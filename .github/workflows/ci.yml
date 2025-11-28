@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+  
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          # Automatically use the version specified in go.mod
+          go-version-file: 'go.mod'
+      
+      - name: Show Go version
+        run: go version
+
+      - name: Check formatting
+        run: |
+          changed=$(gofmt -l .)
+          if [ -n "$changed" ]; then
+            echo "The following files are not not gofmt'ed:"
+            echo "$changed"
+            echo
+            echo "Run 'gofmt -w .' locally and commit the result."
+            exit 1
+          fi
+      
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Run tests
+        run: go test ./...
