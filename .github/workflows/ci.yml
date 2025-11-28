@@ -27,7 +27,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          changed-$(gofmt -l .)
+          changed=$(gofmt -l .)
           if [ -n "$changed" ]; then
             echo "The following files are not not gofmt'ed:"
             echo "$changed"
