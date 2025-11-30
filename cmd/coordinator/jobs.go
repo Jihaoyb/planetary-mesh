@@ -28,7 +28,7 @@ type Job struct {
 	Status JobStatus `json:"status"`
 
 	// is the ID of the node executing / that executed the job
-	NodeID string `json:"node_id, omitempty"`
+	NodeID string `json:"node_id,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
