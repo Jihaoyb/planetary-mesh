@@ -9,12 +9,18 @@ import (
 // server holds dependencies for HTTP handlers.
 type server struct {
 	registry *NodeRegistry
+	jobs     *JobStore
 }
 
 // registerRequest is the JSON payload agents send to /register.
 type registerRequest struct {
 	ID      string `json:"id"`
 	Address string `json:"address"`
+}
+
+type createJobRequest struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
 }
 
 // healthHandler is a basic health check.
@@ -65,5 +71,50 @@ func (s *server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(nodes); err != nil {
 		log.Printf("[coordinator] failed to encode nodes: %v", err)
+	}
+}
+
+// handleJobs is the multiplexer for /jobs:
+//   - POST /jobs -> create a new job
+//   - GET /jobs -> list all jobs
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.handleCreateJob(w, r)
+	case http.MethodGet:
+		s.handleListJobs(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleCreateJob implements POST /jobs.
+func (s *server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
+	var req createJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		http.Error(w, "type is required", http.StatusBadRequest)
+		return
+	}
+
+	job := s.jobs.Create(req.Type, req.Payload)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(job); err != nil {
+		log.Printf("encode job response: %v", err)
+	}
+}
+
+// handleListJobs implements GET /jobs.
+func (s *server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	jobs := s.jobs.List()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(jobs); err != nil {
+		log.Printf("encode jobs response: %v", err)
 	}
 }

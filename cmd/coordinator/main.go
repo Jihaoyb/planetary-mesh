@@ -12,7 +12,11 @@ func main() {
 
 	// In-memory node registry.
 	registry := NewNodeRegistry()
-	srv := &server{registry: registry}
+	jobStore := NewJobStore()
+	srv := &server{
+		registry: registry,
+		jobs:     jobStore,
+	}
 
 	// Start background health checker for nodes.
 	startHealthChecker(registry)
@@ -22,6 +26,7 @@ func main() {
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/register", srv.handleRegister)
 	mux.HandleFunc("/nodes", srv.handleListNodes)
+	mux.HandleFunc("/jobs", srv.handleJobs)
 
 	log.Printf("[coordinator] starting on %s\n", addr)
 
