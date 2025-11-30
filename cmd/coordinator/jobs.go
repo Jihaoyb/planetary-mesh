@@ -27,6 +27,9 @@ type Job struct {
 
 	Status JobStatus `json:"status"`
 
+	// is the ID of the node executing / that executed the job
+	NodeID string `json:"node_id, omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -36,7 +39,7 @@ type Job struct {
 type JobStore struct {
 	mu     sync.Mutex
 	jobs   map[string]*Job
-	nextID int
+	nextID uint64
 }
 
 // Creates an empty job store
@@ -79,4 +82,23 @@ func (s *JobStore) List() []Job {
 		result = append(result, *j)
 	}
 	return result
+}
+
+// Updates the status (and optionally NodeID) of a job
+func (s *JobStore) UpdateStatus(id string, status JobStatus, nodeID string) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+
+	j.Status = status
+	if nodeID != "" {
+		j.NodeID = nodeID
+	}
+	j.UpdatedAt = time.Now().UTC()
+
+	return *j, nil
 }
