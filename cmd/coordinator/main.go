@@ -14,8 +14,9 @@ func main() {
 	registry := NewNodeRegistry()
 	jobStore := NewJobStore()
 	srv := &server{
-		registry: registry,
-		jobs:     jobStore,
+		registry:   registry,
+		jobs:       jobStore,
+		httpClient: http.DefaultClient,
 	}
 
 	// Start background health checker for nodes.
@@ -29,7 +30,6 @@ func main() {
 	mux.HandleFunc("/jobs", srv.handleJobs)
 
 	log.Printf("[coordinator] starting on %s\n", addr)
-
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("[coordinator] server error: %v", err)
 	}

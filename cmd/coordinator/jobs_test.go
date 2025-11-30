@@ -15,6 +15,9 @@ func TestJobStoreCreateAndList(t *testing.T) {
 	if j1.Payload != "hello" {
 		t.Fatalf("expected payload hello, got %s", j1.Payload)
 	}
+	if j1.Status != JobStatusQueued {
+		t.Fatalf("expected status %s, got %s", JobStatusQueued, j1.Status)
+	}
 
 	j2 := store.Create("echo", "world")
 	if j2.ID == j1.ID {
@@ -36,5 +39,46 @@ func TestJobStoreCreateAndList(t *testing.T) {
 	}
 	if byID[j2.ID].Payload != "world" {
 		t.Errorf("job2 payload mismatch; got %s", byID[j2.ID].Payload)
+	}
+}
+
+func TestJobStoreUpdateStatus(t *testing.T) {
+	store := NewJobStore()
+
+	j := store.Create("echo", "data")
+	if j.Status != JobStatusQueued {
+		t.Fatalf("expected initial status QUEUED, got %s", j.Status)
+	}
+	if j.NodeID != "" {
+		t.Fatalf("expected initial NodeID to be empty, got %s", j.NodeID)
+	}
+
+	// first update: set RUNNING + NodeID.
+	updated, err := store.UpdateStatus(j.ID, JobStatusRunning, "node-1")
+	if err != nil {
+		t.Fatalf("unexpected error updating status: %v", err)
+	}
+	if updated.Status != JobStatusRunning {
+		t.Fatalf("expected status RUNNING, got %s", updated.Status)
+	}
+	if updated.NodeID != "node-1" {
+		t.Fatalf("expected NodeID node-1, got %s", updated.NodeID)
+	}
+
+	// second update: set COMPLETED, but keep existing NodeID (empty nodeID argument).
+	updated2, err := store.UpdateStatus(j.ID, JobStatusCompleted, "")
+	if err != nil {
+		t.Fatalf("unexpected error updating status: %v", err)
+	}
+	if updated2.Status != JobStatusCompleted {
+		t.Fatalf("expected status COMPLETED, got %s", updated2.Status)
+	}
+	if updated2.NodeID != "node-1" {
+		t.Fatalf("expected NodeID to remain node-1, got %s", updated2.NodeID)
+	}
+
+	// updating a non-existent job should return an error.
+	if _, err := store.UpdateStatus("does-not-exist", JobStatusFailed, "node-x"); err == nil {
+		t.Fatalf("expected error when updating non-existent job, got nil")
 	}
 }
