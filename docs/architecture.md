@@ -477,3 +477,34 @@ The v0 architecture is deliberately simple but should support:
 Those directions are not implemented in v0, but the current architecture should not block them.
 
 ---
+
+## 11. Current Prototype Implementation Status (v0.1)
+
+The current Go implementation in this repository is an early prototype and implements only a subset of the architecture described above:
+
+- **Coordinator**
+  - Maintains an in-memory node registry with health states:
+    - Agents register via `POST /register`.
+    - A background ticker updates node state based on last heartbeat:
+      - `HEALTHY` → `SUSPECT` → `OFFLINE`.
+  - Maintains an in-memory job store:
+    - `POST /jobs` creates a job with a simple `type` and `payload`.
+    - `GET /jobs` lists all known jobs.
+  - Uses a very simple scheduler:
+    - Picks the first `HEALTHY` node to run a job.
+    - Dispatches the job to the chosen agent's `/execute` endpoint.
+    - Updates job status (`QUEUED` → `RUNNING` → `COMPLETED` or `FAILED`).
+
+- **Agent**
+  - Registers with the coordinator and sends periodic heartbeats using plain HTTP.
+  - Exposes:
+    - `GET /healthz` for liveness.
+    - `POST /execute` for job execution.
+  - Job execution is simulated in v0.1 (log + sleep + 200 OK response).
+
+- **Technology choices (prototype)**
+  - Communication is plain HTTP with JSON (no TLS yet).
+  - All state (nodes and jobs) is kept in memory inside the coordinator process.
+  - There is no database, retries, or multi-task jobs yet.
+
+The more advanced topics in this document (mTLS, gRPC, persistent storage, multi-task jobs, score-based scheduling, retries) represent **future iterations**. As those features are implemented, new ADRs will be added and this section will be updated to reflect the current state.
