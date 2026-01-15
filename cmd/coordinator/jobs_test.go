@@ -82,3 +82,24 @@ func TestJobStoreUpdateStatus(t *testing.T) {
 		t.Fatalf("expected error when updating non-existent job, got nil")
 	}
 }
+
+func TestJobStoreGet(t *testing.T) {
+	store := NewJobStore()
+
+	created := store.Create("echo", "payload")
+
+	found, err := store.Get(created.ID)
+	if err != nil {
+		t.Fatalf("unexpected error getting job: %v", err)
+	}
+	if found.ID != created.ID {
+		t.Fatalf("expected job ID %s, got %s", created.ID, found.ID)
+	}
+	if found.Payload != "payload" {
+		t.Fatalf("expected payload payload, got %s", found.Payload)
+	}
+
+	if _, err := store.Get("missing-id"); err == nil {
+		t.Fatalf("expected error for missing job ID, got nil")
+	}
+}

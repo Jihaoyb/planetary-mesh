@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,7 +18,7 @@ type registerPayload struct {
 }
 
 // registerWithCoordinator sends a POST /register to the coordinator.
-func registerWithCoordinator(coordBaseURL, nodeID, addr string) error {
+func registerWithCoordinator(coordBaseURL, nodeID, addr string, client *http.Client) error {
 	payload := registerPayload{
 		ID:      nodeID,
 		Address: addr, // For now we just send the listen address (e.g., ":8081").
@@ -31,7 +32,25 @@ func registerWithCoordinator(coordBaseURL, nodeID, addr string) error {
 	url := coordBaseURL + "/register"
 	log.Printf("[agent] registering with coordinator at %s", url)
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+
+	timeout := client.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post to coordinator: %w", err)
 	}
@@ -45,19 +64,29 @@ func registerWithCoordinator(coordBaseURL, nodeID, addr string) error {
 }
 
 // startHeartbeatLoop periodically calls registerWithCoordinator to act as a heartbeat.
-func startHeartbeatLoop(coordBaseURL, nodeID, addr string) {
-	interval := 10 * time.Second // how often to send heartbeats
-
+// Returns a stop function to halt the ticker.
+func startHeartbeatLoop(coordBaseURL, nodeID, addr string, interval time.Duration, client *http.Client) func() {
 	ticker := time.NewTicker(interval)
+	stop := make(chan struct{})
 	go func() {
-		for range ticker.C {
-			if err := registerWithCoordinator(coordBaseURL, nodeID, addr); err != nil {
-				log.Printf("[agent] heartbeat failed: %v", err)
-			} else {
-				log.Printf("[agent] heartbeat OK")
+		for {
+			select {
+			case <-ticker.C:
+				if err := registerWithCoordinator(coordBaseURL, nodeID, addr, client); err != nil {
+					log.Printf("[agent] heartbeat failed: %v", err)
+				} else {
+					log.Printf("[agent] heartbeat OK")
+				}
+			case <-stop:
+				ticker.Stop()
+				return
 			}
 		}
 	}()
+
+	return func() {
+		close(stop)
+	}
 }
 
 // defaultNodeID tries to use the hostname as a default ID.

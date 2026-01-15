@@ -153,3 +153,116 @@ curl http://localhost:8081/healthz
 - Add an in-memory node registry on the coordinator.
 - Expose a simple `/nodes` API to inspect registered agents.
 - Start defining the job/task model and submission API.
+# Planetary Mesh
+
+## Overview
+
+Planetary Mesh is a decentralized compute network that pools idle CPU/GPU, storage, and bandwidth across devices on a local or trusted network. Clients submit jobs to a coordinator, which schedules tasks across participating agent nodes.
+
+---
+
+## Status
+
+- Stage: Design / early prototype
+- Code: Go coordinator and agent with health checks, job submission, dispatch, and agent execution
+- Scope: LAN-focused prototype with trusted nodes and plain HTTP (TLS/mTLS planned)
+
+Docs: [Kickoff](docs/kickoff.md) | [Architecture](docs/architecture.md) | [Tech Choices](docs/tech-choices.md) | [ADRs](docs/adr)
+
+---
+
+## Goals for v0 (Prototype)
+
+- Secure node registration and mutual TLS between components.
+- Basic job submission API.
+- Coordinator-based scheduling and task dispatch.
+- Agent execution in a sandboxed environment.
+- Heartbeats, timeouts, and automatic reassignment on failure.
+- Dashboard with node list, job list, and basic metrics.
+
+---
+
+## Project Structure
+
+```text
+planetary-mesh/
+  README.md
+
+  docs/
+    kickoff.md
+    architecture.md
+    tech-choices.md
+    adr/
+      0000-template.md
+      0001-process-and-docs.md
+      0002-language-choice.md
+      0003-job-api-v0.md
+      0004-job-execution-v1.md
+
+  cmd/
+    coordinator/       # Coordinator service binary (Go, package main)
+    agent/             # Agent daemon binary (Go, package main)
+
+  internal/            # Reserved for shared/internal packages (future)
+  proto/               # Protocol / gRPC definitions (future)
+```
+
+---
+
+## Quickstart (Development)
+
+Requirements: Go 1.21+
+
+### Coordinator
+
+```bash
+go run ./cmd/coordinator
+```
+
+- Default listen: `:8080` (override `COORDINATOR_ADDR`).
+- Health: `curl http://localhost:8080/healthz` -> `ok`
+
+Config (env):
+- `COORDINATOR_ADDR` (default `:8080`)
+- `DISPATCH_TIMEOUT` (default `5s`)
+- `DISPATCH_BACKOFF` (default `200ms`)
+- `DISPATCH_MAX_ATTEMPTS` (default `2`)
+
+Metrics:
+```bash
+curl http://localhost:8080/metrics
+```
+
+### Agent
+
+```bash
+go run ./cmd/agent
+```
+
+- Default listen: `:8081` (override `AGENT_ADDR`).
+- Health: `curl http://localhost:8081/healthz` -> `ok`
+
+Config (env):
+- `AGENT_ADDR` (default `:8081`)
+- `COORDINATOR_URL` (default `http://localhost:8080`)
+- `NODE_ID` (default hostname)
+- `HEARTBEAT_INTERVAL` (default `10s`)
+- `COORD_REQUEST_TIMEOUT` (default `5s`)
+
+---
+
+## Current Prototype Capabilities
+
+- Endpoints: `/healthz`, `/register`, `/nodes`, `/jobs`, `/jobs/{id}`; coordinator dispatches to agent `/execute`.
+- Health & lifecycle: background health checker for nodes; graceful shutdown for coordinator and agent.
+- Dispatch: first-healthy scheduling with configurable timeout/backoff/retries and per-request timeouts.
+- Agent: registration + heartbeat loop with configurable interval and request timeout.
+
+---
+
+## Next Steps
+
+- Richer job/task model and task-level scheduling.
+- Observability (metrics) and better retry/backoff policies.
+- TLS/mTLS and move toward gRPC control plane.
+- Persist nodes/jobs instead of in-memory stores.

@@ -508,3 +508,235 @@ The current Go implementation in this repository is an early prototype and imple
   - There is no database, retries, or multi-task jobs yet.
 
 The more advanced topics in this document (mTLS, gRPC, persistent storage, multi-task jobs, score-based scheduling, retries) represent **future iterations**. As those features are implemented, new ADRs will be added and this section will be updated to reflect the current state.
+# Planetary Mesh - Architecture Overview
+
+This document describes the technical architecture of Planetary Mesh for the initial prototype (v0). It focuses on a single-coordinator mesh running in a LAN or other trusted environment.
+
+For technology options and why we lean toward specific stacks and patterns, see:
+
+- `tech-choices.md` – stack/pattern options and rationale.
+- `adr/` – Architecture Decision Records for finalized choices.
+
+---
+
+## 1. Goals and Design Principles
+
+### 1.1 Goals
+
+- Provide a simple way to run compute tasks across multiple devices on a LAN.
+- Keep security as a default (mutual TLS and basic node trust).
+- Offer a minimal but usable scheduling and retry system.
+- Support observability and troubleshooting from day one.
+- Keep the design incremental so we can extend it to WAN / global mesh later.
+
+### 1.2 Design Principles
+
+- **Separation of concerns**
+  - Coordinator handles control plane (jobs, nodes, scheduling).
+  - Agents handle data-plane execution (running tasks).
+  - Dashboard/CLI handles human interaction and visualization.
+- **Secure by default**
+  - All control-plane communication uses TLS with mutual authentication.
+  - Node participation is explicitly controlled (allowlist / CA).
+- **Simple first, extensible later**
+  - v0 uses a single coordinator, basic scheduling, and direct process execution.
+  - The architecture leaves room for:
+    - More advanced scheduling.
+    - Container-based execution.
+    - Verifiable compute and incentives.
+- **Observable from the start**
+  - Logging and metrics are part of the design, not an afterthought.
+- **Explicit decisions**
+  - Major choices (language, protocol, storage) are recorded in `tech-choices.md` and ADRs.
+
+---
+
+## 2. Relationship to SDLC and Decision Docs
+
+The architecture is developed under a lightweight iterative SDLC (described in `kickoff.md`):
+
+- We do a first-pass design here.
+- We then implement in small iterations and refine the architecture as needed.
+- Significant changes or non-obvious tradeoffs are captured as:
+  - `tech-choices.md` – lists options and current leanings.
+  - `docs/adr/*.md` – finalized decisions with context and consequences.
+
+This means:
+
+- This document is conceptual (what the system is and how it behaves).
+- Implementation details (exact language, frameworks) can evolve but should stay consistent with the architecture unless an ADR explicitly changes direction.
+
+---
+
+## 3. High-Level System View
+
+Conceptual view:
+
+```
++-----------+         +-----------------+         +-------------------+
+|           |  Jobs   |                 |  Tasks  |                   |
+|  Client   +-------->+   Coordinator   +-------->+     Agents        |
+| (CLI/UI)  |         |                 |  Results|   (Node daemons)  |
++-----------+         +-----------------+<--------+-------------------+
+                            ^
+                            |
+                            v
+                       +-----------+
+                       | Dashboard |
+                       +-----------+
+```
+
+- **Coordinator**: central control plane for v0.
+- **Agents**: run on participant devices, executing tasks.
+- **Dashboard / CLI**: communicates with coordinator API.
+- All control traffic should use TLS with mutual authentication (future iteration).
+
+---
+
+## 4. Components
+
+### 4.1 Coordinator
+
+Responsibilities:
+
+- **Node Registry**
+  - Accept node registration requests.
+  - Store node metadata: capabilities, identity, health status, last heartbeat.
+- **Health Management**
+  - Process periodic heartbeats from agents.
+  - Mark nodes as `HEALTHY`, `SUSPECT`, or `OFFLINE` based on heartbeats and timeouts.
+- **Job Management**
+  - Expose an API for job submission.
+  - Store job metadata and status.
+  - Split jobs into tasks where applicable.
+- **Scheduling**
+  - Select agents for tasks based on simple heuristics (v0: first healthy).
+- **Task Dispatch and Tracking**
+  - Assign tasks to agents.
+  - Track task state transitions (QUEUED → ASSIGNED → RUNNING → COMPLETED / FAILED).
+  - Handle retries and reassignment when agents fail or time out.
+- **Result Aggregation**
+  - Collect task results and aggregate when needed.
+
+### 4.2 Agent
+
+Responsibilities:
+
+- **Registration**
+  - Load or obtain its certificate and key (future TLS).
+  - Register capabilities (CPU, RAM, GPU, tags).
+- **Heartbeat**
+  - Periodically send heartbeat messages with health/load signals.
+- **Task Execution**
+  - Receive tasks assigned by the coordinator.
+  - Run them in a sandboxed environment (v0: direct process/sleep simulation).
+- **Progress and Result Reporting**
+  - Report task start, completion, or errors.
+
+### 4.3 Dashboard / Client
+
+Responsibilities:
+
+- Node view: list nodes and their states.
+- Job view: list jobs and their status.
+- Job submission: simple UI/CLI to submit jobs.
+- Metrics: display coordinator metrics.
+
+### 4.4 Storage
+
+- Coordinator storage holds nodes, jobs, tasks.
+- Target is relational DB (e.g., Postgres). Early iterations use in-memory stores.
+
+---
+
+## 5. Data Model (Logical)
+
+### Node
+
+- `id`, `name`, `state` (`HEALTHY`, `SUSPECT`, `OFFLINE`)
+- `cert_fingerprint`
+- `capabilities`
+- `reliability_score`
+- `last_heartbeat_at`
+- `created_at`, `updated_at`
+
+### Job
+
+- `id`, `type`, `status` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`)
+- `payload_ref` or inline payload
+- `submitter`
+- `created_at`, `started_at`, `completed_at`
+
+### Task
+
+- `id`, `job_id`, `node_id`
+- `status` (`QUEUED`, `ASSIGNED`, `RUNNING`, `COMPLETED`, `FAILED`, `RETRYING`)
+- `payload_subset`
+- `attempts`
+- `started_at`, `finished_at`
+- `last_error`
+
+---
+
+## 6. Key Flows
+
+- **Node Registration**: agent registers, coordinator validates, stores node, responds.
+- **Heartbeat**: agent sends periodic heartbeat; coordinator updates `last_seen` and health.
+- **Job Submission and Scheduling**: client submits job; coordinator stores job, selects node, dispatches to agent.
+- **Failure Handling and Retry**: coordinator detects stale heartbeats or failed dispatch and may retry/reassign (future enhancements).
+
+---
+
+## 7. Networking and Protocol
+
+- Control-plane: REST + JSON for prototype; gRPC with mTLS planned.
+- Discovery: static coordinator address for v0; mDNS possible later.
+
+---
+
+## 8. Security Model (v0)
+
+- Identity via certificates (future), allowlist.
+- TLS/mTLS planned; current prototype uses plain HTTP on trusted LAN.
+- Tasks should run with limited privileges; containers/VMs are future options.
+
+---
+
+## 9. Observability
+
+- Logging: node register/heartbeat changes; job submission, dispatch, completion/failure; agent execution start/finish.
+- Metrics: `GET /metrics` (coordinator) returns counts of nodes by state and jobs by status; richer metrics planned (retries, latency).
+
+---
+
+## 10. Future Evolution (Beyond v0)
+
+- Multiple coordinators, sharding, failover.
+- WAN / cross-site routing.
+- Verifiable and incentivized compute.
+- Stronger multi-tenant isolation and quotas.
+
+---
+
+## 11. Current Prototype Implementation Status (v0.1)
+
+The current Go implementation is an early prototype:
+
+- **Coordinator**
+  - In-memory node registry; health checker marks `HEALTHY` / `SUSPECT` / `OFFLINE`.
+  - In-memory job store; endpoints: `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`.
+  - Dispatch: pick first `HEALTHY` node, call agent `/execute`, mark `RUNNING` → `COMPLETED` / `FAILED`.
+  - Dispatch tuning: configurable timeout/backoff/retries and per-request timeouts.
+  - Graceful shutdown stops health checks and HTTP server.
+
+- **Agent**
+  - Registers and sends heartbeats over plain HTTP; heartbeat interval and request timeout are configurable.
+  - Endpoints: `GET /healthz`, `POST /execute` (simulated work via sleep).
+  - Graceful shutdown stops heartbeat loop and HTTP server.
+
+- **Technology choices (prototype)**
+  - Plain HTTP + JSON (no TLS yet).
+  - All state in memory inside the coordinator process.
+  - No database, advanced retries, or multi-task jobs yet.
+
+These limitations are acceptable for v0 and will be revisited as features (mTLS, gRPC, persistence, richer scheduling) are added. New ADRs should accompany non-trivial changes.

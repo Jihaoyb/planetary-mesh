@@ -82,3 +82,57 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 		t.Fatalf("expected job ID %s in list, got %s", jobResp.ID, jobs[0].ID)
 	}
 }
+
+func TestHandleJobByID(t *testing.T) {
+	jobStore := NewJobStore()
+	created := jobStore.Create("echo", "hello jobs")
+
+	srv := &server{
+		jobs: jobStore,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/"+created.ID, nil)
+	w := httptest.NewRecorder()
+
+	srv.handleJobByID(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", res.StatusCode)
+	}
+
+	var jobResp Job
+	if err := json.NewDecoder(res.Body).Decode(&jobResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if jobResp.ID != created.ID {
+		t.Fatalf("expected job ID %s, got %s", created.ID, jobResp.ID)
+	}
+	if jobResp.Type != "echo" {
+		t.Fatalf("expected type echo, got %s", jobResp.Type)
+	}
+	if jobResp.Payload != "hello jobs" {
+		t.Fatalf("expected payload hello jobs, got %s", jobResp.Payload)
+	}
+}
+
+func TestHandleJobByIDNotFound(t *testing.T) {
+	srv := &server{
+		jobs: NewJobStore(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/missing", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleJobByID(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", res.StatusCode)
+	}
+}

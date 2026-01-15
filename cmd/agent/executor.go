@@ -31,12 +31,12 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("agent: starting execution of job %s (type=%s, payload=%q)", req.JobID, req.Type, req.Payload)
+	log.Printf("[agent] job_id=%s event=execute_start type=%s payload=%q", req.JobID, req.Type, req.Payload)
 
 	// dummy work to simulate doing something.
 	time.Sleep(2 * time.Second)
 
-	log.Printf("agent: finished execution of job %s", req.JobID)
+	log.Printf("[agent] job_id=%s event=execute_complete", req.JobID)
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{

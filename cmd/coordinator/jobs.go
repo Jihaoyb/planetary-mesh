@@ -102,3 +102,16 @@ func (s *JobStore) UpdateStatus(id string, status JobStatus, nodeID string) (Job
 
 	return *j, nil
 }
+
+// Get returns a copy of the job for the given ID, or an error if it does not exist.
+func (s *JobStore) Get(id string) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+
+	return *j, nil
+}

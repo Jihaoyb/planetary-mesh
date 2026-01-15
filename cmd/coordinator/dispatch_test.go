@@ -120,3 +120,153 @@ func TestDispatchJobNoHealthyNodes(t *testing.T) {
 		t.Fatalf("expected empty NodeID, got %s", unchanged.NodeID)
 	}
 }
+
+func TestDispatchJobTimeout(t *testing.T) {
+	jobStore := NewJobStore()
+	job := jobStore.Create("echo", "hello")
+
+	reg := NewNodeRegistry()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	reg.mu.Lock()
+	reg.nodes["node-1"] = &Node{
+		ID:       "node-1",
+		Address:  u.Host,
+		LastSeen: time.Now().UTC(),
+		State:    NodeStateHealthy,
+	}
+	reg.mu.Unlock()
+
+	httpClient := &http.Client{Timeout: 50 * time.Millisecond}
+
+	srv := &server{
+		registry:   reg,
+		jobs:       jobStore,
+		httpClient: httpClient,
+	}
+
+	srv.dispatchJob(job.ID)
+
+	jobs := jobStore.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+
+	updated := jobs[0]
+	if updated.Status != JobStatusFailed {
+		t.Fatalf("expected job status FAILED due to timeout, got %s", updated.Status)
+	}
+	if updated.NodeID != "node-1" {
+		t.Fatalf("expected job NodeID node-1, got %s", updated.NodeID)
+	}
+}
+
+func TestDispatchJobRetriesThenSucceeds(t *testing.T) {
+	jobStore := NewJobStore()
+	job := jobStore.Create("echo", "hello")
+
+	reg := NewNodeRegistry()
+
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	reg.mu.Lock()
+	reg.nodes["node-1"] = &Node{
+		ID:       "node-1",
+		Address:  u.Host,
+		LastSeen: time.Now().UTC(),
+		State:    NodeStateHealthy,
+	}
+	reg.mu.Unlock()
+
+	srv := &server{
+		registry: reg,
+		jobs:     jobStore,
+	}
+
+	srv.dispatchJob(job.ID)
+
+	if calls != 2 {
+		t.Fatalf("expected 2 calls (retry once), got %d", calls)
+	}
+
+	jobs := jobStore.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	updated := jobs[0]
+	if updated.Status != JobStatusCompleted {
+		t.Fatalf("expected job status COMPLETED after retry, got %s", updated.Status)
+	}
+	if updated.NodeID != "node-1" {
+		t.Fatalf("expected job NodeID node-1, got %s", updated.NodeID)
+	}
+}
+
+func TestDispatchJobRetriesAndFails(t *testing.T) {
+	jobStore := NewJobStore()
+	job := jobStore.Create("echo", "hello")
+
+	reg := NewNodeRegistry()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	reg.mu.Lock()
+	reg.nodes["node-1"] = &Node{
+		ID:       "node-1",
+		Address:  u.Host,
+		LastSeen: time.Now().UTC(),
+		State:    NodeStateHealthy,
+	}
+	reg.mu.Unlock()
+
+	srv := &server{
+		registry: reg,
+		jobs:     jobStore,
+	}
+
+	srv.dispatchJob(job.ID)
+
+	jobs := jobStore.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobs))
+	}
+	updated := jobs[0]
+	if updated.Status != JobStatusFailed {
+		t.Fatalf("expected job status FAILED after retries, got %s", updated.Status)
+	}
+	if updated.NodeID != "node-1" {
+		t.Fatalf("expected job NodeID node-1, got %s", updated.NodeID)
+	}
+}
