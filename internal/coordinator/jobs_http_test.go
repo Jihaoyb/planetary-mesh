@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import (
 	"bytes"
@@ -11,12 +11,8 @@ import (
 func TestHandleJobsCreateAndList(t *testing.T) {
 	reg := NewNodeRegistry()
 	jobStore := NewJobStore()
-	srv := &server{
-		registry: reg,
-		jobs:     jobStore,
-	}
+	srv := NewServer(reg, jobStore, nil)
 
-	// create a job via POST /jobs
 	createPayload := createJobRequest{
 		Type:    "echo",
 		Payload: "hello jobs",
@@ -57,7 +53,6 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 		t.Fatalf("expected status QUEUED, got %s", jobResp.Status)
 	}
 
-	// list jobs via GET /jobs
 	reqList := httptest.NewRequest(http.MethodGet, "/jobs", nil)
 	wList := httptest.NewRecorder()
 
@@ -80,5 +75,48 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 	}
 	if jobs[0].ID != jobResp.ID {
 		t.Fatalf("expected job ID %s in list, got %s", jobResp.ID, jobs[0].ID)
+	}
+}
+
+func TestHandleJobByID(t *testing.T) {
+	reg := NewNodeRegistry()
+	jobStore := NewJobStore()
+	srv := NewServer(reg, jobStore, nil)
+
+	created := jobStore.Create("echo", "hello detail")
+
+	// happy path
+	req := httptest.NewRequest(http.MethodGet, "/jobs/"+created.ID, nil)
+	w := httptest.NewRecorder()
+	srv.handleJobByID(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	var got Job
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != created.ID || got.Payload != "hello detail" {
+		t.Fatalf("unexpected job: %+v", got)
+	}
+
+	// not found
+	req404 := httptest.NewRequest(http.MethodGet, "/jobs/missing-id", nil)
+	w404 := httptest.NewRecorder()
+	srv.handleJobByID(w404, req404)
+	if w404.Result().StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w404.Result().StatusCode)
+	}
+
+	// wrong method
+	reqBad := httptest.NewRequest(http.MethodPost, "/jobs/"+created.ID, nil)
+	wBad := httptest.NewRecorder()
+	srv.handleJobByID(wBad, reqBad)
+	if wBad.Result().StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", wBad.Result().StatusCode)
 	}
 }

@@ -1,42 +1,67 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"planetary-mesh/internal/agent"
 )
 
-// main wires config, coordinator registration, heartbeat, and HTTP server.
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
 	addr := getEnv("AGENT_ADDR", ":8081")
 	coordURL := getEnv("COORDINATOR_URL", "http://localhost:8080")
-	nodeID := getEnv("NODE_ID", defaultNodeID())
+	nodeID := getEnv("NODE_ID", agent.DefaultNodeID())
 
-	if err := registerWithCoordinator(coordURL, nodeID, addr); err != nil {
-		log.Printf("[agent] failed to register with coordinator: %v", err)
+	if err := agent.RegisterWithCoordinator(coordURL, nodeID, addr); err != nil {
+		logger.Warn("initial registration failed", "err", err)
 	} else {
-		log.Printf("[agent] registered with coordinator as %q", nodeID)
+		logger.Info("registered with coordinator", "node_id", nodeID)
 	}
 
-	// Start periodic heartbeat
-	startHeartbeatLoop(coordURL, nodeID, addr)
+	stopCh := make(chan struct{})
+	agent.StartHeartbeatLoop(coordURL, nodeID, addr, stopCh)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthHandler)
-	mux.HandleFunc("/execute", executeHandler)
-
-	log.Printf("[agent] starting on %s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("[agent] server error: %v", err)
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           agent.Mux(),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	// Graceful shutdown on SIGINT/SIGTERM.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		logger.Info("shutdown signal received")
+		close(stopCh)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("graceful shutdown error", "err", err)
+		}
+	}()
+
+	logger.Info("agent starting", "addr", addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server error", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("agent stopped")
 }
 
-// healthHandler handles /healthz as before.
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+func getEnv(key, def string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
 	}
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+	return def
 }

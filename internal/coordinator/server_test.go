@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ func TestHealthHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	healthHandler(w, req)
+	HealthHandler(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -34,9 +34,8 @@ func TestHealthHandler(t *testing.T) {
 // and GET /nodes returns it.
 func TestHandleRegisterAndListNodes(t *testing.T) {
 	reg := NewNodeRegistry()
-	srv := &server{registry: reg}
+	srv := NewServer(reg, NewJobStore(), nil)
 
-	// 1) Register a node via HTTP.
 	payload := registerRequest{
 		ID:      "agent-1",
 		Address: ":8081",
@@ -71,7 +70,6 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 		t.Fatalf("expected node address :8081, got %s", nodeResp.Address)
 	}
 
-	// 2) List nodes via HTTP and ensure the registered node is present.
 	reqList := httptest.NewRequest(http.MethodGet, "/nodes", nil)
 	wList := httptest.NewRecorder()
 

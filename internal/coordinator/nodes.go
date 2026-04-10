@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import (
 	"sync"
@@ -84,16 +84,22 @@ func (r *NodeRegistry) UpdateHealthStates(now time.Time, suspectAfter, offlineAf
 	}
 }
 
-// startHealthChecker launches a background goroutine that periodically updates node states.
-func startHealthChecker(registry *NodeRegistry) {
-	// How long before a node is considered SUSPECT / OFFLINE.
+// StartHealthChecker launches a background goroutine that periodically updates node states.
+// It stops when stopCh is closed. Pass nil to run forever (current behavior).
+func StartHealthChecker(registry *NodeRegistry, stopCh <-chan struct{}) {
 	suspectAfter := 15 * time.Second
 	offlineAfter := 30 * time.Second
 
-	ticker := time.NewTicker(5 * time.Second) // how often we recalc health
+	ticker := time.NewTicker(5 * time.Second)
 	go func() {
-		for now := range ticker.C {
-			registry.UpdateHealthStates(now, suspectAfter, offlineAfter)
+		defer ticker.Stop()
+		for {
+			select {
+			case now := <-ticker.C:
+				registry.UpdateHealthStates(now, suspectAfter, offlineAfter)
+			case <-stopCh:
+				return
+			}
 		}
 	}()
 }

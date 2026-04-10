@@ -1,41 +1,60 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"planetary-mesh/internal/coordinator"
 )
 
 func main() {
-	// Coordinator listen address, default :8080.
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
 	addr := getEnv("COORDINATOR_ADDR", ":8080")
 
-	// In-memory node registry.
-	registry := NewNodeRegistry()
-	jobStore := NewJobStore()
-	srv := &server{
-		registry:   registry,
-		jobs:       jobStore,
-		httpClient: http.DefaultClient,
+	registry := coordinator.NewNodeRegistry()
+	jobs := coordinator.NewJobStore()
+	srv := coordinator.NewServerWithConfig(registry, jobs, http.DefaultClient, coordinator.DefaultDispatchConfig(), logger)
+
+	stopCh := make(chan struct{})
+	coordinator.StartHealthChecker(registry, stopCh)
+
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Mux(),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// Start background health checker for nodes.
-	startHealthChecker(registry)
+	// Graceful shutdown on SIGINT/SIGTERM.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		logger.Info("shutdown signal received")
+		close(stopCh)
 
-	// HTTP routing.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthHandler)
-	mux.HandleFunc("/register", srv.handleRegister)
-	mux.HandleFunc("/nodes", srv.handleListNodes)
-	mux.HandleFunc("/jobs", srv.handleJobs)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("graceful shutdown error", "err", err)
+		}
+	}()
 
-	log.Printf("[coordinator] starting on %s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("[coordinator] server error: %v", err)
+	logger.Info("coordinator starting", "addr", addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server error", "err", err)
+		os.Exit(1)
 	}
+	logger.Info("coordinator stopped")
 }
 
-// getEnv reads an environment variable, or returns a default if not set.
 func getEnv(key, def string) string {
 	if val := os.Getenv(key); val != "" {
 		return val

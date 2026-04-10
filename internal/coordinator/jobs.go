@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 )
 
 // JobStatus represents the lifecycle state of a job.
-// For v0 we only use QUEUED, but we define a few more
 type JobStatus string
 
 const (
@@ -18,8 +17,8 @@ const (
 	JobStatusCancelled JobStatus = "CANCELLED"
 )
 
-// Job is the coordinator's view of a unit of work
-// Payload is an opaque string for now and change to JSON later
+// Job is the coordinator's view of a unit of work.
+// Payload is an opaque string for now; may become structured JSON later.
 type Job struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
@@ -27,29 +26,28 @@ type Job struct {
 
 	Status JobStatus `json:"status"`
 
-	// is the ID of the node executing / that executed the job
+	// NodeID is the ID of the node executing / that executed the job.
 	NodeID string `json:"node_id,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// JobStore is an in-memory, concurrency-safe job registry
-// It mirrors NodeRegistry: a map protected by a mutex
+// JobStore is an in-memory, concurrency-safe job registry.
 type JobStore struct {
 	mu     sync.Mutex
 	jobs   map[string]*Job
 	nextID uint64
 }
 
-// Creates an empty job store
+// NewJobStore creates an empty job store.
 func NewJobStore() *JobStore {
 	return &JobStore{
 		jobs: make(map[string]*Job),
 	}
 }
 
-// Allocates a new job, assigns it an ID, stores it, and return a copy
+// Create allocates a new job, assigns it an ID, stores it, and returns a copy.
 func (s *JobStore) Create(jobType, payload string) Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,7 +70,7 @@ func (s *JobStore) Create(jobType, payload string) Job {
 	return *j
 }
 
-// Returns a slice of Job values (copies) for all jobs currently known to the coordinator
+// List returns all jobs as a slice of copies.
 func (s *JobStore) List() []Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,7 +82,19 @@ func (s *JobStore) List() []Job {
 	return result
 }
 
-// Updates the status (and optionally NodeID) of a job
+// Get returns a single job by ID. The boolean is false if not found.
+func (s *JobStore) Get(id string) (Job, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, false
+	}
+	return *j, true
+}
+
+// UpdateStatus updates the status (and optionally NodeID) of a job.
 func (s *JobStore) UpdateStatus(id string, status JobStatus, nodeID string) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

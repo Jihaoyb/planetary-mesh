@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import "testing"
 
@@ -42,6 +42,23 @@ func TestJobStoreCreateAndList(t *testing.T) {
 	}
 }
 
+func TestJobStoreGet(t *testing.T) {
+	store := NewJobStore()
+	j := store.Create("echo", "hello")
+
+	got, ok := store.Get(j.ID)
+	if !ok {
+		t.Fatalf("expected to find job %s", j.ID)
+	}
+	if got.ID != j.ID || got.Payload != "hello" {
+		t.Fatalf("unexpected job returned: %+v", got)
+	}
+
+	if _, ok := store.Get("nope"); ok {
+		t.Fatalf("expected Get on missing id to return false")
+	}
+}
+
 func TestJobStoreUpdateStatus(t *testing.T) {
 	store := NewJobStore()
 
@@ -53,7 +70,6 @@ func TestJobStoreUpdateStatus(t *testing.T) {
 		t.Fatalf("expected initial NodeID to be empty, got %s", j.NodeID)
 	}
 
-	// first update: set RUNNING + NodeID.
 	updated, err := store.UpdateStatus(j.ID, JobStatusRunning, "node-1")
 	if err != nil {
 		t.Fatalf("unexpected error updating status: %v", err)
@@ -65,7 +81,6 @@ func TestJobStoreUpdateStatus(t *testing.T) {
 		t.Fatalf("expected NodeID node-1, got %s", updated.NodeID)
 	}
 
-	// second update: set COMPLETED, but keep existing NodeID (empty nodeID argument).
 	updated2, err := store.UpdateStatus(j.ID, JobStatusCompleted, "")
 	if err != nil {
 		t.Fatalf("unexpected error updating status: %v", err)
@@ -77,7 +92,6 @@ func TestJobStoreUpdateStatus(t *testing.T) {
 		t.Fatalf("expected NodeID to remain node-1, got %s", updated2.NodeID)
 	}
 
-	// updating a non-existent job should return an error.
 	if _, err := store.UpdateStatus("does-not-exist", JobStatusFailed, "node-x"); err == nil {
 		t.Fatalf("expected error when updating non-existent job, got nil")
 	}
