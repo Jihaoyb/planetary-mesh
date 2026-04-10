@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ func TestExecuteHandlerSuccess(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	executeHandler(w, req)
+	ExecuteHandler(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -46,7 +46,7 @@ func TestExecuteHandlerInvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader([]byte("not-json")))
 	w := httptest.NewRecorder()
 
-	executeHandler(w, req)
+	ExecuteHandler(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -69,7 +69,7 @@ func TestExecuteHandlerMissingJobID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader(bodyBytes))
 	w := httptest.NewRecorder()
 
-	executeHandler(w, req)
+	ExecuteHandler(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()

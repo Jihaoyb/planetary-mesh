@@ -9,9 +9,12 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Design / Early prototype
-- **Code**: Initial Go services scaffolded (coordinator / agent health checks)
-- **Scope**: LAN-focused prototype with trusted nodes and secure communication
+- **Stage**: Early prototype — control plane working end-to-end on plain HTTP/JSON
+- **Code**:
+  - Coordinator: node registry with health states, in-memory job store, job dispatch to healthy agents
+  - Agent: auto-registration, periodic heartbeat, `/execute` handler (stub workload)
+  - CI: gofmt + build + tests on every push
+- **Scope**: LAN-focused prototype with trusted nodes; mTLS, persistence, and dashboard are planned but not yet implemented
 
 For more details, see:
 
@@ -65,11 +68,15 @@ The detailed design is in [docs/architecture.md](docs/architecture.md).
 
 ## Project Structure
 
-Current (early) structure:
+Current structure:
 
 ```text
 planetary-mesh/
   README.md
+  go.mod
+
+  .github/workflows/
+    ci.yml             # gofmt + build + test on every push/PR
 
   docs/
     kickoff.md
@@ -82,18 +89,19 @@ planetary-mesh/
 
   cmd/
     coordinator/       # Coordinator service binary (Go, package main)
+      main.go
+      server.go        # HTTP handlers + dispatch logic
+      nodes.go         # NodeRegistry + health checker
+      jobs.go          # JobStore (in-memory)
+      *_test.go
     agent/             # Agent daemon binary (Go, package main)
-
-  internal/
-    coordinator/       # Coordinator-specific logic (to be added)
-    agent/             # Agent-specific logic (to be added)
-    config/            # Config loading helpers (to be added)
-    logging/           # Logging helpers (to be added)
-
-  proto/               # Protocol / gRPC definitions (future)
+      main.go
+      coord_client.go  # Register + heartbeat client
+      executor.go      # /execute handler (stub workload)
+      *_test.go
 ```
 
-This may evolve as we add the dashboard and more shared libraries.
+Planned (not yet present): `internal/` packages for shared logic, `proto/` for gRPC definitions, `cmd/dashboard/` or `cmd/cli/` for the operator surface.
 
 ---
 
@@ -101,7 +109,7 @@ This may evolve as we add the dashboard and more shared libraries.
 
 ### Requirements
 
-- Go 1.21+ (check with `go version`)
+- Go 1.25+ (check with `go version`)
 
 ### Run the coordinator
 
@@ -147,9 +155,32 @@ curl http://localhost:8081/healthz
 
 ---
 
+## Submitting a Job
+
+Once a coordinator and at least one agent are running:
+
+```bash
+# Submit a job
+curl -X POST http://localhost:8080/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"echo","payload":"hello mesh"}'
+
+# List nodes
+curl http://localhost:8080/nodes
+
+# List jobs
+curl http://localhost:8080/jobs
+```
+
+The coordinator dispatches the job to the first healthy agent, which simulates work and returns success.
+
 ## Next Steps
 
-- Implement coordinator ↔ agent registration and heartbeats.
-- Add an in-memory node registry on the coordinator.
-- Expose a simple `/nodes` API to inspect registered agents.
-- Start defining the job/task model and submission API.
+The current focus is hardening the control plane before expanding scope:
+
+- Refactor shared logic from `cmd/` into `internal/` packages.
+- Add `GET /jobs/{id}`, structured logging, graceful shutdown, configurable
+  dispatch timeout/retry/backoff, and a `/metrics` endpoint.
+- Add end-to-end and failure-path tests.
+- Then layer in TLS/mTLS, node identity/allowlisting, and durable persistence.
+- Finally add a thin operator CLI or dashboard that consumes the coordinator API.

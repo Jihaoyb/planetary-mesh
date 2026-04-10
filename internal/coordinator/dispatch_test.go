@@ -1,4 +1,4 @@
-package main
+package coordinator
 
 import (
 	"encoding/json"
@@ -15,7 +15,6 @@ func TestDispatchJobSuccess(t *testing.T) {
 
 	reg := NewNodeRegistry()
 
-	// fake agent server that simulates /execute behavior
 	var called bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/execute" {
@@ -41,7 +40,6 @@ func TestDispatchJobSuccess(t *testing.T) {
 
 		called = true
 		w.WriteHeader(http.StatusOK)
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}))
@@ -52,30 +50,22 @@ func TestDispatchJobSuccess(t *testing.T) {
 		t.Fatalf("failed to parse test server URL: %v", err)
 	}
 
-	// seed the registry with one healthy node pointing at the fake agent.
 	reg.mu.Lock()
 	reg.nodes["node-1"] = &Node{
 		ID:       "node-1",
-		Address:  u.Host, // host:port
+		Address:  u.Host,
 		LastSeen: time.Now().UTC(),
 		State:    NodeStateHealthy,
 	}
 	reg.mu.Unlock()
 
-	srv := &server{
-		registry:   reg,
-		jobs:       jobStore,
-		httpClient: ts.Client(),
-	}
-
-	// run dispatcher synchronously (in production it's run as a goroutine).
+	srv := NewServer(reg, jobStore, ts.Client())
 	srv.dispatchJob(job.ID)
 
 	if !called {
 		t.Fatalf("expected fake agent to be called, but it was not")
 	}
 
-	// verify job has been updated to COMPLETED with the right NodeID.
 	jobs := jobStore.List()
 	if len(jobs) != 1 {
 		t.Fatalf("expected 1 job, got %d", len(jobs))
@@ -95,18 +85,10 @@ func TestDispatchJobNoHealthyNodes(t *testing.T) {
 	job := jobStore.Create("echo", "hello")
 
 	reg := NewNodeRegistry()
-	// no nodes registered at all => no healthy nodes.
+	srv := NewServer(reg, jobStore, nil)
 
-	srv := &server{
-		registry: reg,
-		jobs:     jobStore,
-		// httpClient nil is fine; dispatchJob won't use it if no healthy nodes.
-	}
-
-	// run dispatcher.
 	srv.dispatchJob(job.ID)
 
-	// job should remain QUEUED because there was no node to dispatch to.
 	jobs := jobStore.List()
 	if len(jobs) != 1 {
 		t.Fatalf("expected 1 job, got %d", len(jobs))

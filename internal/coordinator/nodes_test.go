@@ -1,15 +1,14 @@
-package main
+package coordinator
 
 import (
 	"testing"
 	"time"
 )
 
-// Test that Register creates nodes, updates exisiting ones, and List return them
+// Test that Register creates nodes, updates existing ones, and List returns them.
 func TestNodeRegistryRegisterAndList(t *testing.T) {
 	reg := NewNodeRegistry()
 
-	// first registration
 	n1 := reg.Register("node-1", ":8081")
 	if n1.ID != "node-1" {
 		t.Fatalf("expected id node-1, got %s", n1.ID)
@@ -21,13 +20,11 @@ func TestNodeRegistryRegisterAndList(t *testing.T) {
 		t.Fatalf("expected state %s, got %s", NodeStateHealthy, n1.State)
 	}
 
-	// re-register same ID with a different address; should update
 	n2 := reg.Register("node-1", ":9090")
 	if n2.Address != ":9090" {
 		t.Fatalf("expected address :9090, got %s", n2.Address)
 	}
 
-	// register a second node
 	reg.Register("node-2", ":8082")
 
 	nodes := reg.List()
@@ -48,12 +45,11 @@ func TestNodeRegistryRegisterAndList(t *testing.T) {
 	}
 }
 
-// Test that UpdateHealthStates flips nodes into HEALTHY / SUSPECT / OFFLINE based on LastSeen and the provided thresholds
+// Test that UpdateHealthStates flips nodes into HEALTHY / SUSPECT / OFFLINE based on LastSeen.
 func TestNodeRegistryUpdateHealthStates(t *testing.T) {
 	reg := NewNodeRegistry()
 	now := time.Now().UTC()
 
-	// manually insert nodes with different LastSeen values
 	reg.mu.Lock()
 	reg.nodes["healthy"] = &Node{
 		ID:       "healthy",
@@ -91,7 +87,7 @@ func TestNodeRegistryUpdateHealthStates(t *testing.T) {
 	}
 
 	if byID["healthy"].State != NodeStateHealthy {
-		t.Errorf("expected 'healthy' to be HEALTHY, got %s, byID['healthy'].State", byID["healthy"].State)
+		t.Errorf("expected 'healthy' to be HEALTHY, got %s", byID["healthy"].State)
 	}
 	if byID["suspect"].State != NodeStateSuspect {
 		t.Errorf("expected 'suspect' to be SUSPECT, got %s", byID["suspect"].State)
