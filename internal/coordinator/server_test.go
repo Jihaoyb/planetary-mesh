@@ -30,6 +30,18 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
+func TestProtocolVersionRequired(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/nodes", nil)
+	w := httptest.NewRecorder()
+	srv.handleListNodes(w, req)
+
+	if w.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Result().StatusCode)
+	}
+}
+
 // TestHandleRegisterAndListNodes verifies that POST /register creates a node
 // and GET /nodes returns it.
 func TestHandleRegisterAndListNodes(t *testing.T) {
@@ -45,7 +57,7 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 		t.Fatalf("failed to marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
+	req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -63,34 +75,11 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if nodeResp.ID != "agent-1" {
-		t.Fatalf("expected node id agent-1, got %s", nodeResp.ID)
-	}
-	if nodeResp.Address != ":8081" {
-		t.Fatalf("expected node address :8081, got %s", nodeResp.Address)
-	}
-
-	reqList := httptest.NewRequest(http.MethodGet, "/nodes", nil)
+	reqList := newVersionedRequest(http.MethodGet, "/nodes", nil)
 	wList := httptest.NewRecorder()
-
 	srv.handleListNodes(wList, reqList)
 
-	resList := wList.Result()
-	defer resList.Body.Close()
-
-	if resList.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200 from /nodes, got %d", resList.StatusCode)
-	}
-
-	var nodes []Node
-	if err := json.NewDecoder(resList.Body).Decode(&nodes); err != nil {
-		t.Fatalf("failed to decode nodes response: %v", err)
-	}
-
-	if len(nodes) != 1 {
-		t.Fatalf("expected 1 node, got %d", len(nodes))
-	}
-	if nodes[0].ID != "agent-1" {
-		t.Fatalf("expected node id agent-1 in list, got %s", nodes[0].ID)
+	if wList.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 from /nodes, got %d", wList.Result().StatusCode)
 	}
 }

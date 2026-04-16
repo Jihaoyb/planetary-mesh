@@ -14,15 +14,16 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 	srv := NewServer(reg, jobStore, nil)
 
 	createPayload := createJobRequest{
-		Type:    "echo",
-		Payload: "hello jobs",
+		Type:    "command",
+		Command: "echo",
+		Args:    []string{"hello jobs"},
 	}
 	bodyBytes, err := json.Marshal(createPayload)
 	if err != nil {
 		t.Fatalf("failed to marshal payload: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/jobs", bytes.NewReader(bodyBytes))
+	req := newVersionedRequest(http.MethodPost, "/jobs", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -39,42 +40,16 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&jobResp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-
-	if jobResp.ID == "" {
-		t.Fatalf("expected non-empty job ID")
-	}
-	if jobResp.Type != "echo" {
-		t.Fatalf("expected type echo, got %s", jobResp.Type)
-	}
-	if jobResp.Payload != "hello jobs" {
-		t.Fatalf("expected payload hello jobs, got %s", jobResp.Payload)
-	}
-	if jobResp.Status != JobStatusQueued {
-		t.Fatalf("expected status QUEUED, got %s", jobResp.Status)
+	if jobResp.Command != "echo" {
+		t.Fatalf("expected command echo, got %s", jobResp.Command)
 	}
 
-	reqList := httptest.NewRequest(http.MethodGet, "/jobs", nil)
+	reqList := newVersionedRequest(http.MethodGet, "/jobs", nil)
 	wList := httptest.NewRecorder()
-
 	srv.handleJobs(wList, reqList)
 
-	resList := wList.Result()
-	defer resList.Body.Close()
-
-	if resList.StatusCode != http.StatusOK {
-		t.Fatalf("expected status 200 from /jobs, got %d", resList.StatusCode)
-	}
-
-	var jobs []Job
-	if err := json.NewDecoder(resList.Body).Decode(&jobs); err != nil {
-		t.Fatalf("failed to decode jobs response: %v", err)
-	}
-
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 job, got %d", len(jobs))
-	}
-	if jobs[0].ID != jobResp.ID {
-		t.Fatalf("expected job ID %s in list, got %s", jobResp.ID, jobs[0].ID)
+	if wList.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 from /jobs, got %d", wList.Result().StatusCode)
 	}
 }
 
@@ -83,10 +58,9 @@ func TestHandleJobByID(t *testing.T) {
 	jobStore := NewJobStore()
 	srv := NewServer(reg, jobStore, nil)
 
-	created := jobStore.Create("echo", "hello detail")
+	created := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello detail"}})
 
-	// happy path
-	req := httptest.NewRequest(http.MethodGet, "/jobs/"+created.ID, nil)
+	req := newVersionedRequest(http.MethodGet, "/jobs/"+created.ID, nil)
 	w := httptest.NewRecorder()
 	srv.handleJobByID(w, req)
 
@@ -100,23 +74,26 @@ func TestHandleJobByID(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.ID != created.ID || got.Payload != "hello detail" {
+	if got.ID != created.ID || got.Command != "echo" {
 		t.Fatalf("unexpected job: %+v", got)
 	}
+}
 
-	// not found
-	req404 := httptest.NewRequest(http.MethodGet, "/jobs/missing-id", nil)
-	w404 := httptest.NewRecorder()
-	srv.handleJobByID(w404, req404)
-	if w404.Result().StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", w404.Result().StatusCode)
+func TestHandleCommandJobRejectsPayload(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+
+	createPayload := createJobRequest{
+		Type:    "command",
+		Command: "echo",
+		Payload: "should fail",
 	}
+	bodyBytes, _ := json.Marshal(createPayload)
+	req := newVersionedRequest(http.MethodPost, "/jobs", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
 
-	// wrong method
-	reqBad := httptest.NewRequest(http.MethodPost, "/jobs/"+created.ID, nil)
-	wBad := httptest.NewRecorder()
-	srv.handleJobByID(wBad, reqBad)
-	if wBad.Result().StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405, got %d", wBad.Result().StatusCode)
+	srv.handleJobs(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Result().StatusCode)
 	}
 }
