@@ -290,6 +290,23 @@ Detailed component and data model design is documented in:
   - Initial dashboard or CLI.
   - Basic metrics and logs.
 
+### 7.3 Current Milestone Status
+
+As of PR #5 (`feature/control-plane-hardening`) merged to `main`:
+
+- Milestone 1 / control-plane hardening is complete:
+  - shared runtime logic moved into `internal/`
+  - structured logging, graceful shutdown, retry/backoff, metrics
+  - end-to-end and failure-path tests
+- The active next milestone is **Real Command Execution**
+- The current canonical milestone sequence is:
+  1. Real command execution
+  2. Durable coordinator state
+  3. Trusted LAN security
+  4. Operator CLI
+
+See [roadmap.md](roadmap.md) for the living plan.
+
 ---
 
 ## 8. Risks and Open Questions
