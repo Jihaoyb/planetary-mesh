@@ -103,18 +103,16 @@ If a different language is chosen later, the change and its rationale should be 
 
   ### 3.2 Choice
 
-For control-plane communication (Coordinator ↔ Agent ↔ Dashboard API), we **lean toward gRPC**.
+For the current v0 baseline, we use **HTTP/JSON** for the control plane.
 
 **Reasons**
 
-- The system needs **structured, versioned messages** and **streaming** (for progress updates, logs).
-- gRPC + Protobuf gives:
-  - Schema-based definitions.
-  - Good performance.
-  - Built-in support for **mTLS**.
-- Better than custom TCP for v0, because we can rely on battle-tested tooling and focus on core mesh logic.
+- The early control plane is easier to debug with `curl` and browser tooling.
+- The data model is still evolving quickly.
+- The current repo already records this as an accepted decision in ADR 0003.
 
-REST endpoints may still be exposed for the dashboard or simple client integration, but the internal coordinator–agent protocol is likely gRPC.
+We still expect to revisit gRPC later if streaming, stronger contracts, or
+multi-client evolution make HTTP/JSON too limiting.
 
 ---
 
@@ -140,7 +138,8 @@ REST endpoints may still be exposed for the dashboard or simple client integrati
 
 ### 4.2 Choice
 
-For v0, we **lean toward Postgres** (or another relational DB) for coordinator state.
+After the real command-execution milestone, we plan to move coordinator state to
+**Postgres**.
 
 **Reasons**
 
@@ -148,7 +147,9 @@ For v0, we **lean toward Postgres** (or another relational DB) for coordinator s
 - We need **durability** and **queries** across jobs and nodes.
 - Postgres is a solid default with good tooling and libraries.
 
-In-memory caches (or in-memory-only prototypes) can still be used **in early iterations**, but the target architecture assumes durable storage.
+In-memory storage remains the current baseline and is documented in ADR 0004.
+Postgres is the planned persistence target immediately after the command-
+execution milestone.
 
 ---
 

@@ -6,6 +6,7 @@ It focuses on a single-coordinator mesh running in a LAN or other trusted enviro
 For technology options and why we lean toward specific stacks and patterns, see:
 
 - `tech-choices.md` – stack/pattern options and rationale.
+- `roadmap.md` – current milestone plan from the merged baseline.
 - `adr/` – Architecture Decision Records for finalized choices.
 
 ---
@@ -99,7 +100,8 @@ flowchart LR
   - Communicates with coordinator’s API.
 - All control traffic uses TLS with mutual authentication.
 
-Network and protocol details (REST vs gRPC, etc.) are in `tech-choices.md` and ADRs.
+Today, the merged prototype uses HTTP/JSON for the control plane, as captured in
+ADR 0003. Longer-term protocol evolution remains open.
 
 ---
 
@@ -169,7 +171,8 @@ The agent runs on participant devices and executes tasks.
 - **Task Execution**
   - Receive tasks assigned by the coordinator.
   - Run them in a sandboxed environment.
-    - For v0, we lean toward direct process execution with resource limits.
+    - For the current v0 roadmap, the next milestone is allowlisted direct
+      process execution with resource limits and bounded output capture.
     - Container-based execution can be layered on later.
 - **Progress and Result Reporting**
   - Report task start, progress (if needed), and completion.
@@ -364,7 +367,8 @@ This section describes core runtime flows. Sequence diagrams can be added later.
 
 ### 7.1 Transport and APIs
 
-We expect to use a structured RPC framework (for example, gRPC) for:
+The long-term architecture may still use a structured RPC framework (for
+example, gRPC) for:
 
 - Coordinator ↔ Agent
   - `REGISTER_NODE`
@@ -378,7 +382,9 @@ We expect to use a structured RPC framework (for example, gRPC) for:
   - `LIST_NODES`
   - Metrics endpoint (HTTP).
 
-REST endpoints may exist for convenience (especially for the dashboard), but internal coordinator–agent communication should use a typed binary protocol (gRPC or equivalent), as discussed in `tech-choices.md`.
+For the current merged baseline and near-term roadmap, coordinator-agent and
+client-coordinator communication use HTTP/JSON with explicit versioning. This is
+documented in ADR 0003.
 
 ### 7.2 Discovery
 

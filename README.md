@@ -11,8 +11,8 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 - **Stage**: Early prototype — control plane working end-to-end on plain HTTP/JSON
 - **Code**:
-  - Coordinator: node registry with health states, in-memory job store, job dispatch to healthy agents
-  - Agent: auto-registration, periodic heartbeat, `/execute` handler (stub workload)
+  - Coordinator: node registry with health states, in-memory job store, job dispatch to healthy agents, job detail, and metrics
+  - Agent: auto-registration, periodic heartbeat, and a stub `/execute` handler
   - CI: gofmt + build + tests on every push
 - **Scope**: LAN-focused prototype with trusted nodes; mTLS, persistence, and dashboard are planned but not yet implemented
 
@@ -21,6 +21,7 @@ For more details, see:
 - [Kickoff Plan](docs/kickoff.md)
 - [Architecture](docs/architecture.md)
 - [Tech Choices](docs/tech-choices.md)
+- [Roadmap](docs/roadmap.md)
 
 ---
 
@@ -82,26 +83,28 @@ planetary-mesh/
     kickoff.md
     architecture.md
     tech-choices.md
+    roadmap.md
     adr/
       0000-template.md
       0001-process-and-docs.md
       0002-language-choice.md
+      0003-http-json-control-plane-for-v0.md
+      0004-in-memory-storage-for-v0.md
 
   cmd/
     coordinator/       # Coordinator service binary (Go, package main)
-      main.go
-      server.go        # HTTP handlers + dispatch logic
-      nodes.go         # NodeRegistry + health checker
-      jobs.go          # JobStore (in-memory)
-      *_test.go
+      main.go          # Thin entrypoint wiring coordinator runtime
     agent/             # Agent daemon binary (Go, package main)
-      main.go
-      coord_client.go  # Register + heartbeat client
-      executor.go      # /execute handler (stub workload)
-      *_test.go
+      main.go          # Thin entrypoint wiring agent runtime
+
+  internal/
+    coordinator/       # Coordinator HTTP handlers, stores, metrics, tests
+    agent/             # Agent HTTP handlers, coordinator client, tests
 ```
 
-Planned (not yet present): `internal/` packages for shared logic, `proto/` for gRPC definitions, `cmd/dashboard/` or `cmd/cli/` for the operator surface.
+Planned (not yet present): `proto/` for any future gRPC work, durable storage
+implementation, `examples/` for smoke demos, and `cmd/pmctl` for the operator
+CLI.
 
 ---
 
@@ -163,7 +166,7 @@ Once a coordinator and at least one agent are running:
 # Submit a job
 curl -X POST http://localhost:8080/jobs \
   -H 'Content-Type: application/json' \
-  -d '{"type":"echo","payload":"hello mesh"}'
+  -d '{"type":"demo","payload":"hello mesh"}'
 
 # List nodes
 curl http://localhost:8080/nodes
@@ -172,15 +175,22 @@ curl http://localhost:8080/nodes
 curl http://localhost:8080/jobs
 ```
 
-The coordinator dispatches the job to the first healthy agent, which simulates work and returns success.
+The current agent execution path is still a stub. Real allowlisted command
+execution is the next milestone.
 
 ## Next Steps
 
-The current focus is hardening the control plane before expanding scope:
+The current roadmap is:
 
-- Refactor shared logic from `cmd/` into `internal/` packages.
-- Add `GET /jobs/{id}`, structured logging, graceful shutdown, configurable
-  dispatch timeout/retry/backoff, and a `/metrics` endpoint.
-- Add end-to-end and failure-path tests.
-- Then layer in TLS/mTLS, node identity/allowlisting, and durable persistence.
-- Finally add a thin operator CLI or dashboard that consumes the coordinator API.
+1. **Milestone 2: Real Command Execution**
+   - Replace stub execution with allowlisted direct-process command jobs
+   - Add bounded stdout/stderr capture and protocol-version enforcement
+2. **Milestone 3: Durable Coordinator State**
+   - Persist nodes and jobs in Postgres
+   - Keep unit tests DB-free and add integration/Compose coverage
+3. **Milestone 4: Trusted LAN Security**
+   - Add mTLS and node allowlisting
+4. **Milestone 5: Operator CLI**
+   - Add a thin `pmctl` client for submitting and inspecting jobs
+
+The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md).
