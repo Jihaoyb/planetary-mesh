@@ -20,17 +20,44 @@ const (
 // Job is the coordinator's view of a unit of work.
 // Payload is an opaque string for now; may become structured JSON later.
 type Job struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
+	ID      string   `json:"id"`
+	Type    string   `json:"type"`
+	Payload string   `json:"payload"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
 
 	Status JobStatus `json:"status"`
 
 	// NodeID is the ID of the node executing / that executed the job.
-	NodeID string `json:"node_id,omitempty"`
+	NodeID          string     `json:"node_id,omitempty"`
+	Attempts        int        `json:"attempts"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ExitCode        *int       `json:"exit_code,omitempty"`
+	Stdout          string     `json:"stdout"`
+	Stderr          string     `json:"stderr"`
+	StdoutTruncated bool       `json:"stdout_truncated"`
+	StderrTruncated bool       `json:"stderr_truncated"`
+	LastError       string     `json:"last_error"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type JobCreateInput struct {
+	Type    string
+	Payload string
+	Command string
+	Args    []string
+}
+
+type JobResult struct {
+	ExitCode        *int
+	Stdout          string
+	Stderr          string
+	StdoutTruncated bool
+	StderrTruncated bool
+	LastError       string
 }
 
 // JobStore is an in-memory, concurrency-safe job registry.
@@ -48,7 +75,7 @@ func NewJobStore() *JobStore {
 }
 
 // Create allocates a new job, assigns it an ID, stores it, and returns a copy.
-func (s *JobStore) Create(jobType, payload string) Job {
+func (s *JobStore) Create(in JobCreateInput) Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,8 +85,10 @@ func (s *JobStore) Create(jobType, payload string) Job {
 
 	j := &Job{
 		ID:        id,
-		Type:      jobType,
-		Payload:   payload,
+		Type:      in.Type,
+		Payload:   in.Payload,
+		Command:   in.Command,
+		Args:      append([]string(nil), in.Args...),
 		Status:    JobStatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -109,6 +138,61 @@ func (s *JobStore) UpdateStatus(id string, status JobStatus, nodeID string) (Job
 		j.NodeID = nodeID
 	}
 	j.UpdatedAt = time.Now().UTC()
+
+	return *j, nil
+}
+
+func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+
+	now := time.Now().UTC()
+	j.Status = JobStatusRunning
+	j.NodeID = nodeID
+	j.Attempts++
+	if j.StartedAt == nil {
+		j.StartedAt = &now
+	}
+	j.UpdatedAt = now
+
+	return *j, nil
+}
+
+func (s *JobStore) Complete(id, nodeID string, result JobResult) (Job, error) {
+	return s.finish(id, nodeID, JobStatusCompleted, result)
+}
+
+func (s *JobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
+	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+
+	now := time.Now().UTC()
+	j.Status = status
+	if nodeID != "" {
+		j.NodeID = nodeID
+	}
+	j.CompletedAt = &now
+	j.ExitCode = result.ExitCode
+	j.Stdout = result.Stdout
+	j.Stderr = result.Stderr
+	j.StdoutTruncated = result.StdoutTruncated
+	j.StderrTruncated = result.StderrTruncated
+	j.LastError = result.LastError
+	j.UpdatedAt = now
 
 	return *j, nil
 }

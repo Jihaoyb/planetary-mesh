@@ -5,25 +5,39 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"planetary-mesh/internal/protocol"
 )
 
-func TestExecuteHandlerSuccess(t *testing.T) {
-	payload := executeRequest{
-		JobID:   "job-1",
-		Type:    "echo",
-		Payload: "hello",
-	}
+func newExecuteRequest(t *testing.T, payload protocol.ExecuteRequest) *http.Request {
+	t.Helper()
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("failed to marshal payload: %v", err)
 	}
-
 	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
+	protocol.SetVersionHeader(req.Header)
+	return req
+}
+
+func TestExecuteHandlerSuccess(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"echo": "echo"},
+		Timeout:   2 * time.Second,
+	}
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "echo",
+		Args:    []string{"hello"},
+	})
 	w := httptest.NewRecorder()
 
-	ExecuteHandler(w, req)
+	NewExecuteHandler(cfg)(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -32,49 +46,91 @@ func TestExecuteHandlerSuccess(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", res.StatusCode)
 	}
 
-	var resp map[string]string
+	var resp protocol.ExecuteResponse
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-
-	if resp["status"] != "ok" {
-		t.Fatalf("expected status 'ok', got %q", resp["status"])
+	if !strings.Contains(resp.Stdout, "hello") {
+		t.Fatalf("expected stdout to contain hello, got %q", resp.Stdout)
 	}
 }
 
-func TestExecuteHandlerInvalidJSON(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader([]byte("not-json")))
+func TestExecuteHandlerRejectsMissingVersion(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader([]byte(`{"job_id":"job-1","type":"command","command":"echo"}`)))
 	w := httptest.NewRecorder()
 
 	ExecuteHandler(w, req)
-
-	res := w.Result()
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected status 400 for invalid JSON, got %d", res.StatusCode)
+	if w.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Result().StatusCode)
 	}
 }
 
-func TestExecuteHandlerMissingJobID(t *testing.T) {
-	payload := executeRequest{
+func TestExecuteHandlerRejectsDisallowedCommand(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"echo": "echo"},
+		Timeout:   time.Second,
+	}
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandler(cfg)(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestExecuteHandlerNonZeroExit(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"false": "false"},
+		Timeout:   time.Second,
+	}
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "false",
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandler(cfg)(w, req)
+
+	if w.Result().StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestExecuteHandlerTimeout(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"sleep": "sleep"},
+		Timeout:   10 * time.Millisecond,
+	}
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+		Args:    []string{"1"},
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandler(cfg)(w, req)
+	if w.Result().StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestExecuteHandlerLegacyStubStillWorks(t *testing.T) {
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
 		Type:    "echo",
 		Payload: "hello",
-	}
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("failed to marshal payload: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader(bodyBytes))
+	})
 	w := httptest.NewRecorder()
 
 	ExecuteHandler(w, req)
-
-	res := w.Result()
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected status 400 for missing job_id, got %d", res.StatusCode)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
 	}
 }

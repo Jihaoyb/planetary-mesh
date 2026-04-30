@@ -20,6 +20,23 @@ func main() {
 	addr := getEnv("AGENT_ADDR", ":8081")
 	coordURL := getEnv("COORDINATOR_URL", "http://localhost:8080")
 	nodeID := getEnv("NODE_ID", agent.DefaultNodeID())
+	execTimeout := getEnv("AGENT_EXEC_TIMEOUT", agent.DefaultExecutionTimeout.String())
+	allowlistRaw := getEnv("AGENT_COMMAND_ALLOWLIST", agent.DefaultAllowlist)
+
+	timeout, err := time.ParseDuration(execTimeout)
+	if err != nil {
+		logger.Error("invalid AGENT_EXEC_TIMEOUT", "value", execTimeout, "err", err)
+		os.Exit(1)
+	}
+	allowlist, err := agent.ParseAllowlist(allowlistRaw)
+	if err != nil {
+		logger.Error("invalid AGENT_COMMAND_ALLOWLIST", "value", allowlistRaw, "err", err)
+		os.Exit(1)
+	}
+	cfg := agent.ExecutorConfig{
+		Allowlist: allowlist,
+		Timeout:   timeout,
+	}
 
 	if err := agent.RegisterWithCoordinator(coordURL, nodeID, addr); err != nil {
 		logger.Warn("initial registration failed", "err", err)
@@ -32,7 +49,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           agent.Mux(),
+		Handler:           agent.MuxWithConfig(cfg),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

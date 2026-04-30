@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"planetary-mesh/internal/protocol"
 )
 
 // registerPayload matches what the coordinator expects at /register.
@@ -31,7 +33,14 @@ func RegisterWithCoordinator(coordBaseURL, nodeID, addr string) error {
 	url := coordBaseURL + "/register"
 	slog.Info("agent registering", "coord_url", url, "node_id", nodeID, "addr", addr)
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	protocol.SetVersionHeader(req.Header)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("post to coordinator: %w", err)
 	}

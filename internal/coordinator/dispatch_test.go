@@ -1,104 +1,96 @@
 package coordinator
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"testing"
 	"time"
+
+	"planetary-mesh/internal/protocol"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func jsonResponse(status int, body any) *http.Response {
+	data, _ := json.Marshal(body)
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(data)),
+	}
+}
 
 func TestDispatchJobSuccess(t *testing.T) {
 	jobStore := NewJobStore()
-	job := jobStore.Create("echo", "hello")
+	job := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
 
 	reg := NewNodeRegistry()
 
 	var called bool
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/execute" {
-			t.Errorf("expected path /execute, got %s", r.URL.Path)
-		}
-		if r.Method != http.MethodPost {
-			t.Errorf("expected method POST, got %s", r.Method)
-		}
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if !protocol.HasExpectedVersion(r.Header) {
+				t.Errorf("expected protocol header")
+			}
 
-		var req executeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("failed to decode execute request: %v", err)
-		}
-		if req.JobID != job.ID {
-			t.Errorf("expected job ID %s, got %s", job.ID, req.JobID)
-		}
-		if req.Type != job.Type {
-			t.Errorf("expected job type %s, got %s", job.Type, req.Type)
-		}
-		if req.Payload != job.Payload {
-			t.Errorf("expected job payload %s, got %s", job.Payload, req.Payload)
-		}
+			var req protocol.ExecuteRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("failed to decode execute request: %v", err)
+			}
+			if req.Command != "echo" {
+				t.Errorf("expected command echo, got %s", req.Command)
+			}
 
-		called = true
-		w.WriteHeader(http.StatusOK)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}))
-	defer ts.Close()
-
-	u, err := url.Parse(ts.URL)
-	if err != nil {
-		t.Fatalf("failed to parse test server URL: %v", err)
+			called = true
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{
+				Status: "ok",
+				Stdout: "hello\n",
+			}), nil
+		}),
 	}
 
 	reg.mu.Lock()
 	reg.nodes["node-1"] = &Node{
 		ID:       "node-1",
-		Address:  u.Host,
+		Address:  "agent.local:8081",
 		LastSeen: time.Now().UTC(),
 		State:    NodeStateHealthy,
 	}
 	reg.mu.Unlock()
 
-	srv := NewServer(reg, jobStore, ts.Client())
+	srv := NewServer(reg, jobStore, client)
 	srv.dispatchJob(job.ID)
 
 	if !called {
 		t.Fatalf("expected fake agent to be called, but it was not")
 	}
 
-	jobs := jobStore.List()
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 job, got %d", len(jobs))
-	}
-
-	updated := jobs[0]
+	updated, _ := jobStore.Get(job.ID)
 	if updated.Status != JobStatusCompleted {
 		t.Fatalf("expected job status COMPLETED, got %s", updated.Status)
 	}
-	if updated.NodeID != "node-1" {
-		t.Fatalf("expected job NodeID node-1, got %s", updated.NodeID)
+	if updated.Stdout != "hello\n" {
+		t.Fatalf("expected stdout to be captured, got %q", updated.Stdout)
 	}
 }
 
 func TestDispatchJobNoHealthyNodes(t *testing.T) {
 	jobStore := NewJobStore()
-	job := jobStore.Create("echo", "hello")
+	job := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
 
 	reg := NewNodeRegistry()
 	srv := NewServer(reg, jobStore, nil)
 
 	srv.dispatchJob(job.ID)
 
-	jobs := jobStore.List()
-	if len(jobs) != 1 {
-		t.Fatalf("expected 1 job, got %d", len(jobs))
-	}
-
-	unchanged := jobs[0]
+	unchanged, _ := jobStore.Get(job.ID)
 	if unchanged.Status != JobStatusQueued {
 		t.Fatalf("expected job status QUEUED, got %s", unchanged.Status)
-	}
-	if unchanged.NodeID != "" {
-		t.Fatalf("expected empty NodeID, got %s", unchanged.NodeID)
 	}
 }

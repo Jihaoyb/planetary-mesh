@@ -3,10 +3,14 @@ package coordinator
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"planetary-mesh/internal/protocol"
 )
 
 // DispatchConfig controls how dispatchJob talks to an agent.
@@ -91,14 +95,10 @@ type registerRequest struct {
 }
 
 type createJobRequest struct {
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
-}
-
-type executeRequest struct {
-	JobID   string `json:"job_id"`
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
+	Type    string   `json:"type"`
+	Payload string   `json:"payload,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // HealthHandler is a basic health check.
@@ -111,11 +111,22 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+func requireProtocolVersion(w http.ResponseWriter, r *http.Request) bool {
+	if protocol.HasExpectedVersion(r.Header) {
+		return true
+	}
+	http.Error(w, "protocol version mismatch", http.StatusConflict)
+	return false
+}
+
 // handleRegister handles POST /register from agents.
 // We treat each call as both registration and heartbeat.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireProtocolVersion(w, r) {
 		return
 	}
 
@@ -147,6 +158,9 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireProtocolVersion(w, r) {
+		return
+	}
 
 	nodes := s.registry.List()
 
@@ -160,6 +174,10 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 //   - POST /jobs -> create a new job
 //   - GET  /jobs -> list all jobs
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	if !requireProtocolVersion(w, r) {
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPost:
 		s.handleCreateJob(w, r)
@@ -174,6 +192,9 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireProtocolVersion(w, r) {
 		return
 	}
 
@@ -201,6 +222,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireProtocolVersion(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	s.metrics.WriteProm(w, s.registry)
 }
@@ -216,10 +240,28 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "type is required", http.StatusBadRequest)
 		return
 	}
+	if req.Type == "command" {
+		if req.Command == "" {
+			http.Error(w, "command is required for type=command", http.StatusBadRequest)
+			return
+		}
+		if req.Payload != "" {
+			http.Error(w, "payload is not supported for type=command", http.StatusBadRequest)
+			return
+		}
+	} else if req.Command != "" || len(req.Args) > 0 {
+		http.Error(w, "command and args are only supported for type=command", http.StatusBadRequest)
+		return
+	}
 
-	job := s.jobs.Create(req.Type, req.Payload)
+	job := s.jobs.Create(JobCreateInput{
+		Type:    req.Type,
+		Payload: req.Payload,
+		Command: req.Command,
+		Args:    req.Args,
+	})
 	s.metrics.JobsCreated.Add(1)
-	s.logger.Info("job created", "job_id", job.ID, "type", job.Type)
+	s.logger.Info("job created", "job_id", job.ID, "type", job.Type, "command", job.Command)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -241,7 +283,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // dispatchJob picks a healthy node, marks the job RUNNING, and POSTs to its
-// /execute endpoint. It retries on transport or non-200 errors up to
+// /execute endpoint. It retries on transport or retryable server errors up to
 // dispatch.MaxAttempts with exponential backoff (base = dispatch.BaseBackoff).
 func (s *Server) dispatchJob(jobID string) {
 	nodes := s.registry.List()
@@ -259,25 +301,27 @@ func (s *Server) dispatchJob(jobID string) {
 		return
 	}
 
-	job, err := s.jobs.UpdateStatus(jobID, JobStatusRunning, target.ID)
-	if err != nil {
-		s.logger.Error("failed to mark job RUNNING", "job_id", jobID, "err", err)
+	job, ok := s.jobs.Get(jobID)
+	if !ok {
+		s.logger.Error("job missing during dispatch", "job_id", jobID)
 		return
 	}
 
-	agentURL := buildAgentBaseURL(target.Address) + "/execute"
-	reqBody := executeRequest{
+	reqBody := protocol.ExecuteRequest{
 		JobID:   jobID,
 		Type:    job.Type,
 		Payload: job.Payload,
+		Command: job.Command,
+		Args:    append([]string(nil), job.Args...),
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		s.logger.Error("marshal execute request failed", "job_id", jobID, "err", err)
-		s.failJob(jobID, target.ID)
+		s.failJob(jobID, target.ID, JobResult{LastError: err.Error()})
 		return
 	}
 
+	agentURL := buildAgentBaseURL(target.Address) + "/execute"
 	logger := s.logger.With("job_id", jobID, "node_id", target.ID, "agent_url", agentURL)
 
 	maxAttempts := s.dispatch.MaxAttempts
@@ -286,13 +330,21 @@ func (s *Server) dispatchJob(jobID string) {
 	}
 	backoff := s.dispatch.BaseBackoff
 
+	lastResult := JobResult{}
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if _, err := s.jobs.StartAttempt(jobID, target.ID); err != nil {
+			logger.Error("failed to mark job RUNNING", "err", err)
+			return
+		}
+
 		s.metrics.DispatchAttempts.Add(1)
 		logger.Info("dispatch attempt", "attempt", attempt, "max", maxAttempts)
 
-		ok, retryable := s.tryDispatch(agentURL, bodyBytes, logger)
+		result, ok, retryable := s.tryDispatch(agentURL, bodyBytes, logger)
+		lastResult = result
 		if ok {
-			if _, err := s.jobs.UpdateStatus(jobID, JobStatusCompleted, target.ID); err != nil {
+			if _, err := s.jobs.Complete(jobID, target.ID, result); err != nil {
 				logger.Error("failed to mark job COMPLETED", "err", err)
 			}
 			s.metrics.JobsCompleted.Add(1)
@@ -301,27 +353,28 @@ func (s *Server) dispatchJob(jobID string) {
 		}
 
 		s.metrics.DispatchErrors.Add(1)
-
 		if !retryable || attempt == maxAttempts {
 			break
 		}
-		logger.Warn("dispatch attempt failed; backing off", "attempt", attempt, "backoff", backoff.String())
+
+		logger.Warn("dispatch attempt failed; backing off", "attempt", attempt, "backoff", backoff.String(), "last_error", result.LastError)
 		time.Sleep(backoff)
 		backoff *= 2
 	}
 
-	s.failJob(jobID, target.ID)
-	logger.Error("job failed after retries", "attempts", maxAttempts)
+	s.failJob(jobID, target.ID, lastResult)
+	logger.Error("job failed after retries", "attempts", maxAttempts, "last_error", lastResult.LastError)
 }
 
-// tryDispatch performs one HTTP attempt. Returns (success, retryable).
-func (s *Server) tryDispatch(agentURL string, bodyBytes []byte, logger *slog.Logger) (bool, bool) {
+// tryDispatch performs one HTTP attempt. Returns (result, success, retryable).
+func (s *Server) tryDispatch(agentURL string, bodyBytes []byte, logger *slog.Logger) (JobResult, bool, bool) {
 	httpReq, err := http.NewRequest(http.MethodPost, agentURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		logger.Error("build request failed", "err", err)
-		return false, false
+		return JobResult{LastError: err.Error()}, false, false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	protocol.SetVersionHeader(httpReq.Header)
 
 	client := s.httpClient
 	if client == nil {
@@ -340,20 +393,40 @@ func (s *Server) tryDispatch(agentURL string, bodyBytes []byte, logger *slog.Log
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		logger.Warn("execute request failed", "err", err)
-		return false, true
+		return JobResult{LastError: err.Error()}, false, true
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		logger.Warn("execute returned non-200", "status", resp.StatusCode)
-		// 5xx is retryable; 4xx is not.
-		return false, resp.StatusCode >= 500
+	result := decodeExecuteResponse(resp.Body)
+	if result.LastError == "" && resp.StatusCode >= 400 {
+		result.LastError = fmt.Sprintf("agent returned status %d", resp.StatusCode)
 	}
-	return true, false
+
+	if resp.StatusCode == http.StatusOK {
+		return result, true, false
+	}
+
+	logger.Warn("execute returned non-200", "status", resp.StatusCode, "last_error", result.LastError)
+	return result, false, resp.StatusCode >= 500
 }
 
-func (s *Server) failJob(jobID, nodeID string) {
-	if _, err := s.jobs.UpdateStatus(jobID, JobStatusFailed, nodeID); err != nil {
+func decodeExecuteResponse(body io.Reader) JobResult {
+	var resp protocol.ExecuteResponse
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return JobResult{}
+	}
+	return JobResult{
+		ExitCode:        resp.ExitCode,
+		Stdout:          resp.Stdout,
+		Stderr:          resp.Stderr,
+		StdoutTruncated: resp.StdoutTruncated,
+		StderrTruncated: resp.StderrTruncated,
+		LastError:       resp.LastError,
+	}
+}
+
+func (s *Server) failJob(jobID, nodeID string, result JobResult) {
+	if _, err := s.jobs.Fail(jobID, nodeID, result); err != nil {
 		s.logger.Error("failed to mark job FAILED", "job_id", jobID, "err", err)
 	}
 	s.metrics.JobsFailed.Add(1)
