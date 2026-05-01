@@ -9,12 +9,12 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane working end-to-end on plain HTTP/JSON
+- **Stage**: Early prototype — control plane and allowlisted command execution working end-to-end on plain HTTP/JSON
 - **Code**:
-  - Coordinator: node registry with health states, in-memory job store, job dispatch to healthy agents, job detail, and metrics
-  - Agent: auto-registration, periodic heartbeat, and a stub `/execute` handler
+  - Coordinator: node registry with health states, job dispatch to healthy agents, job detail, metrics, and optional Postgres persistence
+  - Agent: auto-registration, periodic heartbeat, and allowlisted direct command execution
   - CI: gofmt + build + tests on every push
-- **Scope**: LAN-focused prototype with trusted nodes; mTLS, persistence, and dashboard are planned but not yet implemented
+- **Scope**: LAN-focused prototype with trusted nodes; mTLS and operator CLI are planned but not yet implemented
 
 For more details, see:
 
@@ -90,6 +90,10 @@ planetary-mesh/
       0002-language-choice.md
       0003-http-json-control-plane-for-v0.md
       0004-in-memory-storage-for-v0.md
+      0005-command-execution-v0.md
+      0006-postgres-coordinator-persistence.md
+
+  compose.yaml         # local coordinator + Postgres + agent demo
 
   cmd/
     coordinator/       # Coordinator service binary (Go, package main)
@@ -100,11 +104,11 @@ planetary-mesh/
   internal/
     coordinator/       # Coordinator HTTP handlers, stores, metrics, tests
     agent/             # Agent HTTP handlers, coordinator client, tests
+    protocol/          # Shared protocol constants and wire structs
 ```
 
-Planned (not yet present): `proto/` for any future gRPC work, durable storage
-implementation, `examples/` for smoke demos, and `cmd/pmctl` for the operator
-CLI.
+Planned (not yet present): `proto/` for any future gRPC work and `cmd/pmctl`
+for the operator CLI.
 
 ---
 
@@ -128,6 +132,14 @@ By default it listens on `:8080`. You can change the address with:
 COORDINATOR_ADDR=":9090" go run ./cmd/coordinator
 ```
 
+By default the coordinator uses in-memory storage. To persist nodes and jobs in
+Postgres, set `COORDINATOR_DATABASE_URL`:
+
+```bash
+COORDINATOR_DATABASE_URL='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
+go run ./cmd/coordinator
+```
+
 Health check:
 
 ```bash
@@ -149,6 +161,15 @@ By default it listens on `:8081`. You can change the address with:
 AGENT_ADDR=":9091" go run ./cmd/agent
 ```
 
+For command jobs, agents execute only allowlisted logical command names:
+
+```bash
+AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' go run ./cmd/agent
+```
+
+If the address agents listen on is different from the address the coordinator
+should call, set `AGENT_ADVERTISE_ADDR`.
+
 Agent health check:
 
 ```bash
@@ -165,32 +186,54 @@ Once a coordinator and at least one agent are running:
 ```bash
 # Submit a job
 curl -X POST http://localhost:8080/jobs \
+  -H 'X-Planetary-Protocol-Version: 1' \
   -H 'Content-Type: application/json' \
-  -d '{"type":"demo","payload":"hello mesh"}'
+  -d '{"type":"command","command":"echo","args":["hello mesh"]}'
 
 # List nodes
-curl http://localhost:8080/nodes
+curl http://localhost:8080/nodes \
+  -H 'X-Planetary-Protocol-Version: 1'
 
 # List jobs
-curl http://localhost:8080/jobs
+curl http://localhost:8080/jobs \
+  -H 'X-Planetary-Protocol-Version: 1'
 ```
 
-The current agent execution path is still a stub. Real allowlisted command
-execution is the next milestone.
+Command jobs reject `payload`; use `command` and optional `args`.
+
+## Compose Demo
+
+To run a local coordinator + Postgres + agent stack:
+
+```bash
+docker compose up
+```
+
+In another terminal, submit a command job:
+
+```bash
+curl -X POST http://localhost:8080/jobs \
+  -H 'X-Planetary-Protocol-Version: 1' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"command","command":"echo","args":["hello from compose"]}'
+```
+
+Use the returned `id` to inspect the result:
+
+```bash
+curl http://localhost:8080/jobs/job-1 \
+  -H 'X-Planetary-Protocol-Version: 1'
+```
+
+Expected output includes `"status": "COMPLETED"` and captured `stdout`.
 
 ## Next Steps
 
 The current roadmap is:
 
-1. **Milestone 2: Real Command Execution**
-   - Replace stub execution with allowlisted direct-process command jobs
-   - Add bounded stdout/stderr capture and protocol-version enforcement
-2. **Milestone 3: Durable Coordinator State**
-   - Persist nodes and jobs in Postgres
-   - Keep unit tests DB-free and add integration/Compose coverage
-3. **Milestone 4: Trusted LAN Security**
+1. **Milestone 4: Trusted LAN Security**
    - Add mTLS and node allowlisting
-4. **Milestone 5: Operator CLI**
+2. **Milestone 5: Operator CLI**
    - Add a thin `pmctl` client for submitting and inspecting jobs
 
 The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md).

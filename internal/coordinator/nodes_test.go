@@ -9,7 +9,10 @@ import (
 func TestNodeRegistryRegisterAndList(t *testing.T) {
 	reg := NewNodeRegistry()
 
-	n1 := reg.Register("node-1", ":8081")
+	n1, err := reg.Register("node-1", ":8081")
+	if err != nil {
+		t.Fatalf("register node-1: %v", err)
+	}
 	if n1.ID != "node-1" {
 		t.Fatalf("expected id node-1, got %s", n1.ID)
 	}
@@ -20,14 +23,22 @@ func TestNodeRegistryRegisterAndList(t *testing.T) {
 		t.Fatalf("expected state %s, got %s", NodeStateHealthy, n1.State)
 	}
 
-	n2 := reg.Register("node-1", ":9090")
+	n2, err := reg.Register("node-1", ":9090")
+	if err != nil {
+		t.Fatalf("update node-1: %v", err)
+	}
 	if n2.Address != ":9090" {
 		t.Fatalf("expected address :9090, got %s", n2.Address)
 	}
 
-	reg.Register("node-2", ":8082")
+	if _, err := reg.Register("node-2", ":8082"); err != nil {
+		t.Fatalf("register node-2: %v", err)
+	}
 
-	nodes := reg.List()
+	nodes, err := reg.List()
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	if len(nodes) != 2 {
 		t.Fatalf("expected 2 nodes, got %d", len(nodes))
 	}
@@ -74,9 +85,14 @@ func TestNodeRegistryUpdateHealthStates(t *testing.T) {
 	suspectAfter := 15 * time.Second
 	offlineAfter := 30 * time.Second
 
-	reg.UpdateHealthStates(now, suspectAfter, offlineAfter)
+	if err := reg.UpdateHealthStates(now, suspectAfter, offlineAfter); err != nil {
+		t.Fatalf("update health states: %v", err)
+	}
 
-	nodes := reg.List()
+	nodes, err := reg.List()
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	if len(nodes) != 3 {
 		t.Fatalf("expected 3 nodes, got %d", len(nodes))
 	}

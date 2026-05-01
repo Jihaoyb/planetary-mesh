@@ -98,10 +98,10 @@ flowchart LR
   - Run on participant devices, executing tasks.
 - **Dashboard / CLI**
   - Communicates with coordinator’s API.
-- All control traffic uses TLS with mutual authentication.
 
 Today, the merged prototype uses HTTP/JSON for the control plane, as captured in
-ADR 0003. Longer-term protocol evolution remains open.
+ADR 0003. Mutual TLS is planned for Milestone 4, and longer-term protocol
+evolution remains open.
 
 ---
 
@@ -124,7 +124,8 @@ The coordinator is the central controller of a mesh.
   - Store job metadata and status.
   - Split jobs into tasks where applicable.
 - **Scheduling**
-  - Select agents for tasks based on:
+  - Current: select the first healthy node for a job dispatch attempt.
+  - Future: select agents based on:
     - Measured network latency (RTT).
     - Current load and running tasks.
     - Queue length.
@@ -137,13 +138,14 @@ The coordinator is the central controller of a mesh.
 
     Exact coefficients and formula are implementation details and may evolve.
 
-- **Task Dispatch and Tracking**
-  - Assign tasks to agents.
-  - Track task state transitions (QUEUED → ASSIGNED → RUNNING → COMPLETED / FAILED).
-  - Handle retries and reassignment when agents fail or time out.
+- **Dispatch and Tracking**
+  - Current: dispatch each job to a healthy agent and track job state
+    transitions (`QUEUED` → `RUNNING` → `COMPLETED` / `FAILED`).
+  - Current: retry retryable transport and agent `5xx` failures.
+  - Future: split jobs into tasks and track task state separately.
 - **Result Aggregation**
-  - Collect task results.
-  - Aggregate them into final job results when needed.
+  - Current: record a single command execution result on the job.
+  - Future: aggregate task results into final job results when fanout exists.
   - Provide access to results via API.
 
 **Why a single coordinator for v0?**
@@ -171,8 +173,8 @@ The agent runs on participant devices and executes tasks.
 - **Task Execution**
   - Receive tasks assigned by the coordinator.
   - Run them in a sandboxed environment.
-    - For the current v0 roadmap, the next milestone is allowlisted direct
-      process execution with resource limits and bounded output capture.
+    - The current v0 implementation supports allowlisted direct process
+      execution with a fixed timeout and bounded stdout/stderr capture.
     - Container-based execution can be layered on later.
 - **Progress and Result Reporting**
   - Report task start, progress (if needed), and completion.
@@ -213,15 +215,15 @@ Coordinator storage holds persistent control-plane state:
 
 - Nodes
 - Jobs
-- Tasks
 
-We lean toward a relational database (e.g., Postgres), as documented in `tech-choices.md`:
+Postgres is the durable runtime storage target for the current v0 roadmap, as
+documented in `tech-choices.md` and ADR 0006:
 
-- Jobs and tasks are naturally relational.
-- We benefit from transactions, constraints, and structured queries.
+- Jobs and nodes benefit from transactions, constraints, and structured queries.
 - It keeps the design flexible for future reporting and analytics.
 
-Early iterations may start with in-memory storage for speed of development but should converge to a durable store for realistic scenarios.
+In-memory storage remains useful for fast unit tests and simple local runs.
+Task fanout and a separate task table remain future work.
 
 ---
 
@@ -233,27 +235,21 @@ The logical data model is independent of any specific DB engine.
 
 ~~~mermaid
 erDiagram
-  NODE ||--o{ TASK : handles
-  JOB  ||--o{ TASK : contains
+  NODE ||--o{ JOB : executes
 
   NODE {
     string id
-    string name
+    string address
     string state
-    string cert_fingerprint
+    datetime last_seen
   }
 
   JOB {
     string id
     string type
     string status
-    string payload_ref
-  }
-
-  TASK {
-    string id
-    string status
-    int    attempts
+    string command
+    int attempts
   }
 ~~~
 
@@ -264,13 +260,10 @@ Represents an agent participating in the mesh.
 Fields (example):
 
 - `id` – unique identifier
-- `name` – human-readable name
-- `cert_fingerprint` – unique identifier for the node certificate
-- `capabilities` – CPU cores, memory, GPU presence, tags
+- `address` – coordinator-reachable agent address
 - `state` – enum: `HEALTHY`, `SUSPECT`, `OFFLINE`
-- `reliability_score` – numeric score based on past successes/failures
-- `last_heartbeat_at` – timestamp
-- `created_at`, `updated_at`
+- `last_heartbeat_at` / `last_seen` – timestamp updated on registration and heartbeat
+- `created_at` – durable storage creation timestamp
 
 ### 5.3 Job
 
@@ -279,26 +272,18 @@ Represents a logical workload submitted by a client.
 Fields (example):
 
 - `id` – unique identifier
-- `type` – job type (e.g., `script`, `image_batch`, `embedding`)
-- `payload_ref` – reference to input data (file path, object store key, etc.)
+- `type` – job type; current real workload type is `command`
+- `payload` – legacy opaque payload for non-command jobs
+- `command`, `args` – allowlisted command key and argument vector for command jobs
 - `status` – enum: `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`
-- `submitter` – optional submitter id
-- `created_at`, `started_at`, `completed_at`
+- `attempts`, `node_id`, `started_at`, `completed_at`
+- `exit_code`, `stdout`, `stderr`, truncation flags, and `last_error`
+- `created_at`, `updated_at`
 
 ### 5.4 Task
 
-Represents a unit of work assigned to a single node as part of a job.
-
-Fields (example):
-
-- `id` – unique identifier
-- `job_id` – foreign key to `Job`
-- `node_id` – foreign key to `Node`
-- `status` – enum: `QUEUED`, `ASSIGNED`, `RUNNING`, `COMPLETED`, `FAILED`, `RETRYING`
-- `payload_subset` – details of what this task should process (e.g., index range)
-- `attempts` – number of attempts so far
-- `started_at`, `finished_at`
-- `last_error` – optional error message
+Separate task records are planned for future fanout work. Milestone 3 persists
+nodes and jobs only.
 
 ---
 
@@ -308,17 +293,12 @@ This section describes core runtime flows. Sequence diagrams can be added later.
 
 ### 6.1 Node Registration
 
-1. Agent starts and loads its certificate and key.
-2. Agent connects to coordinator using mTLS.
-3. Agent sends a `REGISTER_NODE` request with:
-   - Node id (or request for assignment).
-   - Capabilities.
-   - Optional metadata (tags, operator).
-4. Coordinator verifies:
-   - Certificate is from trusted CA.
-   - Node is allowed to join (allowlist).
-5. Coordinator creates or updates node record and returns success.
-6. Agent enters `REGISTERED` state and starts sending heartbeats.
+1. Agent starts with a configured coordinator URL and advertised address.
+2. Agent sends an HTTP/JSON `POST /register` request with node id and address.
+3. Coordinator creates or updates the node record and returns success.
+4. Agent continues sending the same registration request as a heartbeat.
+
+Milestone 4 adds mTLS identity checks and node allowlisting to this flow.
 
 ### 6.2 Heartbeat and Health Management
 
@@ -329,37 +309,29 @@ This section describes core runtime flows. Sequence diagrams can be added later.
 3. A background process periodically:
    - Marks nodes as `SUSPECT` if heartbeat is stale beyond threshold A.
    - Marks nodes as `OFFLINE` if heartbeat is stale beyond threshold B (> A).
-4. Tasks on `OFFLINE` nodes become candidates for reassignment.
+4. Node state does not cancel an already in-flight execution attempt in v0.
 
 ### 6.3 Job Submission and Scheduling
 
 1. Client sends a `SUBMIT_JOB` request to coordinator with:
    - Job type.
-   - Payload reference or inline payload.
-   - Optional parameters (priority, etc. for future).
+   - For command jobs, a logical command key and optional args.
 2. Coordinator validates and stores the job as `QUEUED`.
-3. Coordinator:
-   - Optionally splits the job into multiple tasks.
-   - For each task, evaluates candidate nodes:
-     - Uses the scheduling score: `score = α * RTT + β * Load + γ * Queue + δ * Reliability`.
-4. Coordinator assigns each task to a selected node and sets status to `ASSIGNED`.
-5. Agent receives task, acknowledges it, and sets local task to `RUNNING`.
-6. Agent:
-   - Executes task in sandbox.
-   - Reports completion or error.
-7. Coordinator updates:
-   - Task status.
-   - Job status based on all tasks (for example, full success vs partial failure).
+3. Coordinator chooses a healthy node and dispatches one execution request.
+4. Coordinator marks the job `RUNNING` for each dispatch attempt.
+5. Agent executes the allowlisted command directly with a fixed timeout and
+   bounded stdout/stderr capture.
+6. Coordinator records the terminal job result as `COMPLETED` or `FAILED`.
 
 ### 6.4 Failure Handling and Retry
 
 1. If an agent stops sending heartbeats or fails to report results:
    - Coordinator detects stale heartbeat or task timeout.
-2. Coordinator moves associated tasks to `RETRYING` (if attempts remain).
-3. Tasks are reassigned to other suitable nodes and attempts counter is incremented.
-4. If max attempts are reached:
-   - Task is marked `FAILED`.
-   - Job is marked `FAILED` or `PARTIALLY_COMPLETED` depending on policy (v0 can keep it simple and use `FAILED`).
+2. Transport errors, coordinator request timeout, and agent `5xx` responses are
+   retried under the dispatch policy.
+3. Validation failures, allowlist rejection, protocol mismatch, and non-zero
+   command exit are terminal.
+4. If retry attempts are exhausted, the job is marked `FAILED`.
 
 ---
 
@@ -397,29 +369,32 @@ Possible approaches:
   - Coordinator advertises its presence via mDNS.
   - Agents discover coordinator on the LAN.
 
-We can start with static configuration (simpler to implement and debug) and add mDNS discovery once basic functionality is stable. The chosen approach should be documented in an ADR.
+The current implementation uses static configuration. mDNS discovery can be
+added once basic functionality is stable.
 
 ---
 
 ## 8. Security Model (v0)
 
-High-level security model:
+Target security model:
 
 - **Identity**
-  - Each agent has a unique certificate and private key.
-  - Coordinator has its own certificate.
-  - A simple local CA or manual process issues certificates.
+  - Planned: each agent has a unique certificate and private key.
+  - Planned: coordinator has its own certificate.
+  - Planned: a simple local CA or manual process issues certificates.
 - **Authentication**
-  - Agents validate coordinator certificate against trusted CA.
-  - Coordinator validates agent certificates and checks allowlist (by cert fingerprint or node id).
+  - Planned: agents validate coordinator certificate against trusted CA.
+  - Planned: coordinator validates agent certificates and checks allowlist by
+    certificate fingerprint or node id.
 - **Authorization**
-  - Only nodes with valid certs and not on denylist may register and receive tasks.
+  - Planned: only allowlisted nodes may register and receive work.
   - Future work may add more granular roles and multi-tenant controls.
 - **Confidentiality and Integrity**
-  - All control-plane communication uses TLS for encryption and integrity.
+  - Planned: control-plane communication uses TLS for encryption and integrity.
   - Job payloads can be encrypted or signed as needed (future refinement).
 - **Sandboxing**
-  - Tasks run with limited privileges (direct process with constraints in v0).
+  - Current: command jobs run as allowlisted direct processes with bounded output
+    and a fixed timeout.
   - Container-based isolation is a future extension.
 
 Advanced verifiable compute (redundant execution, proofs, TEEs) is a later phase and not part of v0.
@@ -434,9 +409,9 @@ Advanced verifiable compute (redundant execution, proofs, TEEs) is a later phase
   - Node register/unregister.
   - Heartbeat state changes (healthy → suspect → offline).
   - Job submission and completion.
-  - Task assignments, retries, and failures.
+  - Dispatch attempts, retries, and failures.
 - Agent logs:
-  - Task acceptance, progress, completion.
+  - Command execution start, completion, and failure.
   - Local sandbox errors and resource issues.
   - Connectivity problems.
 
@@ -448,9 +423,9 @@ Coordinator and optionally agents expose metrics such as:
 
 - Number of nodes by state.
 - Number of jobs per status (queued, running, completed, failed).
-- Number of tasks and retries.
+- Number of dispatch attempts and errors.
 - Average job latency.
-- Scheduler decisions (for example, tasks per node).
+- Scheduler decisions (for example, jobs per node).
 
 These can be exposed via an HTTP endpoint for tools like Prometheus.
 

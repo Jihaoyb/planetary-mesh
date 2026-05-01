@@ -22,8 +22,8 @@ func NewMetrics() *Metrics {
 }
 
 // WriteProm writes metrics in a minimal Prometheus text exposition format.
-// It also includes node-state gauges by inspecting the registry.
-func (m *Metrics) WriteProm(w io.Writer, registry *NodeRegistry) {
+// It also includes node-state gauges through the store aggregate contract.
+func (m *Metrics) WriteProm(w io.Writer, registry NodeStore) {
 	fmt.Fprintf(w, "# HELP planetary_jobs_created_total Total jobs created.\n")
 	fmt.Fprintf(w, "# TYPE planetary_jobs_created_total counter\n")
 	fmt.Fprintf(w, "planetary_jobs_created_total %d\n", m.JobsCreated.Load())
@@ -45,21 +45,11 @@ func (m *Metrics) WriteProm(w io.Writer, registry *NodeRegistry) {
 	fmt.Fprintf(w, "planetary_dispatch_errors_total %d\n", m.DispatchErrors.Load())
 
 	if registry != nil {
-		var healthy, suspect, offline int
-		for _, n := range registry.List() {
-			switch n.State {
-			case NodeStateHealthy:
-				healthy++
-			case NodeStateSuspect:
-				suspect++
-			case NodeStateOffline:
-				offline++
-			}
-		}
+		counts, _ := registry.CountByState()
 		fmt.Fprintf(w, "# HELP planetary_nodes Number of nodes by state.\n")
 		fmt.Fprintf(w, "# TYPE planetary_nodes gauge\n")
-		fmt.Fprintf(w, "planetary_nodes{state=\"HEALTHY\"} %d\n", healthy)
-		fmt.Fprintf(w, "planetary_nodes{state=\"SUSPECT\"} %d\n", suspect)
-		fmt.Fprintf(w, "planetary_nodes{state=\"OFFLINE\"} %d\n", offline)
+		fmt.Fprintf(w, "planetary_nodes{state=\"HEALTHY\"} %d\n", counts.Healthy)
+		fmt.Fprintf(w, "planetary_nodes{state=\"SUSPECT\"} %d\n", counts.Suspect)
+		fmt.Fprintf(w, "planetary_nodes{state=\"OFFLINE\"} %d\n", counts.Offline)
 	}
 }

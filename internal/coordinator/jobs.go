@@ -60,6 +60,17 @@ type JobResult struct {
 	LastError       string
 }
 
+// JobStorage is the coordinator's narrow job persistence contract.
+type JobStorage interface {
+	Create(in JobCreateInput) (Job, error)
+	List() ([]Job, error)
+	Get(id string) (Job, bool, error)
+	StartAttempt(id, nodeID string) (Job, error)
+	Complete(id, nodeID string, result JobResult) (Job, error)
+	Fail(id, nodeID string, result JobResult) (Job, error)
+	FailRunningJobs(lastError string) (int64, error)
+}
+
 // JobStore is an in-memory, concurrency-safe job registry.
 type JobStore struct {
 	mu     sync.Mutex
@@ -75,7 +86,7 @@ func NewJobStore() *JobStore {
 }
 
 // Create allocates a new job, assigns it an ID, stores it, and returns a copy.
-func (s *JobStore) Create(in JobCreateInput) Job {
+func (s *JobStore) Create(in JobCreateInput) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -96,11 +107,11 @@ func (s *JobStore) Create(in JobCreateInput) Job {
 
 	s.jobs[id] = j
 
-	return *j
+	return *j, nil
 }
 
 // List returns all jobs as a slice of copies.
-func (s *JobStore) List() []Job {
+func (s *JobStore) List() ([]Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -108,19 +119,19 @@ func (s *JobStore) List() []Job {
 	for _, j := range s.jobs {
 		result = append(result, *j)
 	}
-	return result
+	return result, nil
 }
 
 // Get returns a single job by ID. The boolean is false if not found.
-func (s *JobStore) Get(id string) (Job, bool) {
+func (s *JobStore) Get(id string) (Job, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	j, ok := s.jobs[id]
 	if !ok {
-		return Job{}, false
+		return Job{}, false, nil
 	}
-	return *j, true
+	return *j, true, nil
 }
 
 // UpdateStatus updates the status (and optionally NodeID) of a job.
@@ -169,6 +180,26 @@ func (s *JobStore) Complete(id, nodeID string, result JobResult) (Job, error) {
 
 func (s *JobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+// FailRunningJobs marks jobs left RUNNING across a coordinator restart as failed.
+func (s *JobStore) FailRunningJobs(lastError string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	var count int64
+	for _, j := range s.jobs {
+		if j.Status != JobStatusRunning {
+			continue
+		}
+		j.Status = JobStatusFailed
+		j.LastError = lastError
+		j.CompletedAt = &now
+		j.UpdatedAt = now
+		count++
+	}
+	return count, nil
 }
 
 func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult) (Job, error) {

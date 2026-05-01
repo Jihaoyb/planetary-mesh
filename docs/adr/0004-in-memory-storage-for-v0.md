@@ -1,6 +1,6 @@
 # ADR 0004: Use in-memory storage for the v0 control plane
 
-- Status: Accepted (temporary; will be revisited before any persistence-sensitive feature)
+- Status: Superseded by ADR 0006 for runtime persistence; in-memory storage remains for tests and local fallback.
 - Date: 2026-04-06
 
 ## Context

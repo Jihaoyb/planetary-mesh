@@ -58,7 +58,10 @@ func TestHandleJobByID(t *testing.T) {
 	jobStore := NewJobStore()
 	srv := NewServer(reg, jobStore, nil)
 
-	created := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello detail"}})
+	created, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello detail"}})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
 	req := newVersionedRequest(http.MethodGet, "/jobs/"+created.ID, nil)
 	w := httptest.NewRecorder()

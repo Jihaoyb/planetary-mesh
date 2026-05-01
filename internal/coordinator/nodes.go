@@ -22,6 +22,21 @@ type Node struct {
 	State    NodeState `json:"state"`
 }
 
+// NodeStateCounts is an aggregate snapshot of known nodes by health state.
+type NodeStateCounts struct {
+	Healthy int
+	Suspect int
+	Offline int
+}
+
+// NodeStore is the coordinator's narrow node persistence contract.
+type NodeStore interface {
+	Register(id, addr string) (Node, error)
+	List() ([]Node, error)
+	UpdateHealthStates(now time.Time, suspectAfter, offlineAfter time.Duration) error
+	CountByState() (NodeStateCounts, error)
+}
+
 // NodeRegistry safely stores nodes in memory.
 type NodeRegistry struct {
 	mu    sync.Mutex
@@ -35,9 +50,9 @@ func NewNodeRegistry() *NodeRegistry {
 	}
 }
 
-// Register inserts or updates a node in the registry.
-// We treat registration as a heartbeat: each call updates LastSeen and sets state to HEALTHY.
-func (r *NodeRegistry) Register(id, addr string) Node {
+// Register inserts or updates a node in the registry. We treat registration as
+// a heartbeat: each call updates LastSeen and sets state to HEALTHY.
+func (r *NodeRegistry) Register(id, addr string) (Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -51,11 +66,11 @@ func (r *NodeRegistry) Register(id, addr string) Node {
 	n.State = NodeStateHealthy
 
 	// Return a copy so callers can't mutate internal state.
-	return *n
+	return *n, nil
 }
 
 // List returns a snapshot of all nodes as a slice of copies.
-func (r *NodeRegistry) List() []Node {
+func (r *NodeRegistry) List() ([]Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -63,11 +78,11 @@ func (r *NodeRegistry) List() []Node {
 	for _, n := range r.nodes {
 		out = append(out, *n)
 	}
-	return out
+	return out, nil
 }
 
 // UpdateHealthStates updates each node's State based on LastSeen and thresholds.
-func (r *NodeRegistry) UpdateHealthStates(now time.Time, suspectAfter, offlineAfter time.Duration) {
+func (r *NodeRegistry) UpdateHealthStates(now time.Time, suspectAfter, offlineAfter time.Duration) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -82,11 +97,31 @@ func (r *NodeRegistry) UpdateHealthStates(now time.Time, suspectAfter, offlineAf
 			n.State = NodeStateHealthy
 		}
 	}
+	return nil
+}
+
+// CountByState returns node-state gauges without exposing individual rows.
+func (r *NodeRegistry) CountByState() (NodeStateCounts, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var counts NodeStateCounts
+	for _, n := range r.nodes {
+		switch n.State {
+		case NodeStateHealthy:
+			counts.Healthy++
+		case NodeStateSuspect:
+			counts.Suspect++
+		case NodeStateOffline:
+			counts.Offline++
+		}
+	}
+	return counts, nil
 }
 
 // StartHealthChecker launches a background goroutine that periodically updates node states.
 // It stops when stopCh is closed. Pass nil to run forever (current behavior).
-func StartHealthChecker(registry *NodeRegistry, stopCh <-chan struct{}) {
+func StartHealthChecker(registry NodeStore, stopCh <-chan struct{}) {
 	suspectAfter := 15 * time.Second
 	offlineAfter := 30 * time.Second
 
@@ -96,7 +131,7 @@ func StartHealthChecker(registry *NodeRegistry, stopCh <-chan struct{}) {
 		for {
 			select {
 			case now := <-ticker.C:
-				registry.UpdateHealthStates(now, suspectAfter, offlineAfter)
+				_ = registry.UpdateHealthStates(now, suspectAfter, offlineAfter)
 			case <-stopCh:
 				return
 			}
