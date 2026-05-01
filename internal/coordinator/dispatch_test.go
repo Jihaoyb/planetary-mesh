@@ -28,7 +28,10 @@ func jsonResponse(status int, body any) *http.Response {
 
 func TestDispatchJobSuccess(t *testing.T) {
 	jobStore := NewJobStore()
-	job := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
 	reg := NewNodeRegistry()
 
@@ -71,7 +74,10 @@ func TestDispatchJobSuccess(t *testing.T) {
 		t.Fatalf("expected fake agent to be called, but it was not")
 	}
 
-	updated, _ := jobStore.Get(job.ID)
+	updated, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
 	if updated.Status != JobStatusCompleted {
 		t.Fatalf("expected job status COMPLETED, got %s", updated.Status)
 	}
@@ -82,14 +88,20 @@ func TestDispatchJobSuccess(t *testing.T) {
 
 func TestDispatchJobNoHealthyNodes(t *testing.T) {
 	jobStore := NewJobStore()
-	job := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
 	reg := NewNodeRegistry()
 	srv := NewServer(reg, jobStore, nil)
 
 	srv.dispatchJob(job.ID)
 
-	unchanged, _ := jobStore.Get(job.ID)
+	unchanged, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
 	if unchanged.Status != JobStatusQueued {
 		t.Fatalf("expected job status QUEUED, got %s", unchanged.Status)
 	}

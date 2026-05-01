@@ -34,8 +34,8 @@ func DefaultDispatchConfig() DispatchConfig {
 
 // Server holds dependencies for HTTP handlers.
 type Server struct {
-	registry   *NodeRegistry
-	jobs       *JobStore
+	registry   NodeStore
+	jobs       JobStorage
 	httpClient *http.Client
 	metrics    *Metrics
 	dispatch   DispatchConfig
@@ -45,14 +45,14 @@ type Server struct {
 // NewServer constructs a Server with default dispatch config.
 // If httpClient is nil, http.DefaultClient is used.
 // If logger is nil, slog.Default() is used.
-func NewServer(registry *NodeRegistry, jobs *JobStore, httpClient *http.Client) *Server {
+func NewServer(registry NodeStore, jobs JobStorage, httpClient *http.Client) *Server {
 	return NewServerWithConfig(registry, jobs, httpClient, DefaultDispatchConfig(), nil)
 }
 
 // NewServerWithConfig is the full constructor.
 func NewServerWithConfig(
-	registry *NodeRegistry,
-	jobs *JobStore,
+	registry NodeStore,
+	jobs JobStorage,
 	httpClient *http.Client,
 	dispatch DispatchConfig,
 	logger *slog.Logger,
@@ -142,7 +142,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	node := s.registry.Register(req.ID, req.Address)
+	node, err := s.registry.Register(req.ID, req.Address)
+	if err != nil {
+		s.logger.Error("register node failed", "node_id", req.ID, "err", err)
+		http.Error(w, "register node failed", http.StatusInternalServerError)
+		return
+	}
 	s.logger.Info("node register/heartbeat", "node_id", node.ID, "addr", node.Address)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -162,7 +167,12 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodes := s.registry.List()
+	nodes, err := s.registry.List()
+	if err != nil {
+		s.logger.Error("list nodes failed", "err", err)
+		http.Error(w, "list nodes failed", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(nodes); err != nil {
@@ -204,7 +214,12 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, ok := s.jobs.Get(id)
+	job, ok, err := s.jobs.Get(id)
+	if err != nil {
+		s.logger.Error("get job failed", "job_id", id, "err", err)
+		http.Error(w, "get job failed", http.StatusInternalServerError)
+		return
+	}
 	if !ok {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
@@ -254,12 +269,17 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := s.jobs.Create(JobCreateInput{
+	job, err := s.jobs.Create(JobCreateInput{
 		Type:    req.Type,
 		Payload: req.Payload,
 		Command: req.Command,
 		Args:    req.Args,
 	})
+	if err != nil {
+		s.logger.Error("create job failed", "err", err)
+		http.Error(w, "create job failed", http.StatusInternalServerError)
+		return
+	}
 	s.metrics.JobsCreated.Add(1)
 	s.logger.Info("job created", "job_id", job.ID, "type", job.Type, "command", job.Command)
 
@@ -274,7 +294,12 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 
 // handleListJobs implements GET /jobs.
 func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := s.jobs.List()
+	jobs, err := s.jobs.List()
+	if err != nil {
+		s.logger.Error("list jobs failed", "err", err)
+		http.Error(w, "list jobs failed", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(jobs); err != nil {
@@ -286,7 +311,11 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 // /execute endpoint. It retries on transport or retryable server errors up to
 // dispatch.MaxAttempts with exponential backoff (base = dispatch.BaseBackoff).
 func (s *Server) dispatchJob(jobID string) {
-	nodes := s.registry.List()
+	nodes, err := s.registry.List()
+	if err != nil {
+		s.logger.Error("list nodes during dispatch failed", "job_id", jobID, "err", err)
+		return
+	}
 
 	var target *Node
 	for i := range nodes {
@@ -301,7 +330,11 @@ func (s *Server) dispatchJob(jobID string) {
 		return
 	}
 
-	job, ok := s.jobs.Get(jobID)
+	job, ok, err := s.jobs.Get(jobID)
+	if err != nil {
+		s.logger.Error("get job during dispatch failed", "job_id", jobID, "err", err)
+		return
+	}
 	if !ok {
 		s.logger.Error("job missing during dispatch", "job_id", jobID)
 		return

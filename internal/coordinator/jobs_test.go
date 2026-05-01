@@ -5,7 +5,10 @@ import "testing"
 func TestJobStoreCreateAndList(t *testing.T) {
 	store := NewJobStore()
 
-	j1 := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	j1, err := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	if err != nil {
+		t.Fatalf("create job 1: %v", err)
+	}
 	if j1.ID == "" {
 		t.Fatalf("expected non-empty job ID")
 	}
@@ -22,12 +25,18 @@ func TestJobStoreCreateAndList(t *testing.T) {
 		t.Fatalf("expected status %s, got %s", JobStatusQueued, j1.Status)
 	}
 
-	j2 := store.Create(JobCreateInput{Type: "echo", Payload: "world"})
+	j2, err := store.Create(JobCreateInput{Type: "echo", Payload: "world"})
+	if err != nil {
+		t.Fatalf("create job 2: %v", err)
+	}
 	if j2.ID == j1.ID {
 		t.Fatalf("expected different job IDs, got %s and %s", j1.ID, j2.ID)
 	}
 
-	jobs := store.List()
+	jobs, err := store.List()
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
 	if len(jobs) != 2 {
 		t.Fatalf("expected 2 jobs, got %d", len(jobs))
 	}
@@ -35,9 +44,15 @@ func TestJobStoreCreateAndList(t *testing.T) {
 
 func TestJobStoreGet(t *testing.T) {
 	store := NewJobStore()
-	j := store.Create(JobCreateInput{Type: "echo", Payload: "hello"})
+	j, err := store.Create(JobCreateInput{Type: "echo", Payload: "hello"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
-	got, ok := store.Get(j.ID)
+	got, ok, err := store.Get(j.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
 	if !ok {
 		t.Fatalf("expected to find job %s", j.ID)
 	}
@@ -45,14 +60,19 @@ func TestJobStoreGet(t *testing.T) {
 		t.Fatalf("unexpected job returned: %+v", got)
 	}
 
-	if _, ok := store.Get("nope"); ok {
+	if _, ok, err := store.Get("nope"); err != nil {
+		t.Fatalf("get missing job: %v", err)
+	} else if ok {
 		t.Fatalf("expected Get on missing id to return false")
 	}
 }
 
 func TestJobStoreExecutionLifecycle(t *testing.T) {
 	store := NewJobStore()
-	j := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"data"}})
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"data"}})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
 	started, err := store.StartAttempt(j.ID, "node-1")
 	if err != nil {
@@ -89,7 +109,10 @@ func TestJobStoreExecutionLifecycle(t *testing.T) {
 
 func TestJobStoreFail(t *testing.T) {
 	store := NewJobStore()
-	j := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
 
 	if _, err := store.StartAttempt(j.ID, "node-1"); err != nil {
 		t.Fatalf("start attempt: %v", err)

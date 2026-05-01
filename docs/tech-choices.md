@@ -138,18 +138,23 @@ multi-client evolution make HTTP/JSON too limiting.
 
 ### 4.2 Choice
 
-After the real command-execution milestone, we plan to move coordinator state to
-**Postgres**.
+For durable coordinator runtime state, we use **Postgres**.
 
 **Reasons**
 
-- Jobs, tasks, and node states are naturally relational.
+- Jobs and node states are naturally relational.
 - We need **durability** and **queries** across jobs and nodes.
 - Postgres is a solid default with good tooling and libraries.
 
-In-memory storage remains the current baseline and is documented in ADR 0004.
-Postgres is the planned persistence target immediately after the command-
-execution milestone.
+In-memory storage remains available for fast unit tests and simple local runs.
+Milestone 3 persists nodes and jobs only; task fanout remains out of scope until
+a later milestone. ADR 0006 records the Postgres persistence decision and
+supersedes the temporary in-memory-only runtime decision in ADR 0004.
+
+Managed Postgres providers, including Supabase, can be evaluated later for
+hosted database operations and visual inspection. The coordinator should remain
+provider-neutral by accepting a standard Postgres connection string instead of
+depending on provider-specific APIs.
 
 ---
 
@@ -225,7 +230,9 @@ For v0, we **lean toward direct process execution** with clear constraints.
 
 ### 7.2 Choice
 
-For v0, we use a **score-based scheduler** with a simple formula:
+The current prototype uses a **simple healthy-node scheduler**: it picks the
+first healthy node when dispatching a job. A later v0 iteration can move to a
+score-based scheduler with a formula like:
 
 ```text
 score = α * RTT + β * Load + γ * Queue + δ * Reliability
@@ -233,14 +240,16 @@ score = α * RTT + β * Load + γ * Queue + δ * Reliability
 
 **Reason**
 
-- Still simple enough to implement and tune.
-- Already captures key mesh concerns:
+- The current scheduler is enough to validate registration, dispatch, retries,
+  command execution, and persistence.
+- The score-based shape captures key mesh concerns when we add richer node
+  metrics:
   - Latency (RTT).
   - Current load.
   - Queue length.
   - Historical reliability.
 
-More Advanced policies can be added later as needed.
+More advanced policies can be added later as needed.
 
 ---
 

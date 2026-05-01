@@ -18,6 +18,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	addr := getEnv("AGENT_ADDR", ":8081")
+	advertiseAddr := getEnv("AGENT_ADVERTISE_ADDR", addr)
 	coordURL := getEnv("COORDINATOR_URL", "http://localhost:8080")
 	nodeID := getEnv("NODE_ID", agent.DefaultNodeID())
 	execTimeout := getEnv("AGENT_EXEC_TIMEOUT", agent.DefaultExecutionTimeout.String())
@@ -38,14 +39,14 @@ func main() {
 		Timeout:   timeout,
 	}
 
-	if err := agent.RegisterWithCoordinator(coordURL, nodeID, addr); err != nil {
+	if err := agent.RegisterWithCoordinator(coordURL, nodeID, advertiseAddr); err != nil {
 		logger.Warn("initial registration failed", "err", err)
 	} else {
 		logger.Info("registered with coordinator", "node_id", nodeID)
 	}
 
 	stopCh := make(chan struct{})
-	agent.StartHeartbeatLoop(coordURL, nodeID, addr, stopCh)
+	agent.StartHeartbeatLoop(coordURL, nodeID, advertiseAddr, stopCh)
 
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -68,7 +69,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("agent starting", "addr", addr)
+	logger.Info("agent starting", "addr", addr, "advertise_addr", advertiseAddr)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server error", "err", err)
 		os.Exit(1)

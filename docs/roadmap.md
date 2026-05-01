@@ -1,25 +1,27 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after PR #5
-(`feature/control-plane-hardening`) landed on `main`.
+This document is the canonical roadmap for Planetary Mesh after PR #7
+(`feature/milestone-2-command-execution`) landed on `main`.
 
 ## Current Stage
 
-- Baseline: `main` at `bddee84`
-- Stage: hardened end-to-end control-plane prototype
+- Baseline: `main` at `36ebad6`
+- Stage: command-capable control-plane prototype with durable coordinator state in progress
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
-  - HTTP/JSON control plane with job detail and metrics
+  - HTTP/JSON control plane with protocol versioning, job detail, and metrics
+  - allowlisted direct command execution with bounded stdout/stderr capture
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestone 1 is complete. The next highest-value gap is real command execution.
+Milestones 1 and 2 are complete. The current implementation milestone is durable
+coordinator state with Postgres.
 
 ## Milestone 2: Real Command Execution
 
 Goal: replace the stub `/execute` path with a real, safe, direct-process workload.
 
-Planned changes:
+Implemented in PR #7:
 
 - `POST /jobs` supports `type="command"`, `command`, and optional `args`
 - `payload` is rejected for `type="command"` instead of being silently ignored
@@ -39,7 +41,7 @@ Planned changes:
 - Stdout and stderr are capped at `1 MiB` each and marked as truncated when clipped
 - Add `examples/demo.sh` as the living smoke demo
 
-Status: planned as the next implementation PR
+Status: complete
 
 Acceptance criteria:
 
@@ -51,7 +53,7 @@ Acceptance criteria:
 
 Goal: preserve node/job history across coordinator restarts.
 
-Planned changes:
+Implementation changes:
 
 - Introduce narrow storage interfaces aligned to coordinator needs
 - Keep in-memory implementations for fast unit tests
@@ -60,6 +62,8 @@ Planned changes:
 - Add Compose support for coordinator + Postgres + agent
 - On startup, any persisted `RUNNING` jobs are marked `FAILED` with a
   restart-specific error
+
+Status: in progress for the current implementation PR
 
 Known v0 limitation:
 
@@ -93,6 +97,19 @@ Planned changes:
   - inspect job
   - show coordinator status/config
 - Keep the CLI as a pure client over coordinator APIs
+
+## Later Operational Options
+
+These are not required for v0 milestones, but may be useful once the core LAN
+mesh behavior is stable:
+
+- Evaluate hosted Postgres providers, including Supabase, for managed database
+  hosting, visual table inspection, SQL editing, and operational visibility.
+- Keep the coordinator database integration provider-neutral through
+  `COORDINATOR_DATABASE_URL`; do not depend on Supabase-specific APIs unless a
+  future product requirement needs them.
+- Revisit schema migrations once existing deployments need safe database
+  upgrades across versions.
 
 ## Delivery Model
 

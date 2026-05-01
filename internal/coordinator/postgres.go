@@ -1,0 +1,398 @@
+package coordinator
+
+import (
+	"context"
+	"database/sql"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+)
+
+const RestartRecoveryError = "coordinator restarted before result was recorded"
+
+//go:embed schema/postgres.sql
+var postgresSchemaFS embed.FS
+
+// PostgresStore persists coordinator nodes and jobs in Postgres.
+type PostgresStore struct {
+	db *sql.DB
+}
+
+type PostgresNodeStore struct {
+	db *sql.DB
+}
+
+type PostgresJobStore struct {
+	db *sql.DB
+}
+
+func (s *PostgresStore) Nodes() *PostgresNodeStore {
+	return &PostgresNodeStore{db: s.db}
+}
+
+func (s *PostgresStore) Jobs() *PostgresJobStore {
+	return &PostgresJobStore{db: s.db}
+}
+
+// OpenPostgresStoreWithRetry connects to Postgres, applies the embedded schema,
+// and retries briefly so Compose startup can wait for database readiness.
+func OpenPostgresStoreWithRetry(ctx context.Context, dsn string) (*PostgresStore, error) {
+	const attempts = 5
+	backoff := 250 * time.Millisecond
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		store, err := OpenPostgresStore(ctx, dsn)
+		if err == nil {
+			return store, nil
+		}
+		lastErr = err
+		if attempt == attempts {
+			break
+		}
+
+		select {
+		case <-time.After(backoff):
+			backoff *= 2
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("connect postgres after %d attempts: %w", attempts, lastErr)
+}
+
+// OpenPostgresStore connects to Postgres and applies the embedded schema.
+func OpenPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	schema, err := postgresSchemaFS.ReadFile("schema/postgres.sql")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return &PostgresStore{db: db}, nil
+}
+
+func (s *PostgresStore) Close() error {
+	return s.db.Close()
+}
+
+func (s *PostgresNodeStore) Register(id, addr string) (Node, error) {
+	now := time.Now().UTC()
+	row := s.db.QueryRow(`
+INSERT INTO nodes (id, address, last_seen, state, created_at)
+VALUES ($1, $2, $3, $4, $3)
+ON CONFLICT (id) DO UPDATE
+SET address = EXCLUDED.address,
+    last_seen = EXCLUDED.last_seen,
+    state = EXCLUDED.state
+RETURNING id, address, last_seen, state
+`, id, addr, now, NodeStateHealthy)
+
+	var node Node
+	if err := row.Scan(&node.ID, &node.Address, &node.LastSeen, &node.State); err != nil {
+		return Node{}, err
+	}
+	return node, nil
+}
+
+func (s *PostgresNodeStore) List() ([]Node, error) {
+	rows, err := s.db.Query(`
+SELECT id, address, last_seen, state
+FROM nodes
+ORDER BY id
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nodes := []Node{}
+	for rows.Next() {
+		var node Node
+		if err := rows.Scan(&node.ID, &node.Address, &node.LastSeen, &node.State); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func (s *PostgresNodeStore) UpdateHealthStates(now time.Time, suspectAfter, offlineAfter time.Duration) error {
+	_, err := s.db.Exec(`
+UPDATE nodes
+SET state = CASE
+  WHEN $1::timestamptz - last_seen > ($3::double precision * interval '1 second') THEN $4
+  WHEN $1::timestamptz - last_seen > ($2::double precision * interval '1 second') THEN $5
+  ELSE $6
+END
+`, now.UTC(), suspectAfter.Seconds(), offlineAfter.Seconds(), NodeStateOffline, NodeStateSuspect, NodeStateHealthy)
+	return err
+}
+
+func (s *PostgresNodeStore) CountByState() (NodeStateCounts, error) {
+	rows, err := s.db.Query(`
+SELECT state, count(*)
+FROM nodes
+GROUP BY state
+`)
+	if err != nil {
+		return NodeStateCounts{}, err
+	}
+	defer rows.Close()
+
+	var counts NodeStateCounts
+	for rows.Next() {
+		var state NodeState
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return NodeStateCounts{}, err
+		}
+		switch state {
+		case NodeStateHealthy:
+			counts.Healthy = count
+		case NodeStateSuspect:
+			counts.Suspect = count
+		case NodeStateOffline:
+			counts.Offline = count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return NodeStateCounts{}, err
+	}
+	return counts, nil
+}
+
+func (s *PostgresJobStore) Create(in JobCreateInput) (Job, error) {
+	var seq int64
+	if err := s.db.QueryRow(`SELECT nextval('job_id_seq')`).Scan(&seq); err != nil {
+		return Job{}, err
+	}
+
+	now := time.Now().UTC()
+	job := Job{
+		ID:        fmt.Sprintf("job-%d", seq),
+		Type:      in.Type,
+		Payload:   in.Payload,
+		Command:   in.Command,
+		Args:      append([]string(nil), in.Args...),
+		Status:    JobStatusQueued,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	argsJSON, err := json.Marshal(job.Args)
+	if err != nil {
+		return Job{}, err
+	}
+
+	_, err = s.db.Exec(`
+INSERT INTO jobs (
+  id, type, payload, command, args, status, node_id, attempts,
+  stdout, stderr, stdout_truncated, stderr_truncated, last_error,
+  created_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6, '', 0, '', '', false, false, '', $7, $7)
+`, job.ID, job.Type, job.Payload, job.Command, string(argsJSON), job.Status, now)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (s *PostgresJobStore) List() ([]Job, error) {
+	rows, err := s.db.Query(jobSelectSQL + ` ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanJobs(rows)
+}
+
+func (s *PostgresJobStore) Get(id string) (Job, bool, error) {
+	row := s.db.QueryRow(jobSelectSQL+` WHERE id = $1`, id)
+	job, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, false, nil
+	}
+	if err != nil {
+		return Job{}, false, err
+	}
+	return job, true, nil
+}
+
+func (s *PostgresJobStore) StartAttempt(id, nodeID string) (Job, error) {
+	now := time.Now().UTC()
+	row := s.db.QueryRow(`
+UPDATE jobs
+SET status = $2,
+    node_id = $3,
+    attempts = attempts + 1,
+    started_at = COALESCE(started_at, $4),
+    updated_at = $4
+WHERE id = $1
+RETURNING `+jobColumns, id, JobStatusRunning, nodeID, now)
+	job, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+	return job, err
+}
+
+func (s *PostgresJobStore) Complete(id, nodeID string, result JobResult) (Job, error) {
+	return s.finish(id, nodeID, JobStatusCompleted, result)
+}
+
+func (s *PostgresJobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
+	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+func (s *PostgresJobStore) finish(id, nodeID string, status JobStatus, result JobResult) (Job, error) {
+	now := time.Now().UTC()
+	row := s.db.QueryRow(`
+UPDATE jobs
+SET status = $2,
+    node_id = CASE WHEN $3 = '' THEN node_id ELSE $3 END,
+    completed_at = $4,
+    exit_code = $5,
+    stdout = $6,
+    stderr = $7,
+    stdout_truncated = $8,
+    stderr_truncated = $9,
+    last_error = $10,
+    updated_at = $4
+WHERE id = $1
+RETURNING `+jobColumns,
+		id,
+		status,
+		nodeID,
+		now,
+		result.ExitCode,
+		result.Stdout,
+		result.Stderr,
+		result.StdoutTruncated,
+		result.StderrTruncated,
+		result.LastError,
+	)
+	job, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, fmt.Errorf("job %q not found", id)
+	}
+	return job, err
+}
+
+func (s *PostgresJobStore) FailRunningJobs(lastError string) (int64, error) {
+	now := time.Now().UTC()
+	res, err := s.db.Exec(`
+UPDATE jobs
+SET status = $1,
+    completed_at = $2,
+    last_error = $3,
+    updated_at = $2
+WHERE status = $4
+`, JobStatusFailed, now, lastError, JobStatusRunning)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+const jobColumns = `
+id, type, payload, command, args, status, node_id, attempts,
+started_at, completed_at, exit_code, stdout, stderr, stdout_truncated,
+stderr_truncated, last_error, created_at, updated_at`
+
+const jobSelectSQL = `SELECT ` + jobColumns + ` FROM jobs`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanJobs(rows *sql.Rows) ([]Job, error) {
+	jobs := []Job{}
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func scanJob(row rowScanner) (Job, error) {
+	var job Job
+	var argsJSON []byte
+	var startedAt sql.NullTime
+	var completedAt sql.NullTime
+	var exitCode sql.NullInt64
+
+	err := row.Scan(
+		&job.ID,
+		&job.Type,
+		&job.Payload,
+		&job.Command,
+		&argsJSON,
+		&job.Status,
+		&job.NodeID,
+		&job.Attempts,
+		&startedAt,
+		&completedAt,
+		&exitCode,
+		&job.Stdout,
+		&job.Stderr,
+		&job.StdoutTruncated,
+		&job.StderrTruncated,
+		&job.LastError,
+		&job.CreatedAt,
+		&job.UpdatedAt,
+	)
+	if err != nil {
+		return Job{}, err
+	}
+
+	if len(argsJSON) > 0 {
+		if err := json.Unmarshal(argsJSON, &job.Args); err != nil {
+			return Job{}, err
+		}
+	}
+	if startedAt.Valid {
+		t := startedAt.Time
+		job.StartedAt = &t
+	}
+	if completedAt.Valid {
+		t := completedAt.Time
+		job.CompletedAt = &t
+	}
+	if exitCode.Valid {
+		code := int(exitCode.Int64)
+		job.ExitCode = &code
+	}
+
+	return job, nil
+}

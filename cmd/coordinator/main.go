@@ -18,9 +18,42 @@ func main() {
 	slog.SetDefault(logger)
 
 	addr := getEnv("COORDINATOR_ADDR", ":8080")
+	databaseURL := os.Getenv("COORDINATOR_DATABASE_URL")
 
-	registry := coordinator.NewNodeRegistry()
-	jobs := coordinator.NewJobStore()
+	var registry coordinator.NodeStore
+	var jobs coordinator.JobStorage
+	var postgresStore *coordinator.PostgresStore
+
+	if databaseURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		store, err := coordinator.OpenPostgresStoreWithRetry(ctx, databaseURL)
+		if err != nil {
+			logger.Error("postgres initialization failed", "err", err)
+			os.Exit(1)
+		}
+		postgresStore = store
+		defer func() {
+			if err := postgresStore.Close(); err != nil {
+				logger.Warn("postgres close failed", "err", err)
+			}
+		}()
+
+		registry = store.Nodes()
+		jobs = store.Jobs()
+		recovered, err := jobs.FailRunningJobs(coordinator.RestartRecoveryError)
+		if err != nil {
+			logger.Error("recover running jobs failed", "err", err)
+			os.Exit(1)
+		}
+		logger.Info("postgres storage initialized", "recovered_running_jobs", recovered)
+	} else {
+		registry = coordinator.NewNodeRegistry()
+		jobs = coordinator.NewJobStore()
+		logger.Info("in-memory storage initialized")
+	}
+
 	srv := coordinator.NewServerWithConfig(registry, jobs, http.DefaultClient, coordinator.DefaultDispatchConfig(), logger)
 
 	stopCh := make(chan struct{})
