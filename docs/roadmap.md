@@ -1,12 +1,12 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 4
-trusted LAN security.
+This document is the canonical roadmap for Planetary Mesh after Milestone 5
+operator CLI.
 
 ## Current Stage
 
-- Baseline: `main` after PR #8 (`6eb22f6`) plus the Milestone 4 security branch
-- Stage: command-capable control-plane prototype with durable coordinator state and opt-in coordinator-agent mTLS
+- Baseline: `main` after PR #9 (`905bf5d`)
+- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, and an operator CLI
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
@@ -14,10 +14,10 @@ trusted LAN security.
   - allowlisted direct command execution with bounded stdout/stderr capture
   - optional Postgres persistence for nodes and jobs
   - optional mTLS between coordinator and agents with node allowlisting
+  - `pmctl` for status, node/job listing, job inspection, and command job submission
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 through 4 are complete. The remaining v0 implementation milestone
-is the operator CLI.
+Milestones 1 through 5 are complete.
 
 ## Milestone 2: Real Command Execution
 
@@ -100,16 +100,26 @@ Acceptance criteria:
 
 Goal: make the product usable without `curl`.
 
-Planned changes:
+Implemented changes:
 
 - Add a thin CLI under `cmd/pmctl`
 - Support:
-  - submit job
+  - submit command job
   - list nodes
   - list jobs
   - inspect job
   - show coordinator status/config
 - Keep the CLI as a pure client over coordinator APIs
+
+Status: complete
+
+Acceptance criteria:
+
+- Operators can submit command jobs, list nodes/jobs, inspect a job, and view
+  non-secret coordinator status/config without writing `curl` requests
+- Plain local development works by default
+- Secure coordinator access works with CA/cert/key configuration
+- CLI tests cover command behavior and an in-process coordinator smoke flow
 
 ## Later Operational Options
 

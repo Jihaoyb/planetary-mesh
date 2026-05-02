@@ -186,26 +186,29 @@ The agent runs on participant devices and executes tasks.
 - Clear separation between client (who submits jobs) and workers (agents).
 - Easier to run agents on machines that are not used by the original job submitter.
 
-### 4.3 Dashboard / Client
+### 4.3 CLI / Client
 
-The Dashboard / CLI is a thin layer on top of the coordinator’s API.
+`pmctl` is the current operator interface and is a thin layer on top of the
+coordinator’s API. Dashboard work remains future work.
 
 **Responsibilities**
 
 - **Node View**
   - List nodes and their states (`HEALTHY`, `SUSPECT`, `OFFLINE`).
-  - Show capabilities and basic metrics (jobs handled, last heartbeat).
+  - Show address, last heartbeat, and certificate identity metadata when present.
 - **Job View**
   - List jobs and their status (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
-  - Show tasks per node and any error messages.
+  - Inspect command, node, attempts, captured output, and any error messages.
 - **Job Submission**
-  - Allow users to submit jobs with simple forms or commands.
-- **Metrics**
-  - Display key metrics from coordinator (throughput, failure counts, latency).
+  - Submit command jobs through the same coordinator validation path as direct
+    HTTP clients.
+- **Coordinator Status**
+  - Show non-secret runtime status/config such as protocol version, storage
+    backend, secure mode, node allowlist state, and dispatch settings.
 
-**Why keep the dashboard thin?**
+**Why keep clients thin?**
 
-- The core responsibility is visualization and simple control.
+- The core responsibility is operator interaction and simple control.
 - Most logic (validation, scheduling, retries) stays in the coordinator.
 - This makes it easier to maintain multiple clients (web UI, CLI, automation).
 
@@ -359,6 +362,7 @@ example, gRPC) for:
   - `GET_JOB_STATUS`
   - `LIST_JOBS`
   - `LIST_NODES`
+  - `GET_COORDINATOR_STATUS`
   - Metrics endpoint (HTTP).
 
 For the current merged baseline and near-term roadmap, coordinator-agent and
