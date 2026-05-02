@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"planetary-mesh/internal/security"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -62,7 +64,17 @@ func TestPostgresNodePersistence(t *testing.T) {
 	store := openPostgresTestStore(t)
 	nodes := store.Nodes()
 
-	registered, err := nodes.Register("node-pg", "http://agent:8081")
+	notAfter := time.Now().Add(time.Hour).UTC()
+	registered, err := nodes.Register(NodeRegistration{
+		ID:      "node-pg",
+		Address: "http://agent:8081",
+		Certificate: security.CertificateMetadata{
+			Subject:           "CN=node-pg",
+			DNSNames:          []string{"node-pg.local"},
+			SHA256Fingerprint: "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+			NotAfter:          &notAfter,
+		},
+	})
 	if err != nil {
 		t.Fatalf("register node: %v", err)
 	}
@@ -76,6 +88,9 @@ func TestPostgresNodePersistence(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].ID != "node-pg" {
 		t.Fatalf("unexpected nodes: %+v", listed)
+	}
+	if listed[0].Certificate.Subject != "CN=node-pg" || listed[0].Certificate.DNSNames[0] != "node-pg.local" {
+		t.Fatalf("unexpected certificate metadata: %+v", listed[0].Certificate)
 	}
 
 	counts, err := nodes.CountByState()

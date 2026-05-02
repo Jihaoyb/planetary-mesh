@@ -9,7 +9,7 @@ import (
 func TestNodeRegistryRegisterAndList(t *testing.T) {
 	reg := NewNodeRegistry()
 
-	n1, err := reg.Register("node-1", ":8081")
+	n1, err := reg.Register(NodeRegistration{ID: "node-1", Address: ":8081"})
 	if err != nil {
 		t.Fatalf("register node-1: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestNodeRegistryRegisterAndList(t *testing.T) {
 		t.Fatalf("expected state %s, got %s", NodeStateHealthy, n1.State)
 	}
 
-	n2, err := reg.Register("node-1", ":9090")
+	n2, err := reg.Register(NodeRegistration{ID: "node-1", Address: ":9090"})
 	if err != nil {
 		t.Fatalf("update node-1: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestNodeRegistryRegisterAndList(t *testing.T) {
 		t.Fatalf("expected address :9090, got %s", n2.Address)
 	}
 
-	if _, err := reg.Register("node-2", ":8082"); err != nil {
+	if _, err := reg.Register(NodeRegistration{ID: "node-2", Address: ":8082"}); err != nil {
 		t.Fatalf("register node-2: %v", err)
 	}
 

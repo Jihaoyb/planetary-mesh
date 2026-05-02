@@ -103,13 +103,16 @@ If a different language is chosen later, the change and its rationale should be 
 
   ### 3.2 Choice
 
-For the current v0 baseline, we use **HTTP/JSON** for the control plane.
+For the current v0 baseline, we use **HTTP/JSON** for the control plane, with
+optional HTTPS/mTLS for coordinator-agent traffic.
 
 **Reasons**
 
 - The early control plane is easier to debug with `curl` and browser tooling.
 - The data model is still evolving quickly.
 - The current repo already records this as an accepted decision in ADR 0003.
+- Milestone 4 records the trusted LAN mTLS security model in ADR 0007 without
+  changing the JSON wire shape.
 
 We still expect to revisit gRPC later if streaming, stronger contracts, or
 multi-client evolution make HTTP/JSON too limiting.

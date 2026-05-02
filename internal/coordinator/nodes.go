@@ -3,6 +3,8 @@ package coordinator
 import (
 	"sync"
 	"time"
+
+	"planetary-mesh/internal/security"
 )
 
 // NodeState represents the health state of a node.
@@ -16,10 +18,17 @@ const (
 
 // Node represents an agent node known to the coordinator.
 type Node struct {
-	ID       string    `json:"id"`
-	Address  string    `json:"address"`
-	LastSeen time.Time `json:"last_seen"`
-	State    NodeState `json:"state"`
+	ID          string                       `json:"id"`
+	Address     string                       `json:"address"`
+	LastSeen    time.Time                    `json:"last_seen"`
+	State       NodeState                    `json:"state"`
+	Certificate security.CertificateMetadata `json:"certificate,omitempty"`
+}
+
+type NodeRegistration struct {
+	ID          string
+	Address     string
+	Certificate security.CertificateMetadata
 }
 
 // NodeStateCounts is an aggregate snapshot of known nodes by health state.
@@ -31,7 +40,7 @@ type NodeStateCounts struct {
 
 // NodeStore is the coordinator's narrow node persistence contract.
 type NodeStore interface {
-	Register(id, addr string) (Node, error)
+	Register(in NodeRegistration) (Node, error)
 	List() ([]Node, error)
 	UpdateHealthStates(now time.Time, suspectAfter, offlineAfter time.Duration) error
 	CountByState() (NodeStateCounts, error)
@@ -52,21 +61,22 @@ func NewNodeRegistry() *NodeRegistry {
 
 // Register inserts or updates a node in the registry. We treat registration as
 // a heartbeat: each call updates LastSeen and sets state to HEALTHY.
-func (r *NodeRegistry) Register(id, addr string) (Node, error) {
+func (r *NodeRegistry) Register(in NodeRegistration) (Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	n, exists := r.nodes[id]
+	n, exists := r.nodes[in.ID]
 	if !exists {
-		n = &Node{ID: id}
-		r.nodes[id] = n
+		n = &Node{ID: in.ID}
+		r.nodes[in.ID] = n
 	}
-	n.Address = addr
+	n.Address = in.Address
 	n.LastSeen = time.Now().UTC()
 	n.State = NodeStateHealthy
+	n.Certificate = cloneCertificateMetadata(in.Certificate)
 
 	// Return a copy so callers can't mutate internal state.
-	return *n, nil
+	return cloneNode(*n), nil
 }
 
 // List returns a snapshot of all nodes as a slice of copies.
@@ -76,7 +86,7 @@ func (r *NodeRegistry) List() ([]Node, error) {
 
 	out := make([]Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		out = append(out, *n)
+		out = append(out, cloneNode(*n))
 	}
 	return out, nil
 }
@@ -117,6 +127,23 @@ func (r *NodeRegistry) CountByState() (NodeStateCounts, error) {
 		}
 	}
 	return counts, nil
+}
+
+func cloneNode(n Node) Node {
+	n.Certificate = cloneCertificateMetadata(n.Certificate)
+	return n
+}
+
+func cloneCertificateMetadata(in security.CertificateMetadata) security.CertificateMetadata {
+	out := in
+	out.DNSNames = append([]string(nil), in.DNSNames...)
+	out.IPAddresses = append([]string(nil), in.IPAddresses...)
+	out.URIs = append([]string(nil), in.URIs...)
+	if in.NotAfter != nil {
+		t := *in.NotAfter
+		out.NotAfter = &t
+	}
+	return out
 }
 
 // StartHealthChecker launches a background goroutine that periodically updates node states.

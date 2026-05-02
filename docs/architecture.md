@@ -100,8 +100,8 @@ flowchart LR
   - Communicates with coordinator’s API.
 
 Today, the merged prototype uses HTTP/JSON for the control plane, as captured in
-ADR 0003. Mutual TLS is planned for Milestone 4, and longer-term protocol
-evolution remains open.
+ADR 0003. Coordinator-agent traffic can run with mTLS and node allowlisting, as
+captured in ADR 0007. Longer-term protocol evolution remains open.
 
 ---
 
@@ -115,7 +115,7 @@ The coordinator is the central controller of a mesh.
 
 - **Node Registry**
   - Accept node registration requests.
-  - Store node metadata: capabilities, certificate identity, health status, last heartbeat.
+  - Store node metadata: address, certificate identity, health status, and last heartbeat.
 - **Health Management**
   - Process periodic heartbeats from agents.
   - Mark nodes as `HEALTHY`, `SUSPECT`, or `OFFLINE` based on heartbeats and timeouts.
@@ -263,6 +263,7 @@ Fields (example):
 - `address` – coordinator-reachable agent address
 - `state` – enum: `HEALTHY`, `SUSPECT`, `OFFLINE`
 - `last_heartbeat_at` / `last_seen` – timestamp updated on registration and heartbeat
+- `certificate` – subject, DNS/IP/URI identities, SHA-256 fingerprint, and expiration when mTLS is enabled
 - `created_at` – durable storage creation timestamp
 
 ### 5.3 Job
@@ -293,12 +294,18 @@ This section describes core runtime flows. Sequence diagrams can be added later.
 
 ### 6.1 Node Registration
 
-1. Agent starts with a configured coordinator URL and advertised address.
-2. Agent sends an HTTP/JSON `POST /register` request with node id and address.
-3. Coordinator creates or updates the node record and returns success.
-4. Agent continues sending the same registration request as a heartbeat.
-
-Milestone 4 adds mTLS identity checks and node allowlisting to this flow.
+1. Agent starts with a configured coordinator URL, advertised address, and
+   optional CA/certificate/key files.
+2. In secure mode, the agent connects to the coordinator over HTTPS with a
+   client certificate and validates the coordinator certificate against the
+   configured CA.
+3. Agent sends an HTTP/JSON `POST /register` request with node id and address.
+4. In secure mode, the coordinator verifies the agent certificate and rejects
+   registration unless the node id matches an allowed certificate identity or
+   SHA-256 fingerprint.
+5. Coordinator creates or updates the node record, stores certificate metadata,
+   and returns success.
+6. Agent continues sending the same registration request as a heartbeat.
 
 ### 6.2 Heartbeat and Health Management
 
@@ -356,7 +363,8 @@ example, gRPC) for:
 
 For the current merged baseline and near-term roadmap, coordinator-agent and
 client-coordinator communication use HTTP/JSON with explicit versioning. This is
-documented in ADR 0003.
+documented in ADR 0003. Coordinator-agent communication can be upgraded to
+mutual TLS without changing the JSON wire shape, as documented in ADR 0007.
 
 ### 7.2 Discovery
 
@@ -376,21 +384,21 @@ added once basic functionality is stable.
 
 ## 8. Security Model (v0)
 
-Target security model:
+Current security model:
 
 - **Identity**
-  - Planned: each agent has a unique certificate and private key.
-  - Planned: coordinator has its own certificate.
-  - Planned: a simple local CA or manual process issues certificates.
+  - Agents can be configured with a unique certificate and private key.
+  - Coordinator can be configured with its own certificate and private key.
+  - Certificate distribution is manual for v0.
 - **Authentication**
-  - Planned: agents validate coordinator certificate against trusted CA.
-  - Planned: coordinator validates agent certificates and checks allowlist by
-    certificate fingerprint or node id.
+  - In secure mode, agents validate the coordinator certificate against a trusted CA.
+  - In secure mode, the coordinator validates agent certificates against the same trusted CA.
 - **Authorization**
-  - Planned: only allowlisted nodes may register and receive work.
+  - Secure coordinator mode requires allowed node identities or fingerprints.
+  - Only allowlisted nodes may register and receive work.
   - Future work may add more granular roles and multi-tenant controls.
 - **Confidentiality and Integrity**
-  - Planned: control-plane communication uses TLS for encryption and integrity.
+  - In secure mode, coordinator-agent control-plane communication uses TLS for encryption and integrity.
   - Job payloads can be encrypted or signed as needed (future refinement).
 - **Sandboxing**
   - Current: command jobs run as allowlisted direct processes with bounded output
