@@ -32,3 +32,18 @@ type ExecuteResponse struct {
 	StderrTruncated bool   `json:"stderr_truncated"`
 	LastError       string `json:"last_error"`
 }
+
+type CoordinatorStatusResponse struct {
+	Status               string         `json:"status"`
+	ProtocolVersion      string         `json:"protocol_version"`
+	StorageBackend       string         `json:"storage_backend"`
+	SecureMode           bool           `json:"secure_mode"`
+	NodeAllowlistEnabled bool           `json:"node_allowlist_enabled"`
+	Dispatch             DispatchStatus `json:"dispatch"`
+}
+
+type DispatchStatus struct {
+	Timeout     string `json:"timeout"`
+	MaxAttempts int    `json:"max_attempts"`
+	BaseBackoff string `json:"base_backoff"`
+}
