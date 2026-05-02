@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"planetary-mesh/internal/coordinator"
+	"planetary-mesh/internal/security"
 )
 
 func main() {
@@ -19,6 +21,36 @@ func main() {
 
 	addr := getEnv("COORDINATOR_ADDR", ":8080")
 	databaseURL := os.Getenv("COORDINATOR_DATABASE_URL")
+	tlsFiles := security.TLSFiles{
+		CAFile:   os.Getenv("COORDINATOR_TLS_CA_FILE"),
+		CertFile: os.Getenv("COORDINATOR_TLS_CERT_FILE"),
+		KeyFile:  os.Getenv("COORDINATOR_TLS_KEY_FILE"),
+	}
+	if err := tlsFiles.ValidateComplete("COORDINATOR"); err != nil {
+		logger.Error("invalid coordinator TLS config", "err", err)
+		os.Exit(1)
+	}
+	secureMode := tlsFiles.Configured()
+
+	allowedIdentities, err := security.ParseIdentityAllowlist(os.Getenv("COORDINATOR_ALLOWED_NODE_IDENTITIES"))
+	if err != nil {
+		logger.Error("invalid COORDINATOR_ALLOWED_NODE_IDENTITIES", "err", err)
+		os.Exit(1)
+	}
+	allowedFingerprints, err := security.ParseFingerprintAllowlist(os.Getenv("COORDINATOR_ALLOWED_NODE_FINGERPRINTS"))
+	if err != nil {
+		logger.Error("invalid COORDINATOR_ALLOWED_NODE_FINGERPRINTS", "err", err)
+		os.Exit(1)
+	}
+	allowlistConfigured := len(allowedIdentities) > 0 || len(allowedFingerprints) > 0
+	if secureMode && !allowlistConfigured {
+		logger.Error("secure coordinator mode requires COORDINATOR_ALLOWED_NODE_IDENTITIES or COORDINATOR_ALLOWED_NODE_FINGERPRINTS")
+		os.Exit(1)
+	}
+	if !secureMode && allowlistConfigured {
+		logger.Error("node allowlists require coordinator TLS config")
+		os.Exit(1)
+	}
 
 	var registry coordinator.NodeStore
 	var jobs coordinator.JobStorage
@@ -54,7 +86,35 @@ func main() {
 		logger.Info("in-memory storage initialized")
 	}
 
-	srv := coordinator.NewServerWithConfig(registry, jobs, http.DefaultClient, coordinator.DefaultDispatchConfig(), logger)
+	httpClient := http.DefaultClient
+	var serverTLSConfig *tls.Config
+	if secureMode {
+		clientTLSConfig, err := security.ClientTLSConfig(tlsFiles)
+		if err != nil {
+			logger.Error("load coordinator client TLS config failed", "err", err)
+			os.Exit(1)
+		}
+		serverTLSConfig, err = security.ServerTLSConfig(tlsFiles, true)
+		if err != nil {
+			logger.Error("load coordinator server TLS config failed", "err", err)
+			os.Exit(1)
+		}
+		httpClient = &http.Client{
+			Transport: &http.Transport{TLSClientConfig: clientTLSConfig},
+		}
+	}
+
+	srv := coordinator.NewServerWithSecurity(
+		registry,
+		jobs,
+		httpClient,
+		coordinator.DefaultDispatchConfig(),
+		coordinator.SecurityConfig{
+			AllowedNodeIdentities:   allowedIdentities,
+			AllowedNodeFingerprints: allowedFingerprints,
+		},
+		logger,
+	)
 
 	stopCh := make(chan struct{})
 	coordinator.StartHealthChecker(registry, stopCh)
@@ -63,6 +123,7 @@ func main() {
 		Addr:              addr,
 		Handler:           srv.Mux(),
 		ReadHeaderTimeout: 5 * time.Second,
+		TLSConfig:         serverTLSConfig,
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
@@ -80,9 +141,15 @@ func main() {
 		}
 	}()
 
-	logger.Info("coordinator starting", "addr", addr)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("server error", "err", err)
+	logger.Info("coordinator starting", "addr", addr, "secure", secureMode)
+	var serveErr error
+	if secureMode {
+		serveErr = httpServer.ListenAndServeTLS("", "")
+	} else {
+		serveErr = httpServer.ListenAndServe()
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		logger.Error("server error", "err", serveErr)
 		os.Exit(1)
 	}
 	logger.Info("coordinator stopped")

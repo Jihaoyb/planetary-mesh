@@ -5,8 +5,21 @@ CREATE TABLE IF NOT EXISTS nodes (
   address TEXT NOT NULL,
   last_seen TIMESTAMPTZ NOT NULL,
   state TEXT NOT NULL,
+  certificate_subject TEXT NOT NULL DEFAULT '',
+  certificate_dns_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_ip_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_uris JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_sha256_fingerprint TEXT NOT NULL DEFAULT '',
+  certificate_not_after TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_dns_names JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_ip_addresses JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_uris JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_sha256_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_not_after TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,

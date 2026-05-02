@@ -96,31 +96,60 @@ func (s *PostgresStore) Close() error {
 	return s.db.Close()
 }
 
-func (s *PostgresNodeStore) Register(id, addr string) (Node, error) {
+func (s *PostgresNodeStore) Register(in NodeRegistration) (Node, error) {
 	now := time.Now().UTC()
+	dnsJSON, err := json.Marshal(in.Certificate.DNSNames)
+	if err != nil {
+		return Node{}, err
+	}
+	ipJSON, err := json.Marshal(in.Certificate.IPAddresses)
+	if err != nil {
+		return Node{}, err
+	}
+	uriJSON, err := json.Marshal(in.Certificate.URIs)
+	if err != nil {
+		return Node{}, err
+	}
+
 	row := s.db.QueryRow(`
-INSERT INTO nodes (id, address, last_seen, state, created_at)
-VALUES ($1, $2, $3, $4, $3)
+INSERT INTO nodes (
+  id, address, last_seen, state, created_at,
+  certificate_subject, certificate_dns_names, certificate_ip_addresses,
+  certificate_uris, certificate_sha256_fingerprint, certificate_not_after
+)
+VALUES ($1, $2, $3, $4, $3, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10)
 ON CONFLICT (id) DO UPDATE
 SET address = EXCLUDED.address,
     last_seen = EXCLUDED.last_seen,
-    state = EXCLUDED.state
-RETURNING id, address, last_seen, state
-`, id, addr, now, NodeStateHealthy)
+    state = EXCLUDED.state,
+    certificate_subject = EXCLUDED.certificate_subject,
+    certificate_dns_names = EXCLUDED.certificate_dns_names,
+    certificate_ip_addresses = EXCLUDED.certificate_ip_addresses,
+    certificate_uris = EXCLUDED.certificate_uris,
+    certificate_sha256_fingerprint = EXCLUDED.certificate_sha256_fingerprint,
+    certificate_not_after = EXCLUDED.certificate_not_after
+RETURNING `+nodeColumns,
+		in.ID,
+		in.Address,
+		now,
+		NodeStateHealthy,
+		in.Certificate.Subject,
+		string(dnsJSON),
+		string(ipJSON),
+		string(uriJSON),
+		in.Certificate.SHA256Fingerprint,
+		in.Certificate.NotAfter,
+	)
 
-	var node Node
-	if err := row.Scan(&node.ID, &node.Address, &node.LastSeen, &node.State); err != nil {
+	node, err := scanNode(row)
+	if err != nil {
 		return Node{}, err
 	}
 	return node, nil
 }
 
 func (s *PostgresNodeStore) List() ([]Node, error) {
-	rows, err := s.db.Query(`
-SELECT id, address, last_seen, state
-FROM nodes
-ORDER BY id
-`)
+	rows, err := s.db.Query(`SELECT ` + nodeColumns + ` FROM nodes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +157,8 @@ ORDER BY id
 
 	nodes := []Node{}
 	for rows.Next() {
-		var node Node
-		if err := rows.Scan(&node.ID, &node.Address, &node.LastSeen, &node.State); err != nil {
+		node, err := scanNode(rows)
+		if err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, node)
@@ -183,6 +212,55 @@ GROUP BY state
 		return NodeStateCounts{}, err
 	}
 	return counts, nil
+}
+
+const nodeColumns = `
+id, address, last_seen, state, certificate_subject, certificate_dns_names,
+certificate_ip_addresses, certificate_uris, certificate_sha256_fingerprint,
+certificate_not_after`
+
+func scanNode(row rowScanner) (Node, error) {
+	var node Node
+	var dnsJSON []byte
+	var ipJSON []byte
+	var uriJSON []byte
+	var notAfter sql.NullTime
+
+	err := row.Scan(
+		&node.ID,
+		&node.Address,
+		&node.LastSeen,
+		&node.State,
+		&node.Certificate.Subject,
+		&dnsJSON,
+		&ipJSON,
+		&uriJSON,
+		&node.Certificate.SHA256Fingerprint,
+		&notAfter,
+	)
+	if err != nil {
+		return Node{}, err
+	}
+	if len(dnsJSON) > 0 {
+		if err := json.Unmarshal(dnsJSON, &node.Certificate.DNSNames); err != nil {
+			return Node{}, err
+		}
+	}
+	if len(ipJSON) > 0 {
+		if err := json.Unmarshal(ipJSON, &node.Certificate.IPAddresses); err != nil {
+			return Node{}, err
+		}
+	}
+	if len(uriJSON) > 0 {
+		if err := json.Unmarshal(uriJSON, &node.Certificate.URIs); err != nil {
+			return Node{}, err
+		}
+	}
+	if notAfter.Valid {
+		t := notAfter.Time
+		node.Certificate.NotAfter = &t
+	}
+	return node, nil
 }
 
 func (s *PostgresJobStore) Create(in JobCreateInput) (Job, error) {

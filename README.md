@@ -9,12 +9,12 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane and allowlisted command execution working end-to-end on plain HTTP/JSON
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, and opt-in coordinator-agent mTLS working end-to-end
 - **Code**:
-  - Coordinator: node registry with health states, job dispatch to healthy agents, job detail, metrics, and optional Postgres persistence
-  - Agent: auto-registration, periodic heartbeat, and allowlisted direct command execution
+  - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
+  - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
   - CI: gofmt + build + tests on every push
-- **Scope**: LAN-focused prototype with trusted nodes; mTLS and operator CLI are planned but not yet implemented
+- **Scope**: LAN-focused prototype with trusted nodes; operator CLI is planned but not yet implemented
 
 For more details, see:
 
@@ -92,6 +92,7 @@ planetary-mesh/
       0004-in-memory-storage-for-v0.md
       0005-command-execution-v0.md
       0006-postgres-coordinator-persistence.md
+      0007-mtls-trusted-lan-security.md
 
   compose.yaml         # local coordinator + Postgres + agent demo
 
@@ -105,6 +106,7 @@ planetary-mesh/
     coordinator/       # Coordinator HTTP handlers, stores, metrics, tests
     agent/             # Agent HTTP handlers, coordinator client, tests
     protocol/          # Shared protocol constants and wire structs
+    security/          # Shared TLS, certificate identity, and allowlist helpers
 ```
 
 Planned (not yet present): `proto/` for any future gRPC work and `cmd/pmctl`
@@ -177,6 +179,55 @@ curl http://localhost:8081/healthz
 # → ok
 ```
 
+### Secure coordinator-agent mode
+
+Plain HTTP remains the default for local development. To enable mTLS between the
+coordinator and agents, manually provision a CA plus coordinator and agent
+certificates, then start both processes with TLS file paths.
+
+Coordinator:
+
+```bash
+COORDINATOR_TLS_CA_FILE=./certs/ca.pem \
+COORDINATOR_TLS_CERT_FILE=./certs/coordinator.pem \
+COORDINATOR_TLS_KEY_FILE=./certs/coordinator-key.pem \
+COORDINATOR_ALLOWED_NODE_IDENTITIES='agent-1=dns:agent-1.local' \
+go run ./cmd/coordinator
+```
+
+Agent:
+
+```bash
+COORDINATOR_URL=https://localhost:8080 \
+NODE_ID=agent-1 \
+AGENT_TLS_CA_FILE=./certs/ca.pem \
+AGENT_TLS_CERT_FILE=./certs/agent-1.pem \
+AGENT_TLS_KEY_FILE=./certs/agent-1-key.pem \
+AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+go run ./cmd/agent
+```
+
+Allowed node identities use `node-id=identity` entries, where identity can be
+`dns:name`, `ip:addr`, `uri:value`, `cn:name`, or `subject:value`. Fingerprint
+allowlists use SHA-256 certificate fingerprints:
+
+```bash
+COORDINATOR_ALLOWED_NODE_FINGERPRINTS='agent-1=<sha256-hex-fingerprint>'
+```
+
+Secure `curl` requests to the coordinator need the CA and a client certificate:
+
+```bash
+curl --cacert ./certs/ca.pem \
+  --cert ./certs/operator.pem \
+  --key ./certs/operator-key.pem \
+  https://localhost:8080/nodes \
+  -H 'X-Planetary-Protocol-Version: 1'
+```
+
+Certificate generation, distribution, enrollment, and rotation remain manual in
+v0.
+
 ---
 
 ## Submitting a Job
@@ -231,9 +282,7 @@ Expected output includes `"status": "COMPLETED"` and captured `stdout`.
 
 The current roadmap is:
 
-1. **Milestone 4: Trusted LAN Security**
-   - Add mTLS and node allowlisting
-2. **Milestone 5: Operator CLI**
+1. **Milestone 5: Operator CLI**
    - Add a thin `pmctl` client for submitting and inspecting jobs
 
 The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md).

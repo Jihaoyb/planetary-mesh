@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"planetary-mesh/internal/protocol"
+	"planetary-mesh/internal/security"
 )
 
 // DispatchConfig controls how dispatchJob talks to an agent.
@@ -21,6 +23,15 @@ type DispatchConfig struct {
 	MaxAttempts int
 	// BaseBackoff is the initial backoff between retries; doubles each attempt.
 	BaseBackoff time.Duration
+}
+
+type SecurityConfig struct {
+	AllowedNodeIdentities   map[string][]string
+	AllowedNodeFingerprints map[string][]string
+}
+
+func (c SecurityConfig) Enabled() bool {
+	return len(c.AllowedNodeIdentities) > 0 || len(c.AllowedNodeFingerprints) > 0
 }
 
 // DefaultDispatchConfig returns sensible defaults for v0.
@@ -39,6 +50,7 @@ type Server struct {
 	httpClient *http.Client
 	metrics    *Metrics
 	dispatch   DispatchConfig
+	security   SecurityConfig
 	logger     *slog.Logger
 }
 
@@ -57,6 +69,17 @@ func NewServerWithConfig(
 	dispatch DispatchConfig,
 	logger *slog.Logger,
 ) *Server {
+	return NewServerWithSecurity(registry, jobs, httpClient, dispatch, SecurityConfig{}, logger)
+}
+
+func NewServerWithSecurity(
+	registry NodeStore,
+	jobs JobStorage,
+	httpClient *http.Client,
+	dispatch DispatchConfig,
+	securityConfig SecurityConfig,
+	logger *slog.Logger,
+) *Server {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -69,6 +92,7 @@ func NewServerWithConfig(
 		httpClient: httpClient,
 		metrics:    NewMetrics(),
 		dispatch:   dispatch,
+		security:   securityConfig,
 		logger:     logger.With("component", "coordinator"),
 	}
 }
@@ -142,7 +166,26 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	node, err := s.registry.Register(req.ID, req.Address)
+	certificate := security.CertificateMetadata{}
+	if s.security.Enabled() {
+		peer := peerCertificate(r)
+		if peer == nil {
+			http.Error(w, "client certificate is required", http.StatusForbidden)
+			return
+		}
+		if !security.AuthorizeNode(req.ID, peer, s.security.AllowedNodeIdentities, s.security.AllowedNodeFingerprints) {
+			s.logger.Warn("node registration rejected", "node_id", req.ID, "fingerprint", security.Fingerprint(peer))
+			http.Error(w, "node is not allowlisted", http.StatusForbidden)
+			return
+		}
+		certificate = security.FromCertificate(peer)
+	}
+
+	node, err := s.registry.Register(NodeRegistration{
+		ID:          req.ID,
+		Address:     req.Address,
+		Certificate: certificate,
+	})
 	if err != nil {
 		s.logger.Error("register node failed", "node_id", req.ID, "err", err)
 		http.Error(w, "register node failed", http.StatusInternalServerError)
@@ -155,6 +198,19 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(node); err != nil {
 		s.logger.Warn("encode register response failed", "err", err)
 	}
+}
+
+func peerCertificate(r *http.Request) *x509.Certificate {
+	if r.TLS == nil {
+		return nil
+	}
+	if len(r.TLS.VerifiedChains) > 0 && len(r.TLS.VerifiedChains[0]) > 0 {
+		return r.TLS.VerifiedChains[0][0]
+	}
+	if len(r.TLS.PeerCertificates) > 0 {
+		return r.TLS.PeerCertificates[0]
+	}
+	return nil
 }
 
 // handleListNodes handles GET /nodes and returns all registered nodes.
@@ -354,7 +410,7 @@ func (s *Server) dispatchJob(jobID string) {
 		return
 	}
 
-	agentURL := buildAgentBaseURL(target.Address) + "/execute"
+	agentURL := buildAgentBaseURL(target.Address, s.security.Enabled()) + "/execute"
 	logger := s.logger.With("job_id", jobID, "node_id", target.ID, "agent_url", agentURL)
 
 	maxAttempts := s.dispatch.MaxAttempts
@@ -466,7 +522,7 @@ func (s *Server) failJob(jobID, nodeID string, result JobResult) {
 }
 
 // buildAgentBaseURL converts a node's Address into a usable base URL.
-func buildAgentBaseURL(addr string) string {
+func buildAgentBaseURL(addr string, secure bool) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return ""
@@ -474,8 +530,12 @@ func buildAgentBaseURL(addr string) string {
 	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
 		return addr
 	}
-	if strings.HasPrefix(addr, ":") {
-		return "http://localhost" + addr
+	scheme := "http"
+	if secure {
+		scheme = "https"
 	}
-	return "http://" + addr
+	if strings.HasPrefix(addr, ":") {
+		return scheme + "://localhost" + addr
+	}
+	return scheme + "://" + addr
 }

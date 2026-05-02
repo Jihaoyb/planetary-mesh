@@ -1,21 +1,23 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after PR #7
-(`feature/milestone-2-command-execution`) landed on `main`.
+This document is the canonical roadmap for Planetary Mesh after Milestone 4
+trusted LAN security.
 
 ## Current Stage
 
-- Baseline: `main` at `36ebad6`
-- Stage: command-capable control-plane prototype with durable coordinator state in progress
+- Baseline: `main` after PR #8 (`6eb22f6`) plus the Milestone 4 security branch
+- Stage: command-capable control-plane prototype with durable coordinator state and opt-in coordinator-agent mTLS
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
   - HTTP/JSON control plane with protocol versioning, job detail, and metrics
   - allowlisted direct command execution with bounded stdout/stderr capture
+  - optional Postgres persistence for nodes and jobs
+  - optional mTLS between coordinator and agents with node allowlisting
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 and 2 are complete. The current implementation milestone is durable
-coordinator state with Postgres.
+Milestones 1 through 4 are complete. The remaining v0 implementation milestone
+is the operator CLI.
 
 ## Milestone 2: Real Command Execution
 
@@ -63,7 +65,7 @@ Implementation changes:
 - On startup, any persisted `RUNNING` jobs are marked `FAILED` with a
   restart-specific error
 
-Status: in progress for the current implementation PR
+Status: complete
 
 Known v0 limitation:
 
@@ -75,13 +77,24 @@ Known v0 limitation:
 
 Goal: secure coordinator-agent communication and node admission.
 
-Planned changes:
+Implemented changes:
 
 - Add mTLS between coordinator and agents
 - Add CA/cert/key/allowlist configuration
 - Enforce node allowlisting during registration
 - Extend node inspection with certificate identity metadata
 - Keep manual certificate distribution for v0
+
+Status: complete
+
+Acceptance criteria:
+
+- Coordinator-agent registration and dispatch can run over HTTPS with mutual
+  certificate authentication
+- Unauthorized nodes are rejected during registration
+- Node inspection includes operator-facing certificate metadata
+- Handshake success/failure and secured dispatch are test-covered without
+  requiring external services
 
 ## Milestone 5: Operator CLI
 

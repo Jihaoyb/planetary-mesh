@@ -20,6 +20,13 @@ type registerPayload struct {
 
 // RegisterWithCoordinator sends a POST /register to the coordinator.
 func RegisterWithCoordinator(coordBaseURL, nodeID, addr string) error {
+	return RegisterWithCoordinatorClient(http.DefaultClient, coordBaseURL, nodeID, addr)
+}
+
+func RegisterWithCoordinatorClient(client *http.Client, coordBaseURL, nodeID, addr string) error {
+	if client == nil {
+		client = http.DefaultClient
+	}
 	payload := registerPayload{
 		ID:      nodeID,
 		Address: addr,
@@ -40,7 +47,7 @@ func RegisterWithCoordinator(coordBaseURL, nodeID, addr string) error {
 	req.Header.Set("Content-Type", "application/json")
 	protocol.SetVersionHeader(req.Header)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post to coordinator: %w", err)
 	}
@@ -56,6 +63,13 @@ func RegisterWithCoordinator(coordBaseURL, nodeID, addr string) error {
 // StartHeartbeatLoop periodically calls RegisterWithCoordinator to act as a heartbeat.
 // It stops when stopCh is closed.
 func StartHeartbeatLoop(coordBaseURL, nodeID, addr string, stopCh <-chan struct{}) {
+	StartHeartbeatLoopWithClient(http.DefaultClient, coordBaseURL, nodeID, addr, stopCh)
+}
+
+func StartHeartbeatLoopWithClient(client *http.Client, coordBaseURL, nodeID, addr string, stopCh <-chan struct{}) {
+	if client == nil {
+		client = http.DefaultClient
+	}
 	interval := 10 * time.Second
 
 	ticker := time.NewTicker(interval)
@@ -64,7 +78,7 @@ func StartHeartbeatLoop(coordBaseURL, nodeID, addr string, stopCh <-chan struct{
 		for {
 			select {
 			case <-ticker.C:
-				if err := RegisterWithCoordinator(coordBaseURL, nodeID, addr); err != nil {
+				if err := RegisterWithCoordinatorClient(client, coordBaseURL, nodeID, addr); err != nil {
 					slog.Warn("heartbeat failed", "err", err)
 				} else {
 					slog.Debug("heartbeat ok")
