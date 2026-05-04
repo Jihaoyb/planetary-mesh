@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -20,59 +19,24 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	addr := getEnv("AGENT_ADDR", ":8081")
-	tlsFiles := security.TLSFiles{
-		CAFile:   os.Getenv("AGENT_TLS_CA_FILE"),
-		CertFile: os.Getenv("AGENT_TLS_CERT_FILE"),
-		KeyFile:  os.Getenv("AGENT_TLS_KEY_FILE"),
-	}
-	if err := tlsFiles.ValidateComplete("AGENT"); err != nil {
-		logger.Error("invalid agent TLS config", "err", err)
-		os.Exit(1)
-	}
-	secureMode := tlsFiles.Configured()
-
-	defaultCoordURL := "http://localhost:8080"
-	if secureMode {
-		defaultCoordURL = "https://localhost:8080"
-	}
-	coordURL := getEnv("COORDINATOR_URL", defaultCoordURL)
-	if secureMode && !strings.HasPrefix(coordURL, "https://") {
-		logger.Error("secure agent mode requires COORDINATOR_URL to use https")
-		os.Exit(1)
-	}
-	advertiseAddr := getEnv("AGENT_ADVERTISE_ADDR", addr)
-	if _, ok := os.LookupEnv("AGENT_ADVERTISE_ADDR"); secureMode && !ok {
-		advertiseAddr = security.HostPortToURL("https", addr)
-	}
-	nodeID := getEnv("NODE_ID", agent.DefaultNodeID())
-	execTimeout := getEnv("AGENT_EXEC_TIMEOUT", agent.DefaultExecutionTimeout.String())
-	allowlistRaw := getEnv("AGENT_COMMAND_ALLOWLIST", agent.DefaultAllowlist)
-
-	timeout, err := time.ParseDuration(execTimeout)
+	cfg, err := loadAgentConfig(os.Args[1:])
 	if err != nil {
-		logger.Error("invalid AGENT_EXEC_TIMEOUT", "value", execTimeout, "err", err)
+		logger.Error("invalid agent config", "err", err)
 		os.Exit(1)
 	}
-	allowlist, err := agent.ParseAllowlist(allowlistRaw)
-	if err != nil {
-		logger.Error("invalid AGENT_COMMAND_ALLOWLIST", "value", allowlistRaw, "err", err)
-		os.Exit(1)
-	}
-	cfg := agent.ExecutorConfig{
-		Allowlist: allowlist,
-		Timeout:   timeout,
+	if cfg.ConfigFile != "" {
+		logger.Info("agent config loaded", "path", cfg.ConfigFile)
 	}
 
 	httpClient := http.DefaultClient
 	var serverTLSConfig *tls.Config
-	if secureMode {
-		clientTLSConfig, err := security.ClientTLSConfig(tlsFiles)
+	if cfg.SecureMode {
+		clientTLSConfig, err := security.ClientTLSConfig(cfg.TLSFiles)
 		if err != nil {
 			logger.Error("load agent client TLS config failed", "err", err)
 			os.Exit(1)
 		}
-		serverTLSConfig, err = security.ServerTLSConfig(tlsFiles, true)
+		serverTLSConfig, err = security.ServerTLSConfig(cfg.TLSFiles, true)
 		if err != nil {
 			logger.Error("load agent server TLS config failed", "err", err)
 			os.Exit(1)
@@ -82,18 +46,18 @@ func main() {
 		}
 	}
 
-	if err := agent.RegisterWithCoordinatorClient(httpClient, coordURL, nodeID, advertiseAddr); err != nil {
+	if err := agent.RegisterWithCoordinatorClient(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr); err != nil {
 		logger.Warn("initial registration failed", "err", err)
 	} else {
-		logger.Info("registered with coordinator", "node_id", nodeID)
+		logger.Info("registered with coordinator", "node_id", cfg.NodeID)
 	}
 
 	stopCh := make(chan struct{})
-	agent.StartHeartbeatLoopWithClient(httpClient, coordURL, nodeID, advertiseAddr, stopCh)
+	agent.StartHeartbeatLoopWithClient(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr, stopCh)
 
 	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           agent.MuxWithConfig(cfg),
+		Addr:              cfg.Addr,
+		Handler:           agent.MuxWithConfig(cfg.Executor),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         serverTLSConfig,
 	}
@@ -113,9 +77,9 @@ func main() {
 		}
 	}()
 
-	logger.Info("agent starting", "addr", addr, "advertise_addr", advertiseAddr, "secure", secureMode)
+	logger.Info("agent starting", "addr", cfg.Addr, "advertise_addr", cfg.AdvertiseAddr, "secure", cfg.SecureMode)
 	var serveErr error
-	if secureMode {
+	if cfg.SecureMode {
 		serveErr = httpServer.ListenAndServeTLS("", "")
 	} else {
 		serveErr = httpServer.ListenAndServe()
@@ -125,11 +89,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("agent stopped")
-}
-
-func getEnv(key, def string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return def
 }

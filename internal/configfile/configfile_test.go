@@ -3,6 +3,7 @@ package configfile
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,5 +72,45 @@ func TestLoadReturnsMissingFileError(t *testing.T) {
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected os.ErrNotExist, got %v", err)
+	}
+}
+
+func TestResolvePathPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	defaultPath := filepath.Join(dir, "default.env")
+	if err := os.WriteFile(defaultPath, []byte("KEY=value\n"), 0o600); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	path, err := ResolvePath("flag.env", "env.env", defaultPath)
+	if err != nil {
+		t.Fatalf("ResolvePath returned error: %v", err)
+	}
+	if path != "flag.env" {
+		t.Fatalf("expected flag path, got %q", path)
+	}
+
+	path, err = ResolvePath("", "env.env", defaultPath)
+	if err != nil {
+		t.Fatalf("ResolvePath returned error: %v", err)
+	}
+	if path != "env.env" {
+		t.Fatalf("expected env path, got %q", path)
+	}
+
+	path, err = ResolvePath("", "", defaultPath)
+	if err != nil {
+		t.Fatalf("ResolvePath returned error: %v", err)
+	}
+	if path != defaultPath {
+		t.Fatalf("expected default path, got %q", path)
+	}
+
+	path, err = ResolvePath("", "", filepath.Join(dir, "missing.env"))
+	if err != nil {
+		t.Fatalf("ResolvePath returned error: %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected no path for missing default, got %q", path)
 	}
 }

@@ -19,37 +19,13 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	addr := getEnv("COORDINATOR_ADDR", ":8080")
-	databaseURL := os.Getenv("COORDINATOR_DATABASE_URL")
-	tlsFiles := security.TLSFiles{
-		CAFile:   os.Getenv("COORDINATOR_TLS_CA_FILE"),
-		CertFile: os.Getenv("COORDINATOR_TLS_CERT_FILE"),
-		KeyFile:  os.Getenv("COORDINATOR_TLS_KEY_FILE"),
-	}
-	if err := tlsFiles.ValidateComplete("COORDINATOR"); err != nil {
-		logger.Error("invalid coordinator TLS config", "err", err)
-		os.Exit(1)
-	}
-	secureMode := tlsFiles.Configured()
-
-	allowedIdentities, err := security.ParseIdentityAllowlist(os.Getenv("COORDINATOR_ALLOWED_NODE_IDENTITIES"))
+	cfg, err := loadCoordinatorConfig(os.Args[1:])
 	if err != nil {
-		logger.Error("invalid COORDINATOR_ALLOWED_NODE_IDENTITIES", "err", err)
+		logger.Error("invalid coordinator config", "err", err)
 		os.Exit(1)
 	}
-	allowedFingerprints, err := security.ParseFingerprintAllowlist(os.Getenv("COORDINATOR_ALLOWED_NODE_FINGERPRINTS"))
-	if err != nil {
-		logger.Error("invalid COORDINATOR_ALLOWED_NODE_FINGERPRINTS", "err", err)
-		os.Exit(1)
-	}
-	allowlistConfigured := len(allowedIdentities) > 0 || len(allowedFingerprints) > 0
-	if secureMode && !allowlistConfigured {
-		logger.Error("secure coordinator mode requires COORDINATOR_ALLOWED_NODE_IDENTITIES or COORDINATOR_ALLOWED_NODE_FINGERPRINTS")
-		os.Exit(1)
-	}
-	if !secureMode && allowlistConfigured {
-		logger.Error("node allowlists require coordinator TLS config")
-		os.Exit(1)
+	if cfg.ConfigFile != "" {
+		logger.Info("coordinator config loaded", "path", cfg.ConfigFile)
 	}
 
 	var registry coordinator.NodeStore
@@ -57,11 +33,11 @@ func main() {
 	var postgresStore *coordinator.PostgresStore
 	storageBackend := "in_memory"
 
-	if databaseURL != "" {
+	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		store, err := coordinator.OpenPostgresStoreWithRetry(ctx, databaseURL)
+		store, err := coordinator.OpenPostgresStoreWithRetry(ctx, cfg.DatabaseURL)
 		if err != nil {
 			logger.Error("postgres initialization failed", "err", err)
 			os.Exit(1)
@@ -90,13 +66,13 @@ func main() {
 
 	httpClient := http.DefaultClient
 	var serverTLSConfig *tls.Config
-	if secureMode {
-		clientTLSConfig, err := security.ClientTLSConfig(tlsFiles)
+	if cfg.SecureMode {
+		clientTLSConfig, err := security.ClientTLSConfig(cfg.TLSFiles)
 		if err != nil {
 			logger.Error("load coordinator client TLS config failed", "err", err)
 			os.Exit(1)
 		}
-		serverTLSConfig, err = security.ServerTLSConfig(tlsFiles, true)
+		serverTLSConfig, err = security.ServerTLSConfig(cfg.TLSFiles, true)
 		if err != nil {
 			logger.Error("load coordinator server TLS config failed", "err", err)
 			os.Exit(1)
@@ -112,12 +88,12 @@ func main() {
 		httpClient,
 		coordinator.DefaultDispatchConfig(),
 		coordinator.SecurityConfig{
-			AllowedNodeIdentities:   allowedIdentities,
-			AllowedNodeFingerprints: allowedFingerprints,
+			AllowedNodeIdentities:   cfg.AllowedNodeIdentities,
+			AllowedNodeFingerprints: cfg.AllowedNodeFingerprints,
 		},
 		coordinator.RuntimeConfig{
 			StorageBackend: storageBackend,
-			SecureMode:     secureMode,
+			SecureMode:     cfg.SecureMode,
 		},
 		logger,
 	)
@@ -126,7 +102,7 @@ func main() {
 	coordinator.StartHealthChecker(registry, stopCh)
 
 	httpServer := &http.Server{
-		Addr:              addr,
+		Addr:              cfg.Addr,
 		Handler:           srv.Mux(),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         serverTLSConfig,
@@ -147,9 +123,9 @@ func main() {
 		}
 	}()
 
-	logger.Info("coordinator starting", "addr", addr, "secure", secureMode)
+	logger.Info("coordinator starting", "addr", cfg.Addr, "secure", cfg.SecureMode)
 	var serveErr error
-	if secureMode {
+	if cfg.SecureMode {
 		serveErr = httpServer.ListenAndServeTLS("", "")
 	} else {
 		serveErr = httpServer.ListenAndServe()
@@ -159,11 +135,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("coordinator stopped")
-}
-
-func getEnv(key, def string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return def
 }

@@ -2,6 +2,7 @@ package configfile
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,25 @@ func Load(path string) (map[string]string, error) {
 	defer file.Close()
 
 	return Parse(path, file)
+}
+
+// ResolvePath chooses the config file path to load.
+func ResolvePath(flagPath, envPath, defaultPath string) (string, error) {
+	if strings.TrimSpace(flagPath) != "" {
+		return flagPath, nil
+	}
+	if strings.TrimSpace(envPath) != "" {
+		return envPath, nil
+	}
+	if strings.TrimSpace(defaultPath) == "" {
+		return "", nil
+	}
+	if _, err := os.Stat(defaultPath); err == nil {
+		return defaultPath, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	return "", nil
 }
 
 // Parse reads env-style KEY=value settings from r.
