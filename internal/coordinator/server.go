@@ -34,6 +34,11 @@ func (c SecurityConfig) Enabled() bool {
 	return len(c.AllowedNodeIdentities) > 0 || len(c.AllowedNodeFingerprints) > 0
 }
 
+type RuntimeConfig struct {
+	StorageBackend string
+	SecureMode     bool
+}
+
 // DefaultDispatchConfig returns sensible defaults for v0.
 func DefaultDispatchConfig() DispatchConfig {
 	return DispatchConfig{
@@ -51,6 +56,7 @@ type Server struct {
 	metrics    *Metrics
 	dispatch   DispatchConfig
 	security   SecurityConfig
+	runtime    RuntimeConfig
 	logger     *slog.Logger
 }
 
@@ -80,11 +86,26 @@ func NewServerWithSecurity(
 	securityConfig SecurityConfig,
 	logger *slog.Logger,
 ) *Server {
+	return NewServerWithRuntime(registry, jobs, httpClient, dispatch, securityConfig, RuntimeConfig{}, logger)
+}
+
+func NewServerWithRuntime(
+	registry NodeStore,
+	jobs JobStorage,
+	httpClient *http.Client,
+	dispatch DispatchConfig,
+	securityConfig SecurityConfig,
+	runtimeConfig RuntimeConfig,
+	logger *slog.Logger,
+) *Server {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if runtimeConfig.StorageBackend == "" {
+		runtimeConfig.StorageBackend = "in_memory"
 	}
 	return &Server{
 		registry:   registry,
@@ -93,6 +114,7 @@ func NewServerWithSecurity(
 		metrics:    NewMetrics(),
 		dispatch:   dispatch,
 		security:   securityConfig,
+		runtime:    runtimeConfig,
 		logger:     logger.With("component", "coordinator"),
 	}
 }
@@ -109,6 +131,7 @@ func (s *Server) Mux() *http.ServeMux {
 	mux.HandleFunc("/jobs", s.handleJobs)
 	mux.HandleFunc("/jobs/", s.handleJobByID)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/status", s.handleStatus)
 	return mux
 }
 
@@ -298,6 +321,35 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	s.metrics.WriteProm(w, s.registry)
+}
+
+// handleStatus serves non-secret coordinator runtime status for operators.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireProtocolVersion(w, r) {
+		return
+	}
+
+	resp := protocol.CoordinatorStatusResponse{
+		Status:               "ok",
+		ProtocolVersion:      protocol.Version,
+		StorageBackend:       s.runtime.StorageBackend,
+		SecureMode:           s.runtime.SecureMode,
+		NodeAllowlistEnabled: s.security.Enabled(),
+		Dispatch: protocol.DispatchStatus{
+			Timeout:     s.dispatch.Timeout.String(),
+			MaxAttempts: s.dispatch.MaxAttempts,
+			BaseBackoff: s.dispatch.BaseBackoff.String(),
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Warn("encode status response failed", "err", err)
+	}
 }
 
 // handleCreateJob implements POST /jobs.

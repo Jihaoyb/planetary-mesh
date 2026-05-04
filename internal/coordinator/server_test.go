@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"planetary-mesh/internal/protocol"
 )
 
 // TestHealthHandler verifies that /healthz returns 200 and body "ok".
@@ -37,6 +39,50 @@ func TestProtocolVersionRequired(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.handleListNodes(w, req)
 
+	if w.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleStatus(t *testing.T) {
+	srv := NewServerWithRuntime(
+		NewNodeRegistry(),
+		NewJobStore(),
+		nil,
+		DispatchConfig{Timeout: 2, MaxAttempts: 2, BaseBackoff: 1},
+		SecurityConfig{AllowedNodeIdentities: map[string][]string{"agent-1": {"dns:agent.local"}}},
+		RuntimeConfig{StorageBackend: "postgres", SecureMode: true},
+		nil,
+	)
+
+	req := newVersionedRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	srv.handleStatus(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
+	}
+	var got protocol.CoordinatorStatusResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if got.Status != "ok" || got.ProtocolVersion != protocol.Version {
+		t.Fatalf("unexpected status response: %+v", got)
+	}
+	if got.StorageBackend != "postgres" || !got.SecureMode || !got.NodeAllowlistEnabled {
+		t.Fatalf("unexpected runtime metadata: %+v", got)
+	}
+	if got.Dispatch.MaxAttempts != 2 {
+		t.Fatalf("unexpected dispatch metadata: %+v", got.Dispatch)
+	}
+}
+
+func TestStatusRequiresProtocolVersion(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStatus(w, req)
 	if w.Result().StatusCode != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", w.Result().StatusCode)
 	}

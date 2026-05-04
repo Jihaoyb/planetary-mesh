@@ -55,6 +55,7 @@ func main() {
 	var registry coordinator.NodeStore
 	var jobs coordinator.JobStorage
 	var postgresStore *coordinator.PostgresStore
+	storageBackend := "in_memory"
 
 	if databaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -74,6 +75,7 @@ func main() {
 
 		registry = store.Nodes()
 		jobs = store.Jobs()
+		storageBackend = "postgres"
 		recovered, err := jobs.FailRunningJobs(coordinator.RestartRecoveryError)
 		if err != nil {
 			logger.Error("recover running jobs failed", "err", err)
@@ -104,7 +106,7 @@ func main() {
 		}
 	}
 
-	srv := coordinator.NewServerWithSecurity(
+	srv := coordinator.NewServerWithRuntime(
 		registry,
 		jobs,
 		httpClient,
@@ -112,6 +114,10 @@ func main() {
 		coordinator.SecurityConfig{
 			AllowedNodeIdentities:   allowedIdentities,
 			AllowedNodeFingerprints: allowedFingerprints,
+		},
+		coordinator.RuntimeConfig{
+			StorageBackend: storageBackend,
+			SecureMode:     secureMode,
 		},
 		logger,
 	)

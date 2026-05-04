@@ -9,12 +9,13 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, and opt-in coordinator-agent mTLS working end-to-end
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, and operator CLI working end-to-end
 - **Code**:
   - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
   - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
+  - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
   - CI: gofmt + build + tests on every push
-- **Scope**: LAN-focused prototype with trusted nodes; operator CLI is planned but not yet implemented
+- **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
 
 For more details, see:
 
@@ -93,6 +94,7 @@ planetary-mesh/
       0005-command-execution-v0.md
       0006-postgres-coordinator-persistence.md
       0007-mtls-trusted-lan-security.md
+      0008-operator-cli.md
 
   compose.yaml         # local coordinator + Postgres + agent demo
 
@@ -101,16 +103,17 @@ planetary-mesh/
       main.go          # Thin entrypoint wiring coordinator runtime
     agent/             # Agent daemon binary (Go, package main)
       main.go          # Thin entrypoint wiring agent runtime
+    pmctl/             # Operator CLI binary (Go, package main)
 
   internal/
     coordinator/       # Coordinator HTTP handlers, stores, metrics, tests
     agent/             # Agent HTTP handlers, coordinator client, tests
+    pmctl/             # CLI command parsing, output, and coordinator client
     protocol/          # Shared protocol constants and wire structs
     security/          # Shared TLS, certificate identity, and allowlist helpers
 ```
 
-Planned (not yet present): `proto/` for any future gRPC work and `cmd/pmctl`
-for the operator CLI.
+Planned (not yet present): `proto/` for any future gRPC work.
 
 ---
 
@@ -230,6 +233,49 @@ v0.
 
 ---
 
+## Operator CLI
+
+`pmctl` is a thin client over the coordinator HTTP/JSON API. It defaults to the
+local plain-HTTP coordinator:
+
+```bash
+go run ./cmd/pmctl status
+go run ./cmd/pmctl nodes list
+go run ./cmd/pmctl jobs list
+go run ./cmd/pmctl submit command echo hello mesh
+go run ./cmd/pmctl jobs inspect job-1
+```
+
+Use `--json` for automation-friendly output:
+
+```bash
+go run ./cmd/pmctl --json jobs inspect job-1
+```
+
+Point at another coordinator with a flag or environment variable:
+
+```bash
+go run ./cmd/pmctl --coordinator-url http://localhost:9090 status
+
+PMCTL_COORDINATOR_URL=http://localhost:9090 go run ./cmd/pmctl nodes list
+```
+
+For a secure coordinator, provide the CA and operator client certificate:
+
+```bash
+go run ./cmd/pmctl \
+  --coordinator-url https://localhost:8080 \
+  --ca-file ./certs/ca.pem \
+  --cert-file ./certs/operator.pem \
+  --key-file ./certs/operator-key.pem \
+  nodes list
+```
+
+Equivalent environment variables are `PMCTL_TLS_CA_FILE`,
+`PMCTL_TLS_CERT_FILE`, and `PMCTL_TLS_KEY_FILE`.
+
+---
+
 ## Submitting a Job
 
 Once a coordinator and at least one agent are running:
@@ -280,9 +326,4 @@ Expected output includes `"status": "COMPLETED"` and captured `stdout`.
 
 ## Next Steps
 
-The current roadmap is:
-
-1. **Milestone 5: Operator CLI**
-   - Add a thin `pmctl` client for submitting and inspecting jobs
-
-The detailed milestone plan lives in [docs/roadmap.md](docs/roadmap.md).
+The v0 milestone plan lives in [docs/roadmap.md](docs/roadmap.md).
