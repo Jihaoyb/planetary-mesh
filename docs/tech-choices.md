@@ -179,11 +179,15 @@ depending on provider-specific APIs.
 ### 5.2 Choice
 
 For v0, we **lean toward Docker + Docker Compose** for local dev and demos.
+Local binaries are also first-class for day-to-day development, with optional
+env-style config files documented in ADR 0009.
 
 **Reasons**
 
 - Good balance of **repeatability** and **simplicity**.
 - Easy to share a demo config (e.g., `docker-compose up` starts a full mesh env).
+- Env-style config files make repeated local coordinator, agent, and `pmctl`
+  runs easy without adding another config dependency.
 - K8s can be considered later if/when the system needs production-grade orchestration.
 
 ---
@@ -211,7 +215,7 @@ For v0, we **lean toward direct process execution** with clear constraints.
 **Reasons**
 
 - Easier to implement and debug for early stages.
-- Good enough to prove the coordinator–agent–dashboard flow.
+- Good enough to prove the coordinator-agent-CLI flow.
 - Container-based execution can be added later once the basic system is stable.
 
 ---
