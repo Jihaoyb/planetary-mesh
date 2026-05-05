@@ -29,7 +29,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 func RunE(ctx context.Context, args []string, stdout io.Writer) error {
-	cfg := ConfigFromEnv()
+	cfg, err := ConfigFromSources(args)
+	if err != nil {
+		return err
+	}
 	jsonOut, remaining, err := parseGlobalFlags(args, &cfg)
 	if err != nil {
 		return err
@@ -49,6 +52,7 @@ func parseGlobalFlags(args []string, cfg *Config) (bool, []string, error) {
 	fs := flag.NewFlagSet("pmctl", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var jsonOut bool
+	fs.StringVar(&cfg.ConfigFile, "config", cfg.ConfigFile, "path to env-style config file")
 	fs.StringVar(&cfg.CoordinatorURL, "coordinator-url", cfg.CoordinatorURL, "coordinator base URL")
 	fs.StringVar(&cfg.TLSFiles.CAFile, "ca-file", cfg.TLSFiles.CAFile, "TLS CA file")
 	fs.StringVar(&cfg.TLSFiles.CertFile, "cert-file", cfg.TLSFiles.CertFile, "TLS client certificate file")
