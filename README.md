@@ -9,11 +9,12 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, and operator CLI working end-to-end
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, and local config files working end-to-end
 - **Code**:
   - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
   - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
   - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
+  - Config: optional env-style local config files for coordinator, agent, and `pmctl`
   - CI: gofmt + build + tests on every push
 - **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
 
@@ -35,7 +36,7 @@ The initial prototype targets a **3–5 node LAN mesh** with:
 - Coordinator-based scheduling and task dispatch.
 - Agent execution in a sandboxed environment.
 - Heartbeats, timeouts, and automatic reassignment on failure.
-- Dashboard with node list, job list, and basic metrics.
+- Operator CLI with node list, job list, job inspection, submission, and status.
 
 ---
 
@@ -56,13 +57,14 @@ Core components:
   - Sends heartbeats and progress updates.
 
 - **Network Layer**
-  - LAN discovery (mDNS) and/or static coordinator address.
-  - All communication over TLS with mutual authentication.
-  - gRPC or similar RPC-style protocol for control messages.
+  - Static coordinator address configuration for v0.
+  - HTTP/JSON control messages with explicit protocol versioning.
+  - Optional TLS with mutual authentication for trusted LAN coordinator-agent traffic.
 
-- **Dashboard / CLI**
-  - Shows nodes, jobs, and metrics.
-  - Provides a simple interface to submit and inspect jobs.
+- **CLI**
+  - Shows nodes, jobs, and coordinator status.
+  - Provides a simple interface to submit and inspect command jobs.
+  - Dashboard work remains future work.
 
 The detailed design is in [docs/architecture.md](docs/architecture.md).
 
@@ -95,6 +97,13 @@ planetary-mesh/
       0006-postgres-coordinator-persistence.md
       0007-mtls-trusted-lan-security.md
       0008-operator-cli.md
+      0009-env-style-local-config-files.md
+
+  config/
+    coordinator.env.example
+    agent-1.env.example
+    agent-2.env.example
+    pmctl.env.example
 
   compose.yaml         # local coordinator + Postgres + agent demo
 
@@ -123,6 +132,30 @@ Planned (not yet present): `proto/` for any future gRPC work.
 
 - Go 1.25+ (check with `go version`)
 
+### Configuration precedence
+
+Coordinator, agent, and `pmctl` still work with environment variables. They can
+also load env-style config files that use the same keys as the environment.
+
+Config precedence is:
+
+1. compiled defaults
+2. config file values
+3. non-empty environment variables
+4. CLI flags, where supported
+
+Each binary accepts `--config <path>`. You can also set a config path with
+`COORDINATOR_CONFIG_FILE`, `AGENT_CONFIG_FILE`, or `PMCTL_CONFIG_FILE`.
+
+If present, these default local files are auto-loaded:
+
+- `config/coordinator.env`
+- `config/agent.env`
+- `config/pmctl.env`
+
+Local `config/*.env` files are ignored by git. The tracked `*.env.example` files
+are safe starting points.
+
 ### Run the coordinator
 
 From the repo root:
@@ -143,6 +176,12 @@ Postgres, set `COORDINATOR_DATABASE_URL`:
 ```bash
 COORDINATOR_DATABASE_URL='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
 go run ./cmd/coordinator
+```
+
+You can also run from a config file:
+
+```bash
+go run ./cmd/coordinator --config config/coordinator.env.example
 ```
 
 Health check:
@@ -174,6 +213,14 @@ AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' go run ./cmd/agent
 
 If the address agents listen on is different from the address the coordinator
 should call, set `AGENT_ADVERTISE_ADDR`.
+
+You can also run from config files. For a local two-agent setup, open separate
+terminals:
+
+```bash
+go run ./cmd/agent --config config/agent-1.env.example
+go run ./cmd/agent --config config/agent-2.env.example
+```
 
 Agent health check:
 
@@ -239,31 +286,38 @@ v0.
 local plain-HTTP coordinator:
 
 ```bash
-go run ./cmd/pmctl status
-go run ./cmd/pmctl nodes list
-go run ./cmd/pmctl jobs list
-go run ./cmd/pmctl submit command echo hello mesh
-go run ./cmd/pmctl jobs inspect job-1
+go install ./cmd/pmctl
+
+pmctl status
+pmctl nodes list
+pmctl jobs list
+pmctl submit command echo hello mesh
+pmctl jobs inspect job-1
 ```
+
+Make sure `$(go env GOPATH)/bin` or your configured `GOBIN` is on `PATH`.
+`go run ./cmd/pmctl ...` still works for development.
 
 Use `--json` for automation-friendly output:
 
 ```bash
-go run ./cmd/pmctl --json jobs inspect job-1
+pmctl --json jobs inspect job-1
 ```
 
-Point at another coordinator with a flag or environment variable:
+Point at another coordinator with a flag, environment variable, or config file:
 
 ```bash
-go run ./cmd/pmctl --coordinator-url http://localhost:9090 status
+pmctl --coordinator-url http://localhost:9090 status
 
-PMCTL_COORDINATOR_URL=http://localhost:9090 go run ./cmd/pmctl nodes list
+PMCTL_COORDINATOR_URL=http://localhost:9090 pmctl nodes list
+
+pmctl --config config/pmctl.env.example status
 ```
 
 For a secure coordinator, provide the CA and operator client certificate:
 
 ```bash
-go run ./cmd/pmctl \
+pmctl \
   --coordinator-url https://localhost:8080 \
   --ca-file ./certs/ca.pem \
   --cert-file ./certs/operator.pem \

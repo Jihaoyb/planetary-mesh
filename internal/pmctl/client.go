@@ -20,6 +20,7 @@ const (
 )
 
 type Config struct {
+	ConfigFile     string
 	CoordinatorURL string
 	TLSFiles       security.TLSFiles
 	Timeout        time.Duration

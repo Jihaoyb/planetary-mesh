@@ -1,12 +1,12 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 5
-operator CLI.
+This document is the canonical roadmap for Planetary Mesh after Milestone 6
+local configuration and install ergonomics.
 
 ## Current Stage
 
-- Baseline: `main` after PR #9 (`905bf5d`)
-- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, and an operator CLI
+- Baseline: `main` after PR #10 (`2a8229c`)
+- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, an operator CLI, and file-based local config
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
@@ -15,9 +15,10 @@ operator CLI.
   - optional Postgres persistence for nodes and jobs
   - optional mTLS between coordinator and agents with node allowlisting
   - `pmctl` for status, node/job listing, job inspection, and command job submission
+  - env-style local config files for coordinator, agents, and `pmctl`
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 through 5 are complete.
+Milestones 1 through 6 are complete.
 
 ## Milestone 2: Real Command Execution
 
@@ -120,6 +121,30 @@ Acceptance criteria:
 - Plain local development works by default
 - Secure coordinator access works with CA/cert/key configuration
 - CLI tests cover command behavior and an in-process coordinator smoke flow
+
+## Milestone 6: Config and Install Ergonomics
+
+Goal: improve local operator ergonomics without changing env-based runtime
+behavior.
+
+Implemented changes:
+
+- Add optional env-style config files for coordinator, agent, and `pmctl`
+- Keep existing environment variables working
+- Add `--config <path>` and per-binary config path env vars
+- Define precedence as defaults, config file, non-empty environment variables,
+  then CLI flags where supported
+- Add tracked config examples for a coordinator, two local agents, and `pmctl`
+- Document `go install ./cmd/pmctl` so operators can run `pmctl` directly
+
+Status: complete
+
+Acceptance criteria:
+
+- Existing env-only coordinator, agent, and `pmctl` runs keep working
+- Local two-agent development can be run from example config files
+- Config parsing, precedence, and runtime wiring are test-covered
+- Default `go test ./...` remains free of external services
 
 ## Later Operational Options
 

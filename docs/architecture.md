@@ -96,8 +96,9 @@ flowchart LR
   - Central control plane for v0.
 - **Agents**
   - Run on participant devices, executing tasks.
-- **Dashboard / CLI**
+- **CLI**
   - Communicates with coordinator’s API.
+  - Dashboard work remains future work.
 
 Today, the merged prototype uses HTTP/JSON for the control plane, as captured in
 ADR 0003. Coordinator-agent traffic can run with mTLS and node allowlisting, as
@@ -113,6 +114,9 @@ The coordinator is the central controller of a mesh.
 
 **Responsibilities**
 
+- **Runtime Configuration**
+  - Load listen address, storage, TLS, and node allowlist settings from
+    defaults, optional env-style config files, and environment variables.
 - **Node Registry**
   - Accept node registration requests.
   - Store node metadata: address, certificate identity, health status, and last heartbeat.
@@ -162,6 +166,10 @@ The agent runs on participant devices and executes tasks.
 
 **Responsibilities**
 
+- **Runtime Configuration**
+  - Load coordinator URL, node id, listen address, advertised address, TLS
+    files, execution timeout, and command allowlist settings from defaults,
+    optional env-style config files, and environment variables.
 - **Registration**
   - Load or obtain its certificate and key.
   - Connect to coordinator using mTLS.
@@ -205,6 +213,9 @@ coordinator’s API. Dashboard work remains future work.
 - **Coordinator Status**
   - Show non-secret runtime status/config such as protocol version, storage
     backend, secure mode, node allowlist state, and dispatch settings.
+- **Local Configuration**
+  - Load coordinator URL and optional operator TLS files from defaults,
+    optional env-style config files, environment variables, and CLI flags.
 
 **Why keep clients thin?**
 
@@ -375,7 +386,8 @@ mutual TLS without changing the JSON wire shape, as documented in ADR 0007.
 Possible approaches:
 
 - **Static configuration**
-  - Agents are configured with the coordinator’s address.
+  - Agents are configured with the coordinator’s address through environment
+    variables or env-style local config files.
   - Simple and predictable for v0.
 - **mDNS-based discovery**
   - Coordinator advertises its presence via mDNS.
