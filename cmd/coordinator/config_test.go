@@ -53,6 +53,25 @@ func TestLoadCoordinatorConfigFromPathEnv(t *testing.T) {
 	}
 }
 
+func TestLoadCoordinatorExampleConfig(t *testing.T) {
+	clearCoordinatorEnv(t)
+	path := filepath.Join("..", "..", "config", "coordinator.env.example")
+
+	cfg := loadCoordinatorConfigClean(t, []string{"--config", path})
+	if cfg.ConfigFile != path {
+		t.Fatalf("expected config file %q, got %q", path, cfg.ConfigFile)
+	}
+	if cfg.Addr != ":8080" {
+		t.Fatalf("expected example addr :8080, got %q", cfg.Addr)
+	}
+	if cfg.DatabaseURL != "" {
+		t.Fatalf("expected example to leave database URL empty, got %q", cfg.DatabaseURL)
+	}
+	if cfg.SecureMode {
+		t.Fatalf("expected example coordinator config to default to plain mode")
+	}
+}
+
 func TestLoadCoordinatorConfigRejectsTLSWithoutAllowlist(t *testing.T) {
 	clearCoordinatorEnv(t)
 	path := writeTempConfig(t, `

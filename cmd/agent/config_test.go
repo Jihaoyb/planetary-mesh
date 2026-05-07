@@ -70,6 +70,57 @@ func TestLoadAgentConfigFromPathEnv(t *testing.T) {
 	}
 }
 
+func TestLoadAgentExampleConfigs(t *testing.T) {
+	cases := []struct {
+		name          string
+		path          string
+		nodeID        string
+		addr          string
+		advertiseAddr string
+	}{
+		{
+			name:          "agent 1",
+			path:          filepath.Join("..", "..", "config", "agent-1.env.example"),
+			nodeID:        "local-agent-1",
+			addr:          ":8081",
+			advertiseAddr: "http://localhost:8081",
+		},
+		{
+			name:          "agent 2",
+			path:          filepath.Join("..", "..", "config", "agent-2.env.example"),
+			nodeID:        "local-agent-2",
+			addr:          ":8082",
+			advertiseAddr: "http://localhost:8082",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearAgentEnv(t)
+
+			cfg := loadAgentConfigClean(t, []string{"--config", tc.path})
+			if cfg.ConfigFile != tc.path {
+				t.Fatalf("expected config file %q, got %q", tc.path, cfg.ConfigFile)
+			}
+			if cfg.NodeID != tc.nodeID {
+				t.Fatalf("expected node id %q, got %q", tc.nodeID, cfg.NodeID)
+			}
+			if cfg.Addr != tc.addr || cfg.AdvertiseAddr != tc.advertiseAddr {
+				t.Fatalf("unexpected address config: %+v", cfg)
+			}
+			if cfg.CoordinatorURL != "http://localhost:8080" {
+				t.Fatalf("expected local coordinator URL, got %q", cfg.CoordinatorURL)
+			}
+			if cfg.Executor.Allowlist["echo"] != "echo" {
+				t.Fatalf("expected echo allowlist entry, got %+v", cfg.Executor.Allowlist)
+			}
+			if cfg.SecureMode {
+				t.Fatalf("expected example agent config to default to plain mode")
+			}
+		})
+	}
+}
+
 func TestLoadAgentConfigSecureDefaultsAdvertiseURL(t *testing.T) {
 	clearAgentEnv(t)
 	path := writeAgentTempConfig(t, `

@@ -161,6 +161,25 @@ func TestConfigFromSourcesUsesConfigPathEnv(t *testing.T) {
 	}
 }
 
+func TestConfigFromSourcesLoadsExampleConfig(t *testing.T) {
+	clearPMCTLEnv(t)
+	path := filepath.Join("..", "..", "config", "pmctl.env.example")
+
+	cfg, err := ConfigFromSources([]string{"--config", path, "status"})
+	if err != nil {
+		t.Fatalf("ConfigFromSources returned error: %v", err)
+	}
+	if cfg.ConfigFile != path {
+		t.Fatalf("expected config file %q, got %q", path, cfg.ConfigFile)
+	}
+	if cfg.CoordinatorURL != "http://localhost:8080" {
+		t.Fatalf("expected local coordinator URL, got %q", cfg.CoordinatorURL)
+	}
+	if cfg.TLSFiles.Configured() {
+		t.Fatalf("expected example pmctl config to default to plain mode")
+	}
+}
+
 func TestConfigFromSourcesFlagOverridesEnvAfterParsing(t *testing.T) {
 	clearPMCTLEnv(t)
 	path := writePMCTLTempConfig(t, `PMCTL_COORDINATOR_URL=http://from-file:8080`)
