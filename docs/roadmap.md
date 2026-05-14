@@ -1,8 +1,7 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 6
-local configuration and install ergonomics, with Milestone 7 focused on local
-smoke and release verification.
+This document is the canonical roadmap for Planetary Mesh after Milestone 7
+local smoke and release verification.
 
 ## Current Stage
 
@@ -20,8 +19,7 @@ smoke and release verification.
   - config-driven local smoke demo for one coordinator, two agents, and `pmctl`
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 through 6 are complete. Milestone 7 is the current local
-verification and release-readiness milestone.
+Milestones 1 through 7 are complete.
 
 ## Milestone 2: Real Command Execution
 
@@ -166,7 +164,7 @@ Implementation changes:
 - Add lightweight tests that keep tracked config examples and demo script syntax
   from drifting
 
-Status: in progress
+Status: complete
 
 Acceptance criteria:
 
