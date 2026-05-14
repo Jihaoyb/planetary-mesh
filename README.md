@@ -9,13 +9,14 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, local config files, and repeatable local smoke workflow working end-to-end
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, local config files, repeatable local smoke workflow, and opt-in durable Postgres verification working end-to-end
 - **Code**:
   - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
   - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
   - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
   - Config: optional env-style local config files for coordinator, agent, and `pmctl`
   - Smoke: config-driven local demo for one coordinator, two agents, and `pmctl`
+  - Ops: opt-in Postgres smoke workflow for durable-state and restart-recovery verification
   - CI: gofmt + build + tests on every push
 - **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
 
@@ -171,6 +172,31 @@ lists nodes/jobs through `pmctl`, and inspects the completed job. It uses
 in-memory coordinator storage and plain HTTP by default.
 
 Logs are written under `/tmp` or `$TMPDIR` and printed at the end of the run.
+
+### Run the Postgres durability smoke demo
+
+For an opt-in durable-state check, run the Postgres-backed smoke workflow with
+Docker Compose available:
+
+```bash
+./examples/postgres_smoke.sh
+```
+
+This starts the Compose stack on isolated high host ports by default, verifies
+`pmctl status` reports Postgres storage, submits a completed command job,
+restarts the coordinator while a job is `RUNNING`, verifies startup recovery
+marks that job `FAILED`, checks `/metrics`, and submits another command after
+restart. It cleans up its Compose project and volume unless
+`KEEP_POSTGRES_SMOKE=1` is set.
+
+To run the opt-in Postgres integration tests against an existing database:
+
+```bash
+POSTGRES_TEST_DSN='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
+go test -tags postgres ./internal/coordinator
+```
+
+The default `go test ./...` remains free of external services.
 
 ### Run the coordinator
 
@@ -390,6 +416,17 @@ go run ./cmd/pmctl jobs inspect job-1
 ```
 
 Expected output includes `Status COMPLETED` and captured `Stdout`.
+
+The default Compose host ports are `5432`, `8080`, `8081`, and `8082`. Override
+them when another local stack is already running:
+
+```bash
+POSTGRES_HOST_PORT=15432 \
+COORDINATOR_HOST_PORT=18080 \
+AGENT1_HOST_PORT=18081 \
+AGENT2_HOST_PORT=18082 \
+docker compose up
+```
 
 ## Next Steps
 

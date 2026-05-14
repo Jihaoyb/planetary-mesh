@@ -1,12 +1,12 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 7
-local smoke and release verification.
+This document is the canonical roadmap for Planetary Mesh after Milestone 8
+Postgres operational readiness.
 
 ## Current Stage
 
-- Baseline: `main` after PR #11 (`f00d762`)
-- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, an operator CLI, file-based local config, and repeatable local smoke workflows
+- Baseline: `main` after PR #12 (`62c849b`)
+- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, an operator CLI, file-based local config, repeatable local smoke workflows, and opt-in durable Postgres verification
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
@@ -17,9 +17,11 @@ local smoke and release verification.
   - `pmctl` for status, node/job listing, job inspection, and command job submission
   - env-style local config files for coordinator, agents, and `pmctl`
   - config-driven local smoke demo for one coordinator, two agents, and `pmctl`
+  - opt-in Postgres smoke workflow for durable-state and restart-recovery verification
+  - startup recovery metric for persisted `RUNNING` jobs failed during coordinator startup
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 through 7 are complete.
+Milestones 1 through 8 are complete.
 
 ## Milestone 2: Real Command Execution
 
@@ -174,6 +176,37 @@ Acceptance criteria:
   storage behavior
 - Existing env var behavior, config precedence, command execution, storage,
   mTLS, and `pmctl` behavior are preserved
+- Default `go test ./...` remains fast and free of external services
+
+## Milestone 8: Postgres Ops Readiness
+
+Goal: make durable coordinator operation easier to verify and reason about
+without changing the v0 control-plane model.
+
+Implemented changes:
+
+- Add opt-in Postgres integration coverage for schema initialization
+  idempotency, job ID continuity across store reopen, and restart recovery
+  preserving terminal jobs
+- Add `examples/postgres_smoke.sh` as the durable-state smoke workflow
+- Keep `examples/demo.sh` as the default in-memory smoke workflow
+- Parameterize Compose host ports while preserving existing defaults
+- Expose `planetary_jobs_recovered_on_startup_total` from `/metrics`
+- Document the split between fast DB-free tests and opt-in durable Postgres
+  verification
+
+Status: complete
+
+Acceptance criteria:
+
+- A Postgres-backed coordinator can be started, inspected through `pmctl`,
+  restarted, and used again after restart
+- A persisted `RUNNING` job is marked `FAILED` on coordinator startup with the
+  restart-specific error
+- Operators can inspect durable smoke failures through captured Compose logs,
+  `/status`, `/metrics`, and `pmctl jobs inspect`
+- Existing env var/config file behavior, command execution, Postgres storage,
+  mTLS, `pmctl`, config precedence, and in-memory smoke behavior are preserved
 - Default `go test ./...` remains fast and free of external services
 
 ## Later Operational Options

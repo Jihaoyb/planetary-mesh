@@ -239,6 +239,12 @@ documented in `tech-choices.md` and ADR 0006:
 In-memory storage remains useful for fast unit tests and simple local runs.
 Task fanout and a separate task table remain future work.
 
+Durable-state operation is verified separately from the default DB-free test
+path. The current opt-in checks cover embedded schema initialization, job ID
+continuity across store reopen, coordinator startup recovery for persisted
+`RUNNING` jobs, and a Compose-backed smoke workflow that proves the coordinator
+can restart and continue accepting command jobs with Postgres storage.
+
 ---
 
 ## 5. Data Model (Logical)
@@ -344,6 +350,11 @@ This section describes core runtime flows. Sequence diagrams can be added later.
    bounded stdout/stderr capture.
 6. Coordinator records the terminal job result as `COMPLETED` or `FAILED`.
 
+On coordinator startup with Postgres storage, any persisted `RUNNING` jobs are
+marked `FAILED` with `coordinator restarted before result was recorded`. This
+is intentionally coordinator-owned recovery; agents do not reconcile completed
+but unrecorded work in v0.
+
 ### 6.4 Failure Handling and Retry
 
 1. If an agent stops sending heartbeats or fails to report results:
@@ -447,6 +458,7 @@ Coordinator and optionally agents expose metrics such as:
 
 - Number of nodes by state.
 - Number of jobs per status (queued, running, completed, failed).
+- Number of persisted running jobs recovered during coordinator startup.
 - Number of dispatch attempts and errors.
 - Average job latency.
 - Scheduler decisions (for example, jobs per node).

@@ -154,6 +154,11 @@ Milestone 3 persists nodes and jobs only; task fanout remains out of scope until
 a later milestone. ADR 0006 records the Postgres persistence decision and
 supersedes the temporary in-memory-only runtime decision in ADR 0004.
 
+Milestone 8 keeps that storage model intact and adds operational verification:
+default tests remain DB-free, while opt-in Postgres integration tests and a
+Compose-backed smoke workflow verify schema initialization, restart recovery,
+and post-restart coordinator usability.
+
 Managed Postgres providers, including Supabase, can be evaluated later for
 hosted database operations and visual inspection. The coordinator should remain
 provider-neutral by accepting a standard Postgres connection string instead of
@@ -188,6 +193,8 @@ env-style config files documented in ADR 0009.
 - Easy to share a demo config (e.g., `docker-compose up` starts a full mesh env).
 - Env-style config files make repeated local coordinator, agent, and `pmctl`
   runs easy without adding another config dependency.
+- The fast local smoke workflow stays in-memory by default, while the opt-in
+  Postgres smoke workflow verifies durable-state behavior and restart recovery.
 - K8s can be considered later if/when the system needs production-grade orchestration.
 
 ---
