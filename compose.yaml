@@ -30,7 +30,7 @@ services:
       postgres:
         condition: service_healthy
 
-  agent:
+  agent-1:
     image: golang:1.25
     working_dir: /workspace
     volumes:
@@ -39,11 +39,28 @@ services:
     environment:
       COORDINATOR_URL: "http://coordinator:8080"
       AGENT_ADDR: ":8081"
-      AGENT_ADVERTISE_ADDR: "http://agent:8081"
+      AGENT_ADVERTISE_ADDR: "http://agent-1:8081"
       NODE_ID: "compose-agent-1"
       AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
     ports:
       - "8081:8081"
+    depends_on:
+      - coordinator
+
+  agent-2:
+    image: golang:1.25
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: go run ./cmd/agent
+    environment:
+      COORDINATOR_URL: "http://coordinator:8080"
+      AGENT_ADDR: ":8082"
+      AGENT_ADVERTISE_ADDR: "http://agent-2:8082"
+      NODE_ID: "compose-agent-2"
+      AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
+    ports:
+      - "8082:8082"
     depends_on:
       - coordinator
 

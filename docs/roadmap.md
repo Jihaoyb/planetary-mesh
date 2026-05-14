@@ -1,12 +1,12 @@
 # Planetary Mesh Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 6
-local configuration and install ergonomics.
+This document is the canonical roadmap for Planetary Mesh after Milestone 7
+local smoke and release verification.
 
 ## Current Stage
 
-- Baseline: `main` after PR #10 (`2a8229c`)
-- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, an operator CLI, and file-based local config
+- Baseline: `main` after PR #11 (`f00d762`)
+- Stage: command-capable control-plane prototype with durable coordinator state, opt-in coordinator-agent mTLS, an operator CLI, file-based local config, and repeatable local smoke workflows
 - Current capabilities:
   - thin `cmd/agent` and `cmd/coordinator` entrypoints
   - reusable logic in `internal/agent` and `internal/coordinator`
@@ -16,9 +16,10 @@ local configuration and install ergonomics.
   - optional mTLS between coordinator and agents with node allowlisting
   - `pmctl` for status, node/job listing, job inspection, and command job submission
   - env-style local config files for coordinator, agents, and `pmctl`
+  - config-driven local smoke demo for one coordinator, two agents, and `pmctl`
   - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
 
-Milestones 1 through 6 are complete.
+Milestones 1 through 7 are complete.
 
 ## Milestone 2: Real Command Execution
 
@@ -145,6 +146,35 @@ Acceptance criteria:
 - Local two-agent development can be run from example config files
 - Config parsing, precedence, and runtime wiring are test-covered
 - Default `go test ./...` remains free of external services
+
+## Milestone 7: Local Smoke and Release Workflow
+
+Goal: make the current local operator workflow repeatable and easy to verify
+end to end from a fresh checkout.
+
+Implementation changes:
+
+- Update `examples/demo.sh` into the canonical local smoke workflow
+- Start one coordinator and two agents from tracked env-style config examples
+- Use `pmctl` for coordinator status, node listing, command submission, job
+  inspection, and job listing
+- Keep the smoke workflow plain-HTTP and in-memory by default so it requires no
+  external services
+- Align `compose.yaml` with a coordinator + Postgres + two-agent demo stack
+- Add lightweight tests that keep tracked config examples and demo script syntax
+  from drifting
+
+Status: complete
+
+Acceptance criteria:
+
+- `./examples/demo.sh` proves coordinator, two agents, config files, command
+  execution, and `pmctl` work together locally
+- Compose demo wiring includes two distinct agents without changing Postgres
+  storage behavior
+- Existing env var behavior, config precedence, command execution, storage,
+  mTLS, and `pmctl` behavior are preserved
+- Default `go test ./...` remains fast and free of external services
 
 ## Later Operational Options
 

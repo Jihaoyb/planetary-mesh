@@ -9,12 +9,13 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, and local config files working end-to-end
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, local config files, and repeatable local smoke workflow working end-to-end
 - **Code**:
   - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
   - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
   - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
   - Config: optional env-style local config files for coordinator, agent, and `pmctl`
+  - Smoke: config-driven local demo for one coordinator, two agents, and `pmctl`
   - CI: gofmt + build + tests on every push
 - **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
 
@@ -155,6 +156,21 @@ If present, these default local files are auto-loaded:
 
 Local `config/*.env` files are ignored by git. The tracked `*.env.example` files
 are safe starting points.
+
+### Run the local smoke demo
+
+From a fresh checkout with Go, `curl`, and `python3` available:
+
+```bash
+./examples/demo.sh
+```
+
+The demo builds temporary local binaries, starts one coordinator and two agents
+from tracked config examples, submits an allowlisted command through `pmctl`,
+lists nodes/jobs through `pmctl`, and inspects the completed job. It uses
+in-memory coordinator storage and plain HTTP by default.
+
+Logs are written under `/tmp` or `$TMPDIR` and printed at the end of the run.
 
 ### Run the coordinator
 
@@ -354,29 +370,26 @@ Command jobs reject `payload`; use `command` and optional `args`.
 
 ## Compose Demo
 
-To run a local coordinator + Postgres + agent stack:
+To run a local coordinator + Postgres + two-agent stack:
 
 ```bash
 docker compose up
 ```
 
-In another terminal, submit a command job:
+In another terminal, inspect the mesh with `pmctl`:
 
 ```bash
-curl -X POST http://localhost:8080/jobs \
-  -H 'X-Planetary-Protocol-Version: 1' \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"command","command":"echo","args":["hello from compose"]}'
+go run ./cmd/pmctl nodes list
 ```
 
-Use the returned `id` to inspect the result:
+Submit a command job and inspect the returned job id:
 
 ```bash
-curl http://localhost:8080/jobs/job-1 \
-  -H 'X-Planetary-Protocol-Version: 1'
+go run ./cmd/pmctl submit command echo "hello from compose"
+go run ./cmd/pmctl jobs inspect job-1
 ```
 
-Expected output includes `"status": "COMPLETED"` and captured `stdout`.
+Expected output includes `Status COMPLETED` and captured `Stdout`.
 
 ## Next Steps
 
