@@ -32,6 +32,7 @@ func main() {
 	var jobs coordinator.JobStorage
 	var postgresStore *coordinator.PostgresStore
 	storageBackend := "in_memory"
+	var recoveredRunningJobs int64
 
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -57,6 +58,7 @@ func main() {
 			logger.Error("recover running jobs failed", "err", err)
 			os.Exit(1)
 		}
+		recoveredRunningJobs = recovered
 		logger.Info("postgres storage initialized", "recovered_running_jobs", recovered)
 	} else {
 		registry = coordinator.NewNodeRegistry()
@@ -97,6 +99,7 @@ func main() {
 		},
 		logger,
 	)
+	srv.Metrics().StartupRecoveredJobs.Store(uint64(recoveredRunningJobs))
 
 	stopCh := make(chan struct{})
 	coordinator.StartHealthChecker(registry, stopCh)

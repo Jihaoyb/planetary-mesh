@@ -9,11 +9,12 @@ import (
 // Metrics holds simple counters for the coordinator.
 // All counters are safe for concurrent use via sync/atomic.
 type Metrics struct {
-	JobsCreated      atomic.Uint64
-	JobsCompleted    atomic.Uint64
-	JobsFailed       atomic.Uint64
-	DispatchAttempts atomic.Uint64
-	DispatchErrors   atomic.Uint64
+	JobsCreated          atomic.Uint64
+	JobsCompleted        atomic.Uint64
+	JobsFailed           atomic.Uint64
+	StartupRecoveredJobs atomic.Uint64
+	DispatchAttempts     atomic.Uint64
+	DispatchErrors       atomic.Uint64
 }
 
 // NewMetrics constructs a zeroed Metrics.
@@ -35,6 +36,10 @@ func (m *Metrics) WriteProm(w io.Writer, registry NodeStore) {
 	fmt.Fprintf(w, "# HELP planetary_jobs_failed_total Total jobs that ended in FAILED.\n")
 	fmt.Fprintf(w, "# TYPE planetary_jobs_failed_total counter\n")
 	fmt.Fprintf(w, "planetary_jobs_failed_total %d\n", m.JobsFailed.Load())
+
+	fmt.Fprintf(w, "# HELP planetary_jobs_recovered_on_startup_total Total persisted RUNNING jobs marked FAILED during coordinator startup recovery.\n")
+	fmt.Fprintf(w, "# TYPE planetary_jobs_recovered_on_startup_total counter\n")
+	fmt.Fprintf(w, "planetary_jobs_recovered_on_startup_total %d\n", m.StartupRecoveredJobs.Load())
 
 	fmt.Fprintf(w, "# HELP planetary_dispatch_attempts_total Total dispatch attempts (including retries).\n")
 	fmt.Fprintf(w, "# TYPE planetary_dispatch_attempts_total counter\n")

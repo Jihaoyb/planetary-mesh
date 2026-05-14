@@ -153,6 +153,7 @@ require_metrics() {
 
   grep -q 'planetary_jobs_created_total' <<<"${metrics}"
   grep -q 'planetary_jobs_completed_total' <<<"${metrics}"
+  grep -q 'planetary_jobs_recovered_on_startup_total 1' <<<"${metrics}"
   grep -q 'planetary_nodes{state="HEALTHY"}' <<<"${metrics}"
 }
 
