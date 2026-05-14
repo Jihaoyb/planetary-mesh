@@ -54,7 +54,7 @@ cleanup() {
 
   if [[ "${KEEP_POSTGRES_SMOKE:-}" == "1" ]]; then
     echo "Preserving Compose project ${COMPOSE_PROJECT} for inspection"
-    echo "Clean up later with: COMPOSE_PROJECT=${COMPOSE_PROJECT} docker compose -f ${ROOT}/compose.yaml down -v --remove-orphans"
+    echo "Clean up later with: docker compose -p ${COMPOSE_PROJECT} -f ${ROOT}/compose.yaml down -v --remove-orphans"
   else
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
