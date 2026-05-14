@@ -202,6 +202,7 @@ func TestMetricsEndpointExposesCounters(t *testing.T) {
 	client, _ := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{Status: "ok"})
 
 	srv := NewServerWithConfig(NewNodeRegistry(), NewJobStore(), client, DefaultDispatchConfig(), nil)
+	srv.Metrics().StartupRecoveredJobs.Store(2)
 	mux := srv.Mux()
 
 	registerNode(t, mux, "agent-metrics", "agent.local:8081")
@@ -217,6 +218,7 @@ func TestMetricsEndpointExposesCounters(t *testing.T) {
 	for _, want := range []string{
 		"planetary_jobs_created_total 1",
 		"planetary_jobs_completed_total 1",
+		"planetary_jobs_recovered_on_startup_total 2",
 		`planetary_nodes{state="HEALTHY"} 1`,
 	} {
 		if !strings.Contains(text, want) {
