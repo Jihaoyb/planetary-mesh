@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: planetary
       POSTGRES_DB: planetary_mesh
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
       COORDINATOR_ADDR: ":8080"
       COORDINATOR_DATABASE_URL: "postgres://planetary:planetary@postgres:5432/planetary_mesh?sslmode=disable"
     ports:
-      - "8080:8080"
+      - "${COORDINATOR_HOST_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,7 +43,7 @@ services:
       NODE_ID: "compose-agent-1"
       AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
     ports:
-      - "8081:8081"
+      - "${AGENT1_HOST_PORT:-8081}:8081"
     depends_on:
       - coordinator
 
@@ -60,7 +60,7 @@ services:
       NODE_ID: "compose-agent-2"
       AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
     ports:
-      - "8082:8082"
+      - "${AGENT2_HOST_PORT:-8082}:8082"
     depends_on:
       - coordinator
 

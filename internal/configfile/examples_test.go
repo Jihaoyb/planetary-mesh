@@ -12,9 +12,20 @@ func TestDemoScriptSyntax(t *testing.T) {
 		t.Skip("bash is not available")
 	}
 
-	path := filepath.Join("..", "..", "examples", "demo.sh")
-	cmd := exec.Command(bash, "-n", path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bash -n %s failed: %v\n%s", path, err, out)
+	paths, err := filepath.Glob(filepath.Join("..", "..", "examples", "*.sh"))
+	if err != nil {
+		t.Fatalf("glob examples: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatalf("expected at least one example shell script")
+	}
+
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			cmd := exec.Command(bash, "-n", path)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("bash -n %s failed: %v\n%s", path, err, out)
+			}
+		})
 	}
 }
