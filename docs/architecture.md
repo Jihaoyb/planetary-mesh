@@ -245,6 +245,13 @@ continuity across store reopen, coordinator startup recovery for persisted
 `RUNNING` jobs, and a Compose-backed smoke workflow that proves the coordinator
 can restart and continue accepting command jobs with Postgres storage.
 
+Postgres also records lightweight schema readiness metadata in a
+`schema_version` table. Version `1` represents the current nodes/jobs-only
+schema plus the metadata marker. Coordinator startup backfills missing metadata
+for existing databases and rejects databases that record a newer schema version
+than the running binary expects. This preserves embedded schema initialization;
+it is not a full migration framework.
+
 ---
 
 ## 5. Data Model (Logical)
@@ -459,6 +466,8 @@ Coordinator and optionally agents expose metrics such as:
 - Number of nodes by state.
 - Number of jobs per status (queued, running, completed, failed).
 - Number of persisted running jobs recovered during coordinator startup.
+- Postgres schema readiness and recorded/expected schema versions when Postgres
+  storage is enabled.
 - Number of dispatch attempts and errors.
 - Average job latency.
 - Scheduler decisions (for example, jobs per node).
