@@ -93,7 +93,14 @@ import json
 import sys
 
 status = json.load(sys.stdin)
-ok = status.get("status") == "ok" and status.get("storage_backend") == "postgres"
+schema = status.get("schema") or {}
+ok = (
+    status.get("status") == "ok"
+    and status.get("storage_backend") == "postgres"
+    and schema.get("ready") is True
+    and schema.get("version") == 1
+    and schema.get("expected_version") == 1
+)
 sys.exit(0 if ok else 1)
 ' <<<"${status_json}"; then
       return 0
@@ -155,6 +162,9 @@ require_metrics() {
   grep -q 'planetary_jobs_completed_total' <<<"${metrics}"
   grep -q 'planetary_jobs_recovered_on_startup_total 1' <<<"${metrics}"
   grep -q 'planetary_nodes{state="HEALTHY"}' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_ready 1' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_version 1' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_expected_version 1' <<<"${metrics}"
 }
 
 require_command docker
