@@ -9,14 +9,14 @@ Instead of sending work to a central cloud, clients submit jobs to a coordinator
 
 ## Status
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence, opt-in coordinator-agent mTLS, operator CLI, local config files, repeatable local smoke workflow, and opt-in durable Postgres verification working end-to-end
+- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence with schema readiness metadata, opt-in coordinator-agent mTLS, operator CLI, local config files, repeatable local smoke workflow, and opt-in durable Postgres verification working end-to-end
 - **Code**:
   - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
   - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
   - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
   - Config: optional env-style local config files for coordinator, agent, and `pmctl`
   - Smoke: config-driven local demo for one coordinator, two agents, and `pmctl`
-  - Ops: opt-in Postgres smoke workflow for durable-state and restart-recovery verification
+  - Ops: opt-in Postgres smoke workflow for durable-state, schema readiness, and restart-recovery verification
   - CI: gofmt + build + tests on every push
 - **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
 
@@ -183,10 +183,11 @@ Docker Compose available:
 ```
 
 This starts the Compose stack on isolated high host ports by default, verifies
-`pmctl status` reports Postgres storage, submits a completed command job,
-restarts the coordinator while a job is `RUNNING`, verifies startup recovery
-marks that job `FAILED`, checks `/metrics`, and submits another command after
-restart. It cleans up its Compose project and volume unless
+`pmctl status` reports Postgres storage, verifies `pmctl --json status` reports
+schema readiness version `1`, submits a completed command job, restarts the
+coordinator while a job is `RUNNING`, verifies startup recovery marks that job
+`FAILED`, checks `/metrics`, and submits another command after restart. It
+cleans up its Compose project and volume unless
 `KEEP_POSTGRES_SMOKE=1` is set.
 
 To run the opt-in Postgres integration tests against an existing database:
@@ -219,6 +220,19 @@ Postgres, set `COORDINATOR_DATABASE_URL`:
 COORDINATOR_DATABASE_URL='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
 go run ./cmd/coordinator
 ```
+
+Postgres startup still uses the embedded schema initialization model. The
+coordinator records a lightweight `schema_version` marker and exposes it through
+`/status`, `/metrics`, and `pmctl --json status`:
+
+```bash
+pmctl --json status
+```
+
+For Postgres storage, the `schema` object should report `ready: true`,
+`version: 1`, and `expected_version: 1`. A database marked with a newer schema
+version is rejected at startup so an older coordinator does not run against a
+newer schema. This is readiness metadata, not a full migration framework.
 
 You can also run from a config file:
 

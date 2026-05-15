@@ -159,6 +159,12 @@ default tests remain DB-free, while opt-in Postgres integration tests and a
 Compose-backed smoke workflow verify schema initialization, restart recovery,
 and post-restart coordinator usability.
 
+Milestone 9 keeps embedded schema initialization and adds lightweight schema
+readiness metadata. The coordinator records schema version `1`, exposes readiness
+through status, metrics, logs, tests, and smoke checks, and rejects databases
+marked with a newer schema version than the binary expects. This is intentionally
+not a full migration framework.
+
 Managed Postgres providers, including Supabase, can be evaluated later for
 hosted database operations and visual inspection. The coordinator should remain
 provider-neutral by accepting a standard Postgres connection string instead of
@@ -194,7 +200,8 @@ env-style config files documented in ADR 0009.
 - Env-style config files make repeated local coordinator, agent, and `pmctl`
   runs easy without adding another config dependency.
 - The fast local smoke workflow stays in-memory by default, while the opt-in
-  Postgres smoke workflow verifies durable-state behavior and restart recovery.
+  Postgres smoke workflow verifies durable-state behavior, schema readiness, and
+  restart recovery.
 - K8s can be considered later if/when the system needs production-grade orchestration.
 
 ---

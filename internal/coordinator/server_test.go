@@ -45,13 +45,14 @@ func TestProtocolVersionRequired(t *testing.T) {
 }
 
 func TestHandleStatus(t *testing.T) {
+	schema := protocol.SchemaStatus{Ready: true, Version: 1, ExpectedVersion: 1}
 	srv := NewServerWithRuntime(
 		NewNodeRegistry(),
 		NewJobStore(),
 		nil,
 		DispatchConfig{Timeout: 2, MaxAttempts: 2, BaseBackoff: 1},
 		SecurityConfig{AllowedNodeIdentities: map[string][]string{"agent-1": {"dns:agent.local"}}},
-		RuntimeConfig{StorageBackend: "postgres", SecureMode: true},
+		RuntimeConfig{StorageBackend: "postgres", Schema: &schema, SecureMode: true},
 		nil,
 	)
 
@@ -72,8 +73,30 @@ func TestHandleStatus(t *testing.T) {
 	if got.StorageBackend != "postgres" || !got.SecureMode || !got.NodeAllowlistEnabled {
 		t.Fatalf("unexpected runtime metadata: %+v", got)
 	}
+	if got.Schema == nil || !got.Schema.Ready || got.Schema.Version != 1 || got.Schema.ExpectedVersion != 1 {
+		t.Fatalf("unexpected schema metadata: %+v", got.Schema)
+	}
 	if got.Dispatch.MaxAttempts != 2 {
 		t.Fatalf("unexpected dispatch metadata: %+v", got.Dispatch)
+	}
+}
+
+func TestHandleStatusOmitsSchemaForInMemory(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+
+	req := newVersionedRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	srv.handleStatus(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
+	}
+	var got protocol.CoordinatorStatusResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if got.Schema != nil {
+		t.Fatalf("expected schema metadata to be omitted for in-memory storage, got %+v", got.Schema)
 	}
 }
 

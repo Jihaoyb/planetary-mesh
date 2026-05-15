@@ -37,9 +37,16 @@ type CoordinatorStatusResponse struct {
 	Status               string         `json:"status"`
 	ProtocolVersion      string         `json:"protocol_version"`
 	StorageBackend       string         `json:"storage_backend"`
+	Schema               *SchemaStatus  `json:"schema,omitempty"`
 	SecureMode           bool           `json:"secure_mode"`
 	NodeAllowlistEnabled bool           `json:"node_allowlist_enabled"`
 	Dispatch             DispatchStatus `json:"dispatch"`
+}
+
+type SchemaStatus struct {
+	Ready           bool `json:"ready"`
+	Version         int  `json:"version"`
+	ExpectedVersion int  `json:"expected_version"`
 }
 
 type DispatchStatus struct {
