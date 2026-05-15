@@ -36,6 +36,7 @@ func (c SecurityConfig) Enabled() bool {
 
 type RuntimeConfig struct {
 	StorageBackend string
+	Schema         *protocol.SchemaStatus
 	SecureMode     bool
 }
 
@@ -320,7 +321,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	s.metrics.WriteProm(w, s.registry)
+	s.metrics.WriteProm(w, s.registry, s.runtime.Schema)
 }
 
 // handleStatus serves non-secret coordinator runtime status for operators.
@@ -337,6 +338,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Status:               "ok",
 		ProtocolVersion:      protocol.Version,
 		StorageBackend:       s.runtime.StorageBackend,
+		Schema:               s.runtime.Schema,
 		SecureMode:           s.runtime.SecureMode,
 		NodeAllowlistEnabled: s.security.Enabled(),
 		Dispatch: protocol.DispatchStatus{

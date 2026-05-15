@@ -9,17 +9,23 @@ import (
 	"fmt"
 	"time"
 
+	"planetary-mesh/internal/protocol"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const RestartRecoveryError = "coordinator restarted before result was recorded"
+const PostgresExpectedSchemaVersion = 1
+
+const postgresSchemaVersionID = "coordinator"
 
 //go:embed schema/postgres.sql
 var postgresSchemaFS embed.FS
 
 // PostgresStore persists coordinator nodes and jobs in Postgres.
 type PostgresStore struct {
-	db *sql.DB
+	db     *sql.DB
+	schema protocol.SchemaStatus
 }
 
 type PostgresNodeStore struct {
@@ -36,6 +42,10 @@ func (s *PostgresStore) Nodes() *PostgresNodeStore {
 
 func (s *PostgresStore) Jobs() *PostgresJobStore {
 	return &PostgresJobStore{db: s.db}
+}
+
+func (s *PostgresStore) SchemaStatus() protocol.SchemaStatus {
+	return s.schema
 }
 
 // OpenPostgresStoreWithRetry connects to Postgres, applies the embedded schema,
@@ -79,21 +89,70 @@ func OpenPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) 
 		return nil, err
 	}
 
-	schema, err := postgresSchemaFS.ReadFile("schema/postgres.sql")
+	schema, err := initializePostgresSchema(ctx, db)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 
-	return &PostgresStore{db: db}, nil
+	return &PostgresStore{db: db, schema: schema}, nil
 }
 
 func (s *PostgresStore) Close() error {
 	return s.db.Close()
+}
+
+func initializePostgresSchema(ctx context.Context, db *sql.DB) (protocol.SchemaStatus, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return protocol.SchemaStatus{}, err
+	}
+	defer tx.Rollback()
+
+	schema, err := postgresSchemaFS.ReadFile("schema/postgres.sql")
+	if err != nil {
+		return protocol.SchemaStatus{}, err
+	}
+	if _, err := tx.ExecContext(ctx, string(schema)); err != nil {
+		return protocol.SchemaStatus{}, err
+	}
+
+	var current int
+	err = tx.QueryRowContext(ctx, `SELECT version FROM schema_version WHERE id = $1`, postgresSchemaVersionID).Scan(&current)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		current = PostgresExpectedSchemaVersion
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO schema_version (id, version, updated_at)
+VALUES ($1, $2, now())
+`, postgresSchemaVersionID, current); err != nil {
+			return protocol.SchemaStatus{}, err
+		}
+	case err != nil:
+		return protocol.SchemaStatus{}, err
+	case current > PostgresExpectedSchemaVersion:
+		return protocol.SchemaStatus{}, fmt.Errorf("postgres schema version %d is newer than expected version %d", current, PostgresExpectedSchemaVersion)
+	case current < PostgresExpectedSchemaVersion:
+		current = PostgresExpectedSchemaVersion
+		if _, err := tx.ExecContext(ctx, `
+UPDATE schema_version
+SET version = $2,
+    updated_at = now()
+WHERE id = $1
+`, postgresSchemaVersionID, current); err != nil {
+			return protocol.SchemaStatus{}, err
+		}
+	}
+
+	status := protocol.SchemaStatus{
+		Ready:           true,
+		Version:         current,
+		ExpectedVersion: PostgresExpectedSchemaVersion,
+	}
+	if err := tx.Commit(); err != nil {
+		return protocol.SchemaStatus{}, err
+	}
+	return status, nil
 }
 
 func (s *PostgresNodeStore) Register(in NodeRegistration) (Node, error) {

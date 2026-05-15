@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+
+	"planetary-mesh/internal/protocol"
 )
 
 // Metrics holds simple counters for the coordinator.
@@ -24,7 +26,7 @@ func NewMetrics() *Metrics {
 
 // WriteProm writes metrics in a minimal Prometheus text exposition format.
 // It also includes node-state gauges through the store aggregate contract.
-func (m *Metrics) WriteProm(w io.Writer, registry NodeStore) {
+func (m *Metrics) WriteProm(w io.Writer, registry NodeStore, schema *protocol.SchemaStatus) {
 	fmt.Fprintf(w, "# HELP planetary_jobs_created_total Total jobs created.\n")
 	fmt.Fprintf(w, "# TYPE planetary_jobs_created_total counter\n")
 	fmt.Fprintf(w, "planetary_jobs_created_total %d\n", m.JobsCreated.Load())
@@ -56,5 +58,20 @@ func (m *Metrics) WriteProm(w io.Writer, registry NodeStore) {
 		fmt.Fprintf(w, "planetary_nodes{state=\"HEALTHY\"} %d\n", counts.Healthy)
 		fmt.Fprintf(w, "planetary_nodes{state=\"SUSPECT\"} %d\n", counts.Suspect)
 		fmt.Fprintf(w, "planetary_nodes{state=\"OFFLINE\"} %d\n", counts.Offline)
+	}
+	if schema != nil {
+		ready := 0
+		if schema.Ready {
+			ready = 1
+		}
+		fmt.Fprintf(w, "# HELP planetary_postgres_schema_ready Whether the Postgres schema is ready for this coordinator version.\n")
+		fmt.Fprintf(w, "# TYPE planetary_postgres_schema_ready gauge\n")
+		fmt.Fprintf(w, "planetary_postgres_schema_ready %d\n", ready)
+		fmt.Fprintf(w, "# HELP planetary_postgres_schema_version Current Postgres schema version recorded in schema_version.\n")
+		fmt.Fprintf(w, "# TYPE planetary_postgres_schema_version gauge\n")
+		fmt.Fprintf(w, "planetary_postgres_schema_version %d\n", schema.Version)
+		fmt.Fprintf(w, "# HELP planetary_postgres_schema_expected_version Postgres schema version expected by this coordinator binary.\n")
+		fmt.Fprintf(w, "# TYPE planetary_postgres_schema_expected_version gauge\n")
+		fmt.Fprintf(w, "planetary_postgres_schema_expected_version %d\n", schema.ExpectedVersion)
 	}
 }

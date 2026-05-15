@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"planetary-mesh/internal/coordinator"
+	"planetary-mesh/internal/protocol"
 	"planetary-mesh/internal/security"
 )
 
@@ -32,6 +33,7 @@ func main() {
 	var jobs coordinator.JobStorage
 	var postgresStore *coordinator.PostgresStore
 	storageBackend := "in_memory"
+	var schemaStatus *protocol.SchemaStatus
 	var recoveredRunningJobs int64
 
 	if cfg.DatabaseURL != "" {
@@ -53,13 +55,21 @@ func main() {
 		registry = store.Nodes()
 		jobs = store.Jobs()
 		storageBackend = "postgres"
+		status := store.SchemaStatus()
+		schemaStatus = &status
 		recovered, err := jobs.FailRunningJobs(coordinator.RestartRecoveryError)
 		if err != nil {
 			logger.Error("recover running jobs failed", "err", err)
 			os.Exit(1)
 		}
 		recoveredRunningJobs = recovered
-		logger.Info("postgres storage initialized", "recovered_running_jobs", recovered)
+		logger.Info(
+			"postgres storage initialized",
+			"recovered_running_jobs", recovered,
+			"schema_ready", status.Ready,
+			"schema_version", status.Version,
+			"schema_expected_version", status.ExpectedVersion,
+		)
 	} else {
 		registry = coordinator.NewNodeRegistry()
 		jobs = coordinator.NewJobStore()
@@ -95,6 +105,7 @@ func main() {
 		},
 		coordinator.RuntimeConfig{
 			StorageBackend: storageBackend,
+			Schema:         schemaStatus,
 			SecureMode:     cfg.SecureMode,
 		},
 		logger,
