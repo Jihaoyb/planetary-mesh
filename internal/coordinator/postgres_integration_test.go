@@ -206,6 +206,9 @@ func TestPostgresFailRunningJobs(t *testing.T) {
 func TestPostgresSchemaInitializationIsIdempotent(t *testing.T) {
 	dsn := newPostgresTestDSN(t)
 	store := openPostgresTestStoreForDSN(t, dsn)
+	if status := store.SchemaStatus(); !status.Ready || status.Version != PostgresExpectedSchemaVersion || status.ExpectedVersion != PostgresExpectedSchemaVersion {
+		t.Fatalf("unexpected schema status: %+v", status)
+	}
 
 	if _, err := store.Nodes().Register(NodeRegistration{
 		ID:      "node-idempotent",
@@ -237,6 +240,103 @@ func TestPostgresSchemaInitializationIsIdempotent(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].ID != "job-1" {
 		t.Fatalf("unexpected jobs after schema reapply: %+v", jobs)
+	}
+}
+
+func TestPostgresSchemaVersionInitialized(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+
+	status := store.SchemaStatus()
+	if !status.Ready || status.Version != PostgresExpectedSchemaVersion || status.ExpectedVersion != PostgresExpectedSchemaVersion {
+		t.Fatalf("unexpected schema status: %+v", status)
+	}
+	if got := querySchemaVersion(t, dsn); got != PostgresExpectedSchemaVersion {
+		t.Fatalf("expected stored schema version %d, got %d", PostgresExpectedSchemaVersion, got)
+	}
+}
+
+func TestPostgresSchemaVersionBackfilledWithoutLosingState(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(oldPostgresSchemaSQL); err != nil {
+		t.Fatalf("initialize old schema: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO nodes (id, address, last_seen, state, created_at)
+VALUES ('old-node', 'http://agent:8081', now(), 'HEALTHY', now())
+`); err != nil {
+		t.Fatalf("insert old node: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO jobs (
+  id, type, payload, command, args, status, node_id, attempts,
+  stdout, stderr, stdout_truncated, stderr_truncated, last_error,
+  created_at, updated_at
+)
+VALUES (
+  'job-1', 'command', '', 'echo', '[]'::jsonb, 'COMPLETED', 'old-node', 1,
+  'ok', '', false, false, '',
+  now(), now()
+)
+`); err != nil {
+		t.Fatalf("insert old job: %v", err)
+	}
+	if _, err := db.Exec(`SELECT setval('job_id_seq', 1, true)`); err != nil {
+		t.Fatalf("set old sequence: %v", err)
+	}
+
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+
+	if got := querySchemaVersion(t, dsn); got != PostgresExpectedSchemaVersion {
+		t.Fatalf("expected backfilled schema version %d, got %d", PostgresExpectedSchemaVersion, got)
+	}
+	nodes, err := store.Nodes().List()
+	if err != nil {
+		t.Fatalf("list backfilled nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != "old-node" {
+		t.Fatalf("unexpected nodes after backfill: %+v", nodes)
+	}
+	jobs, err := store.Jobs().List()
+	if err != nil {
+		t.Fatalf("list backfilled jobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ID != "job-1" || jobs[0].Stdout != "ok" {
+		t.Fatalf("unexpected jobs after backfill: %+v", jobs)
+	}
+	next, err := store.Jobs().Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job after backfill: %v", err)
+	}
+	if next.ID != "job-2" {
+		t.Fatalf("expected job sequence to continue at job-2, got %s", next.ID)
+	}
+}
+
+func TestPostgresSchemaVersionRejectsNewerDatabase(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(`
+CREATE TABLE schema_version (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_version (id, version) VALUES ($1, $2);
+`, postgresSchemaVersionID, PostgresExpectedSchemaVersion+1); err != nil {
+		t.Fatalf("seed newer schema version: %v", err)
+	}
+
+	store, err := OpenPostgresStore(context.Background(), dsn)
+	if err == nil {
+		_ = store.Close()
+		t.Fatalf("expected newer schema version to be rejected")
+	}
+	if !strings.Contains(err.Error(), "newer than expected version") {
+		t.Fatalf("expected newer schema version error, got %v", err)
 	}
 }
 
@@ -327,3 +427,64 @@ func TestPostgresRestartRecoveryAfterReopenPreservesTerminalJobs(t *testing.T) {
 		t.Fatalf("expected job sequence to continue at job-4, got %s", next.ID)
 	}
 }
+
+func openPostgresTestDB(t *testing.T, dsn string) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func querySchemaVersion(t *testing.T, dsn string) int {
+	t.Helper()
+
+	db := openPostgresTestDB(t, dsn)
+	var version int
+	if err := db.QueryRow(`SELECT version FROM schema_version WHERE id = $1`, postgresSchemaVersionID).Scan(&version); err != nil {
+		t.Fatalf("query schema version: %v", err)
+	}
+	return version
+}
+
+const oldPostgresSchemaSQL = `
+CREATE SEQUENCE IF NOT EXISTS job_id_seq;
+
+CREATE TABLE IF NOT EXISTS nodes (
+  id TEXT PRIMARY KEY,
+  address TEXT NOT NULL,
+  last_seen TIMESTAMPTZ NOT NULL,
+  state TEXT NOT NULL,
+  certificate_subject TEXT NOT NULL DEFAULT '',
+  certificate_dns_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_ip_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_uris JSONB NOT NULL DEFAULT '[]'::jsonb,
+  certificate_sha256_fingerprint TEXT NOT NULL DEFAULT '',
+  certificate_not_after TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '',
+  command TEXT NOT NULL DEFAULT '',
+  args JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL,
+  node_id TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  exit_code INTEGER,
+  stdout TEXT NOT NULL DEFAULT '',
+  stderr TEXT NOT NULL DEFAULT '',
+  stdout_truncated BOOLEAN NOT NULL DEFAULT false,
+  stderr_truncated BOOLEAN NOT NULL DEFAULT false,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+`
