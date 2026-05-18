@@ -5,9 +5,10 @@
 
 ## Context
 
-The architecture doc and `tech-choices.md` lean toward gRPC for the
-coordinator ↔ agent control plane. gRPC gives us typed schemas, streaming,
-and good mTLS ergonomics, all of which we expect to want eventually.
+At the time this ADR was accepted, the architecture doc and `tech-choices.md`
+leaned toward gRPC for the coordinator-agent control plane. gRPC gives us typed
+schemas, streaming, and good mTLS ergonomics, all of which we may want
+eventually.
 
 However, for the very first iterations we needed the control plane to be:
 
@@ -27,7 +28,33 @@ For v0 we implement the coordinator ↔ agent and client ↔ coordinator
 control plane as **HTTP/JSON** using the Go standard library
 (`net/http` + `encoding/json`).
 
-Endpoints currently in use:
+The endpoint inventory can evolve while this decision remains the same: v0 uses
+HTTP/JSON for coordinator-agent and client-coordinator control-plane traffic.
+The current inventory is listed below for reader convenience.
+
+## Current Endpoint Inventory
+
+Coordinator:
+
+- `GET  /healthz`         – basic health check
+- `GET  /status`          – non-secret coordinator runtime status/config
+- `POST /register`        – agent registration / heartbeat
+- `GET  /nodes`           – list registered nodes
+- `POST /jobs`            – create a job
+- `GET  /jobs`            – list jobs
+- `GET  /jobs/{id}`       – inspect a job
+- `GET  /metrics`         – Prometheus-style text metrics
+
+Agent:
+
+- `GET  /healthz`         – basic health check
+- `POST /execute`         – run an assigned job
+
+Versioned coordinator endpoints except `/healthz` require
+`X-Planetary-Protocol-Version: 1`. Agent `/execute` also requires the protocol
+version header.
+
+Original early endpoint inventory:
 
 - Coordinator
   - `GET  /healthz`

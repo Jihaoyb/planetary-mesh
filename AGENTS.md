@@ -5,47 +5,64 @@ needed to work safely in this repository.
 
 ## Project Summary
 
-Planetary Mesh is a Go-based LAN compute mesh prototype. A coordinator accepts
-jobs, tracks nodes, schedules work, and dispatches work to agent daemons. Agents
-register with the coordinator, send heartbeats, and execute assigned work.
+Planetary Mesh is a Go-based private-first compute mesh prototype. A single
+coordinator accepts jobs, tracks nodes, schedules work, and dispatches work to
+agent daemons. Agents register with the coordinator, send heartbeats, and execute
+assigned allowlisted command jobs. `pmctl` is a thin operator CLI over the
+coordinator HTTP/JSON API.
+
+The product direction is private/local mesh first, remote private mesh later,
+trusted shared compute pool later, and overflow compute marketplace only as
+long-term exploration. Do not imply that marketplace, payment, public-node, GPU
+pooling, storage pooling, or bandwidth pooling features exist today.
 
 The project is intentionally incremental. Keep current behavior, planned
 behavior, and future ideas separate in code and documentation.
 
+## Current Baseline
+
+Current `main` is after PR #14 / Milestone 9 schema readiness at commit
+`46a0af2`.
+
+Milestones 1 through 9 are complete:
+
+- initial docs/process alignment
+- HTTP/JSON coordinator/agent control plane
+- protocol version header enforcement
+- node registration, heartbeat, and health states
+- command job submission and allowlisted direct execution
+- optional Postgres persistence for nodes/jobs
+- opt-in coordinator-agent mTLS and node allowlists
+- thin `pmctl` operator CLI
+- env-style local config files
+- local and Postgres smoke workflows
+- Postgres schema readiness metadata version `1`
+
+The next phase should focus on documentation accuracy and private mesh
+hardening. Do not jump to marketplace, payment, dashboard, public-node, or
+remote-node product work without explicit planning and an accepted direction.
+
 ## Canonical Context
 
-Read these files before making architectural or milestone-level changes:
+Read these files before making architectural, roadmap, or product-direction
+changes:
 
 - `README.md` - concise project entrypoint and local usage
-- `docs/roadmap.md` - canonical milestone plan
+- `docs/product-positioning.md` - current product framing and staged direction
+- `docs/current-limitations.md` - current limitations and risk register
+- `docs/roadmap.md` - canonical roadmap and sequencing
 - `docs/architecture.md` - component model and system boundaries
-- `docs/tech-choices.md` - language, protocol, storage, and runtime choices
+- `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
+  execution choices
 - `docs/adr/` - accepted Architecture Decision Records
 
-If these documents conflict, prefer the most recent ADR for decided technical
-choices and `docs/roadmap.md` for milestone sequencing. If a change makes a doc
-misleading, update the doc in the same PR unless the branch scope says otherwise.
+`docs/kickoff.md` is historical context only. Do not treat it as current product
+or architecture truth if it conflicts with the docs above.
 
-## Current Milestone Model
-
-The project uses one PR per milestone or documentation slice.
-
-Expected sequence:
-
-1. PR 0: docs sync and roadmap alignment
-2. PR 1: Milestone 2, real command execution
-3. PR 2: Milestone 3, durable coordinator state with Postgres
-4. PR 3: Milestone 4, trusted LAN security with mTLS
-5. PR 4: Milestone 5, operator CLI
-
-Important boundary rules:
-
-- Do not mix milestone implementation work into docs-only branches.
-- Do not start Postgres work on the command-execution branch.
-- Do not start mTLS work before the persistence milestone branch.
-- Do not start CLI or dashboard work before the security milestone branch.
-- Keep future-state documentation explicit about what is planned versus what is
-  already implemented.
+If docs conflict, prefer the most recent ADR for decided technical choices,
+`docs/roadmap.md` for sequencing, and `docs/product-positioning.md` for product
+framing. If a change makes a doc misleading, update that doc in the same PR
+unless the branch scope says otherwise.
 
 Always inspect the active branch and recent commits before assuming project
 state:
@@ -54,25 +71,6 @@ state:
 git status --short --branch
 git log --oneline -5
 ```
-
-## Branching Rules
-
-Use focused branches:
-
-- Docs-only work: `docs/<short-topic>`
-- Milestone work: `feature/milestone-<n>-<short-topic>`
-- Bug fixes: `fix/<short-topic>`
-
-Known project branches from the current delivery plan:
-
-- `docs/roadmap-sync`
-- `feature/milestone-2-command-execution`
-- `feature/milestone-3-postgres-persistence`
-- `feature/milestone-4-mtls-security`
-- `feature/milestone-5-pmctl-cli`
-
-Avoid stacking unrelated work in one branch. If work has already been mixed,
-split it before opening PRs.
 
 ## Repository Layout
 
@@ -87,29 +85,41 @@ planetary-mesh/
   cmd/
     coordinator/       # Coordinator service entrypoint
     agent/             # Agent daemon entrypoint
+    pmctl/             # Operator CLI entrypoint
 
   internal/
-    coordinator/       # Coordinator HTTP handlers, node/job stores, metrics, tests
+    coordinator/       # Coordinator HTTP handlers, dispatch, stores, metrics, tests
     agent/             # Agent HTTP handlers, coordinator client, executor, tests
-    protocol/          # Shared protocol constants and wire structs, when present
+    pmctl/             # CLI command parsing, output, and coordinator client
+    protocol/          # Shared protocol constants and wire structs
+    security/          # TLS, certificate identity, and allowlist helpers
+    configfile/        # Env-style config file parser
 
-  docs/
-    kickoff.md
-    architecture.md
-    tech-choices.md
-    roadmap.md
-    adr/
-
-  examples/            # Smoke demos, when present
+  config/              # Tracked example env-style config files
+  docs/                # Roadmap, architecture, product docs, ADRs
+  examples/            # Local and Postgres smoke demos
+  compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 
 Keep reusable application logic under `internal/`. Keep `cmd/*` packages thin:
 parse environment/configuration, wire dependencies, start servers, and handle
 shutdown.
 
+## Branching Rules
+
+Use focused branches:
+
+- Docs-only work: `docs/<short-topic>`
+- Milestone work: `feature/milestone-<n>-<short-topic>`
+- Bug fixes: `fix/<short-topic>`
+
+Avoid stacking unrelated work in one branch. If work has already been mixed,
+split it before opening PRs.
+
 ## Go Standards
 
-The project is Go-first. Follow the existing standard-library-heavy style unless
+The project is Go-first. Go is an accepted current implementation choice, not a
+tentative preference. Follow the existing standard-library-heavy style unless
 there is a clear reason to add a dependency.
 
 Before handing off Go changes, run:
@@ -118,14 +128,16 @@ Before handing off Go changes, run:
 gofmt -w <changed-go-files>
 go build ./...
 go test ./...
+go vet ./...
 ```
 
-If sandboxing blocks writes to the default Go cache, pin the cache inside the
+If sandboxing blocks writes to the default Go cache, pin the cache outside the
 repo:
 
 ```bash
-GOCACHE=$(pwd)/.gocache go build ./...
-GOCACHE=$(pwd)/.gocache go test ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-build go build ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...
 ```
 
 Do not commit `.gocache/`.
@@ -143,6 +155,7 @@ Run an agent in another terminal:
 ```bash
 COORDINATOR_URL=http://localhost:8080 \
 AGENT_ADDR=:8081 \
+AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
 go run ./cmd/agent
 ```
 
@@ -153,43 +166,54 @@ curl http://localhost:8080/healthz
 curl http://localhost:8081/healthz
 ```
 
-After Milestone 2 lands, command execution uses an allowlist:
+Run the default local smoke demo:
 
 ```bash
-COORDINATOR_URL=http://localhost:8080 \
-AGENT_ADDR=:8081 \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
-go run ./cmd/agent
+./examples/demo.sh
 ```
 
-Milestone-specific smoke demos should live under `examples/`.
+Run the opt-in Postgres smoke demo:
+
+```bash
+./examples/postgres_smoke.sh
+```
 
 ## Control Plane Rules
 
 The v0 control plane is HTTP/JSON. ADR 0003 records this decision. Do not
-introduce gRPC or protobuf runtime requirements unless a future ADR and roadmap
-change explicitly call for it.
+introduce gRPC, protobuf, generated API contracts, or a second runtime protocol
+unless a future ADR and roadmap change explicitly call for it.
 
-Current and planned endpoints are coordinator-owned unless noted otherwise:
+Current coordinator endpoints:
 
 - `GET /healthz`
+- `GET /status`
 - `POST /register`
 - `GET /nodes`
 - `POST /jobs`
 - `GET /jobs`
 - `GET /jobs/{id}`
 - `GET /metrics`
-- Agent `POST /execute`
+
+Current agent endpoints:
+
+- `GET /healthz`
+- `POST /execute`
+
+All coordinator control-plane endpoints except `/healthz` require
+`X-Planetary-Protocol-Version: 1`. Agent `/execute` also requires the protocol
+header. Missing or mismatched protocol version returns `409 Conflict`.
 
 Keep validation, scheduling, retry policy, and state transitions in the
-coordinator. Keep agents focused on registration, heartbeat, and execution.
+coordinator. Keep agents focused on registration, heartbeat, and execution. Keep
+`pmctl` as a pure client of coordinator APIs.
 
-## Milestone 2 Rules: Command Execution
+## Command Execution Rules
 
-When working on Milestone 2 or branches that include it, preserve these rules:
+Command execution is security-sensitive. Preserve these rules:
 
 - `POST /jobs` supports `type="command"`, `command`, and optional `args`.
-- `payload` must be rejected for `type="command"` with `400 Bad Request`.
+- `payload` is rejected for `type="command"` with `400 Bad Request`.
 - Job responses include execution/result fields:
   - `attempts`
   - `started_at`
@@ -200,9 +224,6 @@ When working on Milestone 2 or branches that include it, preserve these rules:
   - `stdout_truncated`
   - `stderr_truncated`
   - `last_error`
-- Control-plane requests require `X-Planetary-Protocol-Version: 1` once the
-  protocol-version milestone code is present.
-- Missing or mismatched protocol version returns `409 Conflict`.
 - Agent execution uses `exec.CommandContext`.
 - Never execute through a shell.
 - Submitted command names are logical allowlist keys, not arbitrary executable
@@ -210,7 +231,7 @@ When working on Milestone 2 or branches that include it, preserve these rules:
 - The agent maps logical command names to executable paths through explicit
   allowlist configuration.
 - The execution timeout is fixed by agent config. The default is `30s`.
-- There is no per-job timeout override in Milestone 2 or Milestone 3.
+- There is no per-job timeout override today.
 - Stdout and stderr are captured separately.
 - Stdout and stderr are capped at `1 MiB` per stream.
 - Truncated streams must set their corresponding boolean flags.
@@ -222,64 +243,74 @@ When working on Milestone 2 or branches that include it, preserve these rules:
 - Node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
   in-flight execution attempt in v0.
 
-Required Milestone 2 coverage:
+Do not describe this model as strong sandboxing. It is allowlisted direct
+process execution with bounded output and a fixed timeout.
 
-- successful command execution
-- non-zero exit
-- execution timeout
-- allowlist rejection
-- stdout/stderr truncation
-- protocol mismatch
-- terminal versus retryable dispatch behavior
+## Storage Rules
 
-## Milestone 3 Rules: Durable State
-
-When working on Milestone 3, preserve these rules:
+Preserve these rules:
 
 - Persist nodes and jobs only.
-- Do not add task fanout or a `tasks` table yet.
+- Do not add task fanout or a `tasks` table without explicit planning.
 - Keep in-memory stores for ordinary unit tests and fast `go test ./...`.
-- Add Postgres-backed storage for runtime/integration use.
-- Postgres is the only persistence target in this roadmap. Do not add SQLite.
-- Add Compose support for coordinator + Postgres + agent.
-- On coordinator startup, mark persisted `RUNNING` jobs as `FAILED`.
-- Use a restart-specific error such as:
+- Keep default `go test ./...` DB-free.
+- Postgres is the only durable persistence target in the current roadmap. Do
+  not add SQLite or another persistence backend without an ADR.
+- Postgres is enabled only when `COORDINATOR_DATABASE_URL` is configured.
+- On coordinator startup, persisted `RUNNING` jobs are marked `FAILED` with:
   `coordinator restarted before result was recorded`.
 - Document the known v0 gap: if an agent completed before coordinator crash and
   the result was not persisted, that result is lost.
-- Do not implement agent reconciliation in v0.
-- Postgres integration tests must be opt-in or separately gated so default
-  `go test ./...` remains DB-free.
+- Do not implement agent reconciliation unless it is the explicit task.
+- Postgres integration tests must be opt-in or separately gated.
+- Schema readiness metadata version `1` is current. It is not a full migration
+  framework.
 
-## Milestone 4 Rules: Trusted LAN Security
+## Security Rules
 
-When working on Milestone 4, preserve these rules:
+Planetary Mesh supports opt-in mTLS and node allowlists today. Plain HTTP
+remains available for local development unless configuration changes.
+
+Preserve these rules:
 
 - Keep HTTP/JSON as the v0 control plane.
-- Add mTLS between coordinator and agents.
-- Add configuration for CA, certificate, key, and allowed node identities or
-  fingerprints.
-- Enforce node allowlisting during registration.
-- Extend node inspection with certificate identity metadata needed by operators.
-- Certificate distribution is manual for v0.
-- Do not add automated enrollment or certificate issuance in v0.
+- mTLS requires manual CA/certificate/key configuration.
+- If coordinator TLS is configured, allowed node identities or fingerprints are
+  required.
+- Enforce node allowlisting during registration in secure mode.
+- Node inspection includes certificate identity metadata when mTLS is enabled.
+- Certificate generation, distribution, enrollment, and rotation are manual.
+- Do not add automated enrollment or certificate issuance unless explicitly
+  planned.
 - Keep protocol-version enforcement in place.
-- Database secret-management hardening is not a separate v0 milestone.
+- Treat direct command execution, node identity, and coordinator-agent
+  communication as security-sensitive.
 
-## Milestone 5 Rules: Operator CLI
+## Product and Scope Guardrails
 
-When working on Milestone 5, preserve these rules:
+Do not implement or imply current support for:
 
-- Add the CLI under `cmd/pmctl`.
-- Keep the CLI as a pure client of coordinator APIs.
-- Do not move scheduling, validation, or state logic into the CLI.
-- Support:
-  - submit job
-  - list nodes
-  - list jobs
-  - inspect job
-  - show coordinator status/config
-- Dashboard work remains out of scope for v0.
+- marketplace, payment, payout, dispute, reputation, or transaction-fee systems
+- public, permissionless, or arbitrary third-party compute nodes
+- shared compute pools without admin approval/trust design
+- GPU, storage, or bandwidth marketplace features
+- strong sandbox/container isolation unless actually implemented
+- Kubernetes, Ray, Airflow, or Temporal replacement behavior
+- dashboard or frontend work unless explicitly requested
+- multi-tenant authorization or public cloud platform behavior
+- remote private mesh networking without explicit planning
+
+Allowed near-term direction is private mesh hardening:
+
+- queued-job scheduler/re-dispatch loop
+- cross-node reassignment after dispatch failure
+- node capabilities/load reporting
+- clearer job state transitions
+- agent reconciliation strategy after coordinator restart
+- operator runbooks and API inventory
+- install/release packaging
+- certificate/onboarding helper planning
+- optional private batch/AI demo pipeline
 
 ## Testing Expectations
 
@@ -289,22 +320,21 @@ change affects cross-component contracts.
 General gates:
 
 ```bash
-gofmt -w <changed-go-files>
-go build ./...
-go test ./...
+gofmt -l .
+git diff --check
+GOCACHE=/private/tmp/planetary-mesh-gocache-build go build ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...
 ```
 
-Milestone-specific gates:
+Opt-in durable storage gate:
 
-- Docs-only branches: `git diff --check` is sufficient unless docs tooling is
-  added later.
-- Command execution: include agent unit tests, coordinator dispatch tests, and
-  an end-to-end coordinator flow.
-- Persistence: keep default unit tests DB-free and add separately gated
-  Postgres integration tests.
-- mTLS: cover handshake success/failure, unauthorized node rejection, and
-  secured dispatch.
-- CLI: include integration smoke tests against a live coordinator.
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator
+```
+
+Docs-only branches should at least run `git diff --check`; running the full
+build/test/vet suite is preferred when feasible.
 
 ## Documentation Rules
 
@@ -318,11 +348,14 @@ When changing behavior:
 - Update `docs/architecture.md` if component responsibilities or boundaries
   change.
 - Update `docs/tech-choices.md` if a technology choice changes.
+- Update `docs/product-positioning.md` if product framing changes.
+- Update `docs/current-limitations.md` if a limitation is fixed or a new risk is
+  introduced.
 - Add an ADR for non-trivial decisions involving protocol, storage, execution,
-  security, or operational model.
+  security, operations, or product architecture.
 
-Avoid rewriting docs into future-state fiction. It is better to say "planned"
-than to imply unfinished behavior exists.
+Avoid future-state fiction. It is better to say "planned" than to imply
+unfinished behavior exists.
 
 ## Git Hygiene
 
@@ -331,8 +364,8 @@ than to imply unfinished behavior exists.
 - Do not use destructive git commands unless explicitly requested.
 - Do not amend commits unless explicitly requested.
 - Keep commits focused and named by intent, for example:
-  - `docs: sync roadmap after control-plane hardening`
-  - `feat: add real command execution`
+  - `docs: align product direction with private mesh`
+  - `feat: add queued job scheduler`
   - `test: cover command timeout handling`
 - Leave local-only files alone unless asked.
 
@@ -349,31 +382,10 @@ Do not commit these files.
 - Prefer the Go standard library.
 - Add dependencies only when they clearly reduce risk or complexity.
 - Explain any new dependency in the PR.
-- For Postgres, use the driver selected in the milestone implementation and
-  keep DB-backed tests opt-in.
-- Do not introduce frontend frameworks, dashboards, or CLIs before their
-  roadmap milestone.
-
-## Security Posture
-
-This project is moving toward trusted LAN execution. Treat command execution,
-node identity, and coordinator-agent communication as security-sensitive.
-
-Current security expectations:
-
-- No shell execution for agent workloads.
-- Explicit command allowlists for direct process execution.
-- No arbitrary executable paths from job submissions.
-- Bounded output capture.
-- Clear distinction between terminal validation failures and retryable transport
-  failures.
-
-Future security expectations:
-
-- mTLS between coordinator and agents.
-- Node allowlisting at registration.
-- Manual certificate distribution for v0.
-- No public, permissionless network behavior in v0.
+- For Postgres, keep provider-neutral configuration through
+  `COORDINATOR_DATABASE_URL`.
+- Do not introduce frontend frameworks, dashboard dependencies, marketplace
+  dependencies, payment dependencies, or auth systems without explicit planning.
 
 ## Hand-Off Standard
 
@@ -388,5 +400,5 @@ Every implementation hand-off should include:
 - commands run and their results
 - known gaps or intentionally deferred work
 
-For milestone PRs, include a flat file-by-file explanation. Keep the explanation
-specific enough that a reviewer can trace each file to the milestone goal.
+For milestone PRs, include a flat file-by-file explanation specific enough that
+a reviewer can trace each file to the milestone goal.

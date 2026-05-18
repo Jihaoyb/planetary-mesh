@@ -1,320 +1,308 @@
-# Planetary Mesh - Tech Choices and Rationale
+# Tech Choices
 
-This document lists important technology / pattern options for Planetary Mesh and explains why we choose (or lean toward) specific ones for v0
+This document records current technology and pattern choices for Planetary Mesh.
+Accepted decisions are backed by ADRs where appropriate.
 
-This is not final forever. Decisions can change, but changes should be documented (e.g., via ADRs).
+Planetary Mesh is currently a private-first Go compute mesh prototype for
+allowlisted command jobs across trusted machines. Future protocol, isolation,
+marketplace, and payment systems require separate decisions.
 
----
+## Process and Documentation
 
-## 1. Process and Documentation Patterns
+Choice: iterative/incremental development with lightweight documentation.
 
-### 1.1 Options
+Why:
 
-- **Strict Waterfall**
-  - Heavy upfront requirements and design.
-  - Sequential phases; limited iteration.
+- The project is exploratory and benefits from small reviewed slices.
+- Distributed execution and security-sensitive command handling require written
+  decisions.
+- ADRs keep the reason for major choices visible as the project evolves.
 
-- **Heavyweight RUP / Spiral**
-  - Strong phase structure and risk analysis.
-  - Extensive documentation and governance.
+Related ADR:
 
-- **Ad-hoc Development**
-  - Minimal documentation or process.
-  - Code-first, design later (if at all).
+- [ADR 0001](adr/0001-process-and-docs.md)
 
-- **Iterative / Incremental (Agile-inspired)**
-  - Short iterations.
-  - Continuous integration and feedback.
-  - Lightweight but real documentation.
+## Implementation Language
 
-### 1.2 Choice
+Choice: Go for coordinator, agent, and `pmctl`.
 
-We choose **Iterative / Incremental, Agile-inspired with lightweight docs**.
+Go is the accepted current implementation language, not a tentative preference.
 
-**Why this choice**
+Why:
 
-- The project is **exploratory** (new kind of local mesh compute) and will require adjustments.
-- We need **enough structure** for security and distributed-systems complexity.
-- We want to **avoid heavy ceremony** and move quickly.
+- simple single-binary deployment for coordinator and agents
+- strong standard library for HTTP, TLS, JSON, concurrency, and process control
+- good fit for long-running daemons
+- straightforward CI and local development workflow
 
-The kickoff plan and architecture docs support this model by:
+Related ADR:
 
-- Defining goals and structure.
-- Leaving room for change as we learn from real runs.
+- [ADR 0002](adr/0002-language-choice.md)
 
----
+Future note:
 
-## 2. Backend Language for Coordinator and Agent
+- Workload code can still call external tools or scripts. That does not change
+  the control-plane implementation choice.
 
-*(This section can be updated once you formally pick the langauge and record an ADR.)*
+## Control Plane Protocol
 
-### 2.1 Options (Examples)
+Choice: HTTP/JSON for v0 coordinator-agent and client-coordinator control plane.
 
-- **Go**
-  - Strong concurrency model (goroutines, channels).
-  - Compiled, single static binaries (easy deployment).
-  - Good ecosystem for gRPC, TLS, and networking.
+Why:
 
-- **Rust**
-  - Excellent performance and safety.
-  - Strong type system and memory safety.
-  - More complex onboarding and build times for some teams.
+- easy to debug with `curl`
+- no code generation requirement
+- stable enough for current agent, coordinator, and `pmctl` clients
+- compatible with optional HTTPS/mTLS without changing the JSON wire shape
 
-- **Node.js (TypeScript)**
-  - Fast iteration and quick prototyping.
-  - Great ecosystem for web, but long-running high-load services need careful tuning.
+Related ADR:
 
-- **Python**
-  - Very fast for prototypes; rich ecosystem.
-  - Less ideal for high-concurrency network daemons without extra frameworks.
+- [ADR 0003](adr/0003-http-json-control-plane-for-v0.md)
 
-### 2.2 Tentative Choice
+Current protocol rules:
 
-For v0, we **lean toward Go** for both coordinator and agent.
+- versioned requests use `X-Planetary-Protocol-Version: 1`
+- coordinator `/healthz` and agent `/healthz` are simple health checks
+- other coordinator endpoints and agent `/execute` require the protocol header
 
-**Reasons**
+Future decisions:
 
-- Simple deployment (single binary) fits **agents on many machines**.
-- Good fit for **concurrent networking** and **long-running daemons**.
-- Strong support and libraries for **gRPC + TLS**.
-- Easier onboarding and CI than a more complex toolchain for this use case.
+- OpenAPI, protobuf, gRPC, streaming logs, WebSockets, or SSE are not current
+  commitments. Add them only after an ADR or roadmap update.
 
-If a different language is chosen later, the change and its rationale should be captured in an ADR (e.g., `adr/0001-language-choice.md`).
+## Storage
 
----
+Choice: in-memory storage by default; optional Postgres for durable coordinator
+nodes/jobs.
 
-## 3. Communication Protocol Style
+Why in-memory remains:
 
-### 3.1 Options
+- fast default unit tests
+- simple local development
+- no external service requirement for ordinary `go test ./...`
 
-- **REST + JSON over HTTPS**
-  - Very familiar.
-  - Easy to debug.
-  - Less efficient for high-frequency, streaming interactions.
+Why Postgres:
 
-- **gRPC (HTTP/2 + Protobuf)**
-  - Strong typing via proto files.
-  - Efficient binary serialization.
-  - Built-in streaming and good support for mutual TLS.
+- nodes and jobs are naturally relational
+- durable job history matters after command execution exists
+- transactions and constraints are useful for future operations/reporting
+- provider-neutral `COORDINATOR_DATABASE_URL` keeps deployment flexible
 
-- **Custom TCP / Binary Protocol**
-  - Maximum control and potentially high performance.
-  - More custom work (framing, versioning, tooling).
+Related ADRs:
 
-  ### 3.2 Choice
+- [ADR 0004](adr/0004-in-memory-storage-for-v0.md)
+- [ADR 0006](adr/0006-postgres-coordinator-persistence.md)
+- [ADR 0010](adr/0010-postgres-schema-readiness.md)
 
-For the current v0 baseline, we use **HTTP/JSON** for the control plane, with
-optional HTTPS/mTLS for coordinator-agent traffic.
+Current constraints:
 
-**Reasons**
+- persist nodes and jobs only
+- no task fanout table today
+- no SQLite or alternate durable backend today
+- Postgres tests are opt-in
+- embedded schema initialization remains current
+- schema readiness metadata version `1` is current
+- schema readiness metadata is not a full migration framework
 
-- The early control plane is easier to debug with `curl` and browser tooling.
-- The data model is still evolving quickly.
-- The current repo already records this as an accepted decision in ADR 0003.
-- Milestone 4 records the trusted LAN mTLS security model in ADR 0007 without
-  changing the JSON wire shape.
+Future decisions:
 
-We still expect to revisit gRPC later if streaming, stronger contracts, or
-multi-client evolution make HTTP/JSON too limiting.
+- full schema migration framework
+- task/fanout storage
+- historical reporting tables
+- hosted database provider choices
 
----
+## Deployment and Local Development
 
-## 4. Data Storage
+Choice: local binaries are first-class; Docker Compose supports Postgres-backed
+local demos.
 
-### 4.1 Options
+Current shape:
 
-- **Relational DB (e.g., Postgres)**
-  - Strong consistency and schema.
-  - Good choice for jobs, tasks, node records.
+- `go run ./cmd/coordinator`
+- `go run ./cmd/agent`
+- `go install ./cmd/pmctl`
+- optional env-style config files
+- `examples/demo.sh` for in-memory smoke workflow
+- `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
+- `compose.yaml` for local coordinator + Postgres + agents
 
-- **Document Store (e.g., MongoDB)**
-  - Flexible schema.
-  - Good for variable payloads, less strict for relational queries.
+Related ADR:
 
-- **Embedded DB (e.g., SQLite)**
-  - Very simple to ship.
-  - Good for single-node coordinator, later scaling may require migration.
+- [ADR 0009](adr/0009-env-style-local-config-files.md)
 
-- **In-memory Only**
-  - Very fast, but state is lost on restart.
-  - Hard to reason about failures and recovery.
+Future decisions:
 
-### 4.2 Choice
+- production Dockerfile/image
+- release packaging
+- install scripts
+- systemd or launchd service examples
+- Kubernetes-style orchestration, if ever needed
 
-For durable coordinator runtime state, we use **Postgres**.
+Kubernetes is not a current product dependency or target. The current wedge is
+simpler private job execution, not a Kubernetes replacement.
 
-**Reasons**
+## Execution Model
 
-- Jobs and node states are naturally relational.
-- We need **durability** and **queries** across jobs and nodes.
-- Postgres is a solid default with good tooling and libraries.
+Choice: allowlisted direct command execution for the first real workload.
 
-In-memory storage remains available for fast unit tests and simple local runs.
-Milestone 3 persists nodes and jobs only; task fanout remains out of scope until
-a later milestone. ADR 0006 records the Postgres persistence decision and
-supersedes the temporary in-memory-only runtime decision in ADR 0004.
+Why:
 
-Milestone 8 keeps that storage model intact and adds operational verification:
-default tests remain DB-free, while opt-in Postgres integration tests and a
-Compose-backed smoke workflow verify schema initialization, restart recovery,
-and post-restart coordinator usability.
+- proves useful remote execution with minimal machinery
+- keeps the first workload inspectable and testable
+- avoids shell injection paths by never invoking a shell
+- gives operators explicit local control through an allowlist
 
-Milestone 9 keeps embedded schema initialization and adds lightweight schema
-readiness metadata. The coordinator records schema version `1`, exposes readiness
-through status, metrics, logs, tests, and smoke checks, and rejects databases
-marked with a newer schema version than the binary expects. This is intentionally
-not a full migration framework.
+Related ADR:
 
-Managed Postgres providers, including Supabase, can be evaluated later for
-hosted database operations and visual inspection. The coordinator should remain
-provider-neutral by accepting a standard Postgres connection string instead of
-depending on provider-specific APIs.
+- [ADR 0005](adr/0005-command-execution-v0.md)
 
----
+Current rules:
 
-## 5. Deployment and Local Development
+- jobs use `type="command"`
+- `command` is a logical allowlist key
+- `args` is an argument vector
+- `payload` is rejected for command jobs
+- agents map allowlist keys to executable paths/names
+- agents use `exec.CommandContext`
+- agents do not invoke a shell
+- timeout is fixed by agent config, default `30s`
+- stdout/stderr are captured separately and capped at `1 MiB` each
+- non-zero command exit is terminal
 
-### 5.1 Options
+Important limitation:
 
-- **Local binaries + manual startup**
-  - Minimal overhead but manual wiring of services.
+- This is not strong sandboxing. There is no container, VM, microVM, or
+  multi-tenant isolation today.
 
-- **Docker + Docker Compose**
-  - Standardizes runtime across machines.
-  - Easy to bring up coordinator, agents, and DB together.
+Future decisions:
 
-- **Kubernetes**
-  - Powerful orchestration and scaling.
-  - Heavy for early prototypes and local dev.
+- container-based execution
+- VM/microVM execution
+- per-job resource limits
+- approved workload templates
+- stronger isolation for shared or marketplace compute
 
-### 5.2 Choice
+## Scheduling Strategy
 
-For v0, we **lean toward Docker + Docker Compose** for local dev and demos.
-Local binaries are also first-class for day-to-day development, with optional
-env-style config files documented in ADR 0009.
+Choice: simple first-healthy-node dispatch.
 
-**Reasons**
+Why:
 
-- Good balance of **repeatability** and **simplicity**.
-- Easy to share a demo config (e.g., `docker-compose up` starts a full mesh env).
-- Env-style config files make repeated local coordinator, agent, and `pmctl`
-  runs easy without adding another config dependency.
-- The fast local smoke workflow stays in-memory by default, while the opt-in
-  Postgres smoke workflow verifies durable-state behavior, schema readiness, and
-  restart recovery.
-- K8s can be considered later if/when the system needs production-grade orchestration.
+- enough to prove registration, heartbeat, dispatch, retries, command execution,
+  persistence, mTLS, and CLI workflows
+- keeps early behavior easy to inspect and test
 
----
+Current behavior:
 
-## 6. Task Execution Model on Agents
+- a job is stored as `QUEUED`
+- dispatch attempts immediately after submission
+- coordinator selects the first node currently in `HEALTHY` state
+- retryable dispatch failures are retried against the selected node
+- if no healthy node exists at submission time, the job can remain queued
 
-### 6.1 Options
+Future decisions:
 
-- **Direct Process Execution**
-  - Run specific executables or scripts with arguments.
-  - Simple to implement but may be OS-dependent.
+- queued-job scheduler/re-dispatch loop
+- cross-node reassignment
+- capability-aware scheduling
+- load-aware scheduling
+- priorities, quotas, and fairness
 
-- **Container-based Execution**
-  - Run tasks in containers (e.g., Docker).
-  - Better isolation and repeatability but heavier.
+## Security Model
 
-- **VM / MicroVM-based Execution**
-  - Strong isolation.
-  - Heavy for small tasks and early prototypes.
+Choice: opt-in mTLS and node allowlists for trusted LAN security.
 
-### 6.2 Choice
+Related ADR:
 
-For v0, we **lean toward direct process execution** with clear constraints.
+- [ADR 0007](adr/0007-mtls-trusted-lan-security.md)
 
-**Reasons**
+Current reality:
 
-- Easier to implement and debug for early stages.
-- Good enough to prove the coordinator-agent-CLI flow.
-- Container-based execution can be added later once the basic system is stable.
+- plain HTTP remains available for local development
+- mTLS is enabled by configuring CA/cert/key files
+- coordinator secure mode requires node identity or fingerprint allowlists
+- registration enforces the allowlist in secure mode
+- certificate lifecycle is manual
 
----
+Future decisions:
 
-## 7. Scheduling Strategy
+- certificate generation helper
+- enrollment/rotation workflow
+- remote-node trust bootstrap
+- user/operator auth model
+- multi-tenant authorization
+- stronger secret-management and deployment hardening
 
-### 7.1 Options
+Do not describe the project as secure-by-default production infrastructure. It
+is a trusted LAN/private-network prototype with opt-in mTLS.
 
-- **Simple Round-Robin / Random**
-  - Very easy to implement.
-  - Does not consider node load or latency.
+## Operator Interface
 
-- **Score-Based Scheduling (Latency + Load + Reliability)**
-  - Uses metrics to pick better nodes.
-  - More logic, but more realistic behavior.
+Choice: thin CLI over coordinator APIs.
 
-- **Advanced Scheduling (e.g., queues per node, priorities, SLAs)**
-  - More complex policies and configuration.
+Related ADR:
 
-### 7.2 Choice
+- [ADR 0008](adr/0008-operator-cli.md)
 
-The current prototype uses a **simple healthy-node scheduler**: it picks the
-first healthy node when dispatching a job. A later v0 iteration can move to a
-score-based scheduler with a formula like:
+Why:
 
-```text
-score = α * RTT + β * Load + γ * Queue + δ * Reliability
-```
+- improves usability over raw `curl`
+- keeps coordinator-owned behavior in the coordinator
+- supports secure coordinator access with CA/cert/key files
+- provides human-readable and JSON output
 
-**Reason**
+Current commands:
 
-- The current scheduler is enough to validate registration, dispatch, retries,
-  command execution, and persistence.
-- The score-based shape captures key mesh concerns when we add richer node
-  metrics:
-  - Latency (RTT).
-  - Current load.
-  - Queue length.
-  - Historical reliability.
+- `pmctl status`
+- `pmctl nodes list`
+- `pmctl jobs list`
+- `pmctl jobs inspect <job-id>`
+- `pmctl submit command <command> [args...]`
 
-More advanced policies can be added later as needed.
+Future decisions:
 
----
+- richer CLI UX
+- dashboard
+- API contract generation
+- operator auth model
 
-## 8. Observability Stack
+## Observability
 
-### 8.1 Options
+Choice: structured logs and basic coordinator metrics.
 
-- **Logging Only**
-  - Simple application logs, no structured metrics.
+Current observability:
 
-- **Metrics + Logs**
-  - Expose metrics via HTTP endpoint and use something like Prometheus + Grafana.
+- coordinator and agent structured logs
+- `/status` for non-secret runtime status/config
+- `/metrics` for Prometheus-style counters and gauges
+- Postgres schema readiness metrics when Postgres is enabled
+- startup recovery metric for persisted `RUNNING` jobs
 
-- **Full Tracing**
-  - Distributed tracing (e.g., OpenTelemetry) from start.
+Future decisions:
 
-### 8.2 Choice
+- richer logs UX
+- tracing
+- dashboard
+- alerting/runbook conventions
 
-For v0, we **target metrics + logs**:
-  - Structured logs from coordinator and agents.
-  - A basic metrics endpoint from coordinator (and possibly agents).
+## Product-System Boundaries
 
-**Reason**
+Current product boundary:
 
-- Provides enough visibility for debugging and tuning.
-- Not as heavy as full tracing for a first prototype.
+- private/local compute mesh
+- machines are owned or controlled by the same user/team
+- allowlisted command-job execution
 
----
+Not current commitments:
 
-## 9. Recording Decisions (ADRs)
+- public compute marketplace
+- crypto/token system
+- payment or payout system
+- arbitrary untrusted compute
+- production multi-tenant platform
+- GPU/storage/bandwidth marketplace
+- Kubernetes/Ray/Airflow/Temporal replacement
 
-For any non-trivial choice (language, protocol, storage, etc.), we should:
-
-- Create a new file under [docs/adr/](docs/adr/), for example:
-  - [docs/adr/0001-language-choice.md]
-  - [docs/adr/0002-grpc-vs-rest-for-internal-protocol.md]
-
-Each ADR includes:
-
-- Context
-- Decision
-- Alternatives considered
-- Consequences
-
-This keeps the project history clear and explains **why** things look the way they do.
-
----
+Future product phases should be decided in the roadmap and supported by ADRs
+when they introduce non-trivial architecture, security, storage, protocol, or
+operational choices.

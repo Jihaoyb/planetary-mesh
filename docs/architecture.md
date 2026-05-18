@@ -1,505 +1,338 @@
-# Planetary Mesh – Architecture Overview
-
-This document describes the technical architecture of Planetary Mesh for the initial prototype (v0).  
-It focuses on a single-coordinator mesh running in a LAN or other trusted environment.
-
-For technology options and why we lean toward specific stacks and patterns, see:
-
-- `tech-choices.md` – stack/pattern options and rationale.
-- `roadmap.md` – current milestone plan from the merged baseline.
-- `adr/` – Architecture Decision Records for finalized choices.
+# Architecture
+
+This document describes the current Planetary Mesh architecture and separates it
+from future directions. Planetary Mesh is currently a trusted LAN/private-network
+prototype for allowlisted command-job execution across machines a user/team owns
+or controls.
+
+For product framing and sequencing, see:
+
+- [product-positioning.md](product-positioning.md)
+- [roadmap.md](roadmap.md)
+- [current-limitations.md](current-limitations.md)
+- [tech-choices.md](tech-choices.md)
+- [adr/](adr/)
+
+## Current Architecture
+
+### System View
+
+```text
++---------+        HTTP/JSON         +-------------+       HTTP/JSON        +---------+
+|  pmctl  +------------------------->+ Coordinator +---------------------->+ Agent   |
+| or curl |                          |             |       POST /execute    | daemon  |
++---------+                          +------+------+                        +----+----+
+                                             |
+                                             | optional
+                                             v
+                                        +----------+
+                                        | Postgres |
+                                        +----------+
+```
+
+Current runtime components:
+
+- **Coordinator**: single v0 control plane for node registry, health state, job
+  validation, job state, dispatch, retry policy, storage, status, and metrics.
+- **Agent**: daemon on a trusted machine. It registers with the coordinator,
+  sends heartbeats, and executes allowlisted command jobs through `/execute`.
+- **pmctl**: thin operator CLI over the coordinator HTTP/JSON API.
+- **Postgres**: optional durable store for coordinator nodes/jobs. In-memory
+  storage remains the default for local runs and ordinary unit tests.
 
----
+There is no dashboard today.
 
-## 1. Goals and Design Principles
+### Transport and Versioning
 
-### 1.1 Goals
+The v0 control plane uses HTTP/JSON with the Go standard library. ADR 0003
+records this decision.
 
-- Provide a simple way to run compute tasks across multiple devices on a LAN.
-- Keep security as a default (mutual TLS and basic node trust).
-- Offer a minimal but usable scheduling and retry system.
-- Support observability and troubleshooting from day one.
-- Keep the design incremental so we can extend it to WAN / global mesh later.
+Versioned control-plane requests use:
 
-### 1.2 Design Principles
+```text
+X-Planetary-Protocol-Version: 1
+```
+
+Coordinator endpoints:
 
-- **Separation of concerns**
-  - Coordinator handles control plane (jobs, nodes, scheduling).
-  - Agents handle data-plane execution (running tasks).
-  - Dashboard/CLI handles human interaction and visualization.
-- **Secure by default**
-  - All control-plane communication uses TLS with mutual authentication.
-  - Node participation is explicitly controlled (allowlist / CA).
-- **Simple first, extensible later**
-  - v0 uses a single coordinator, basic scheduling, and direct process execution.
-  - The architecture leaves room for:
-    - More advanced scheduling.
-    - Container-based execution.
-    - Verifiable compute and incentives.
-- **Observable from the start**
-  - Logging and metrics are part of the design, not an afterthought.
-- **Explicit decisions**
-  - Major choices (language, protocol, storage) are recorded in `tech-choices.md` and ADRs.
-
----
-
-## 2. Relationship to SDLC and Decision Docs
-
-The architecture is developed under a lightweight iterative SDLC (described in `kickoff.md`):
-
-- We do a first-pass design here.
-- We then implement in small iterations and refine the architecture as needed.
-- Significant changes or non-obvious tradeoffs are captured as:
-  - `tech-choices.md` – lists options and current leanings.
-  - `docs/adr/*.md` – finalized decisions with context and consequences.
-
-This means:
-
-- This document is conceptual (what the system is and how it behaves).
-- Implementation details (exact language, frameworks) can evolve but should stay consistent with the architecture unless an ADR explicitly changes direction.
-
----
-
-## 3. High-Level System View
-
-Conceptual view:
-
-~~~text
-+-----------+         +-----------------+         +-------------------+
-|           |  Jobs   |                 |  Tasks  |                   |
-|  Client   +-------->+   Coordinator   +-------->+     Agents        |
-| (CLI/UI)  |         |                 |  Results|   (Node daemons)  |
-+-----------+         +-----------------+<--------+-------------------+
-                             ^
-                             |
-                             v
-                        +-----------+
-                        | Dashboard |
-                        +-----------+
-~~~
-
-Mermaid diagram (for renderers that support it):
-
-~~~mermaid
-flowchart LR
-  Client[Client / CLI] --> Coordinator[Coordinator Service]
-  Dashboard[Dashboard UI] --> Coordinator
-
-  Coordinator --> Agent1[Agent Node 1]
-  Coordinator --> Agent2[Agent Node 2]
-  Coordinator --> Agent3[Agent Node 3]
-
-  Coordinator --> DB[(Coordinator DB)]
-~~~
-
-- **Coordinator**
-  - Central control plane for v0.
-- **Agents**
-  - Run on participant devices, executing tasks.
-- **CLI**
-  - Communicates with coordinator’s API.
-  - Dashboard work remains future work.
-
-Today, the merged prototype uses HTTP/JSON for the control plane, as captured in
-ADR 0003. Coordinator-agent traffic can run with mTLS and node allowlisting, as
-captured in ADR 0007. Longer-term protocol evolution remains open.
-
----
-
-## 4. Components
-
-### 4.1 Coordinator
-
-The coordinator is the central controller of a mesh.
-
-**Responsibilities**
-
-- **Runtime Configuration**
-  - Load listen address, storage, TLS, and node allowlist settings from
-    defaults, optional env-style config files, and environment variables.
-- **Node Registry**
-  - Accept node registration requests.
-  - Store node metadata: address, certificate identity, health status, and last heartbeat.
-- **Health Management**
-  - Process periodic heartbeats from agents.
-  - Mark nodes as `HEALTHY`, `SUSPECT`, or `OFFLINE` based on heartbeats and timeouts.
-- **Job Management**
-  - Expose an API for job submission.
-  - Store job metadata and status.
-  - Split jobs into tasks where applicable.
-- **Scheduling**
-  - Current: select the first healthy node for a job dispatch attempt.
-  - Future: select agents based on:
-    - Measured network latency (RTT).
-    - Current load and running tasks.
-    - Queue length.
-    - Reliability score (success/failure history).
-  - Use a score-based approach:
-
-    ~~~text
-    score = α * RTT + β * Load + γ * Queue + δ * Reliability
-    ~~~
-
-    Exact coefficients and formula are implementation details and may evolve.
-
-- **Dispatch and Tracking**
-  - Current: dispatch each job to a healthy agent and track job state
-    transitions (`QUEUED` → `RUNNING` → `COMPLETED` / `FAILED`).
-  - Current: retry retryable transport and agent `5xx` failures.
-  - Future: split jobs into tasks and track task state separately.
-- **Result Aggregation**
-  - Current: record a single command execution result on the job.
-  - Future: aggregate task results into final job results when fanout exists.
-  - Provide access to results via API.
-
-**Why a single coordinator for v0?**
-
-- Simpler failure model and easier to reason about.
-- Enough to validate scheduling, retries, and security.
-- Later phases can introduce:
-  - Standby coordinators.
-  - Partitioned coordinators for different regions.
-
-### 4.2 Agent
-
-The agent runs on participant devices and executes tasks.
-
-**Responsibilities**
-
-- **Runtime Configuration**
-  - Load coordinator URL, node id, listen address, advertised address, TLS
-    files, execution timeout, and command allowlist settings from defaults,
-    optional env-style config files, and environment variables.
-- **Registration**
-  - Load or obtain its certificate and key.
-  - Connect to coordinator using mTLS.
-  - Register capabilities (CPU, RAM, GPU, tags).
-- **Heartbeat**
-  - Periodically send heartbeat messages with:
-    - Current load (running tasks, CPU usage if available).
-    - Basic health signals (e.g., errors encountered).
-- **Task Execution**
-  - Receive tasks assigned by the coordinator.
-  - Run them in a sandboxed environment.
-    - The current v0 implementation supports allowlisted direct process
-      execution with a fixed timeout and bounded stdout/stderr capture.
-    - Container-based execution can be layered on later.
-- **Progress and Result Reporting**
-  - Report task start, progress (if needed), and completion.
-  - Return final result or error to coordinator.
-
-**Why separate agent processes instead of library calls in a client app?**
-
-- Agents can be reused for many different clients and workloads.
-- Clear separation between client (who submits jobs) and workers (agents).
-- Easier to run agents on machines that are not used by the original job submitter.
-
-### 4.3 CLI / Client
-
-`pmctl` is the current operator interface and is a thin layer on top of the
-coordinator’s API. Dashboard work remains future work.
-
-**Responsibilities**
-
-- **Node View**
-  - List nodes and their states (`HEALTHY`, `SUSPECT`, `OFFLINE`).
-  - Show address, last heartbeat, and certificate identity metadata when present.
-- **Job View**
-  - List jobs and their status (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
-  - Inspect command, node, attempts, captured output, and any error messages.
-- **Job Submission**
-  - Submit command jobs through the same coordinator validation path as direct
-    HTTP clients.
-- **Coordinator Status**
-  - Show non-secret runtime status/config such as protocol version, storage
-    backend, secure mode, node allowlist state, and dispatch settings.
-- **Local Configuration**
-  - Load coordinator URL and optional operator TLS files from defaults,
-    optional env-style config files, environment variables, and CLI flags.
-
-**Why keep clients thin?**
-
-- The core responsibility is operator interaction and simple control.
-- Most logic (validation, scheduling, retries) stays in the coordinator.
-- This makes it easier to maintain multiple clients (web UI, CLI, automation).
-
-### 4.4 Storage
-
-Coordinator storage holds persistent control-plane state:
-
-- Nodes
-- Jobs
-
-Postgres is the durable runtime storage target for the current v0 roadmap, as
-documented in `tech-choices.md` and ADR 0006:
-
-- Jobs and nodes benefit from transactions, constraints, and structured queries.
-- It keeps the design flexible for future reporting and analytics.
-
-In-memory storage remains useful for fast unit tests and simple local runs.
-Task fanout and a separate task table remain future work.
-
-Durable-state operation is verified separately from the default DB-free test
-path. The current opt-in checks cover embedded schema initialization, job ID
-continuity across store reopen, coordinator startup recovery for persisted
-`RUNNING` jobs, and a Compose-backed smoke workflow that proves the coordinator
-can restart and continue accepting command jobs with Postgres storage.
-
-Postgres also records lightweight schema readiness metadata in a
-`schema_version` table. Version `1` represents the current nodes/jobs-only
-schema plus the metadata marker. Coordinator startup backfills missing metadata
-for existing databases and rejects databases that record a newer schema version
-than the running binary expects. This preserves embedded schema initialization;
-it is not a full migration framework.
-
----
-
-## 5. Data Model (Logical)
-
-The logical data model is independent of any specific DB engine.
-
-### 5.1 ERD (Visual Overview)
-
-~~~mermaid
-erDiagram
-  NODE ||--o{ JOB : executes
-
-  NODE {
-    string id
-    string address
-    string state
-    datetime last_seen
-  }
-
-  JOB {
-    string id
-    string type
-    string status
-    string command
-    int attempts
-  }
-~~~
-
-### 5.2 Node
-
-Represents an agent participating in the mesh.
-
-Fields (example):
-
-- `id` – unique identifier
-- `address` – coordinator-reachable agent address
-- `state` – enum: `HEALTHY`, `SUSPECT`, `OFFLINE`
-- `last_heartbeat_at` / `last_seen` – timestamp updated on registration and heartbeat
-- `certificate` – subject, DNS/IP/URI identities, SHA-256 fingerprint, and expiration when mTLS is enabled
-- `created_at` – durable storage creation timestamp
-
-### 5.3 Job
-
-Represents a logical workload submitted by a client.
-
-Fields (example):
-
-- `id` – unique identifier
-- `type` – job type; current real workload type is `command`
-- `payload` – legacy opaque payload for non-command jobs
-- `command`, `args` – allowlisted command key and argument vector for command jobs
-- `status` – enum: `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`
-- `attempts`, `node_id`, `started_at`, `completed_at`
-- `exit_code`, `stdout`, `stderr`, truncation flags, and `last_error`
-- `created_at`, `updated_at`
-
-### 5.4 Task
-
-Separate task records are planned for future fanout work. Milestone 3 persists
-nodes and jobs only.
-
----
-
-## 6. Key Flows
-
-This section describes core runtime flows. Sequence diagrams can be added later.
-
-### 6.1 Node Registration
-
-1. Agent starts with a configured coordinator URL, advertised address, and
-   optional CA/certificate/key files.
-2. In secure mode, the agent connects to the coordinator over HTTPS with a
-   client certificate and validates the coordinator certificate against the
-   configured CA.
-3. Agent sends an HTTP/JSON `POST /register` request with node id and address.
-4. In secure mode, the coordinator verifies the agent certificate and rejects
-   registration unless the node id matches an allowed certificate identity or
-   SHA-256 fingerprint.
-5. Coordinator creates or updates the node record, stores certificate metadata,
-   and returns success.
-6. Agent continues sending the same registration request as a heartbeat.
-
-### 6.2 Heartbeat and Health Management
-
-1. Agent sends heartbeat messages at a fixed interval (for example, every few seconds).
-2. Coordinator:
-   - Updates `last_heartbeat_at`.
-   - Updates load metrics (running task count, optional CPU usage).
-3. A background process periodically:
-   - Marks nodes as `SUSPECT` if heartbeat is stale beyond threshold A.
-   - Marks nodes as `OFFLINE` if heartbeat is stale beyond threshold B (> A).
-4. Node state does not cancel an already in-flight execution attempt in v0.
-
-### 6.3 Job Submission and Scheduling
-
-1. Client sends a `SUBMIT_JOB` request to coordinator with:
-   - Job type.
-   - For command jobs, a logical command key and optional args.
+- `GET /healthz` - unversioned basic health check
+- `GET /status` - non-secret runtime status/config
+- `POST /register` - agent registration and heartbeat
+- `GET /nodes` - list known nodes
+- `POST /jobs` - submit a job
+- `GET /jobs` - list jobs
+- `GET /jobs/{id}` - inspect a job
+- `GET /metrics` - Prometheus-style text metrics
+
+Agent endpoints:
+
+- `GET /healthz` - unversioned basic health check
+- `POST /execute` - execute an assigned job
+
+All coordinator endpoints except `/healthz` require the protocol header. Agent
+`/execute` also requires it. Missing or mismatched versions return
+`409 Conflict`.
+
+### Coordinator
+
+Coordinator responsibilities:
+
+- load listen address, storage, TLS, and node allowlist settings from defaults,
+  optional env-style config files, environment variables, and supported flags
+- accept agent registration and heartbeat requests
+- store node id, address, last seen timestamp, health state, and certificate
+  metadata when present
+- update node health states based on heartbeat age
+- validate job submissions
+- store job metadata and execution result fields
+- select the first healthy node for a dispatch attempt
+- dispatch to agent `/execute`
+- retry retryable transport errors and agent `5xx` responses
+- mark terminal job outcomes as `COMPLETED` or `FAILED`
+- expose `/status` and `/metrics`
+- use in-memory storage by default or Postgres when configured
+
+The coordinator owns validation, scheduling, retry policy, and state
+transitions. These responsibilities should not move into agents or `pmctl`.
+
+### Agent
+
+Agent responsibilities:
+
+- load coordinator URL, node id, listen address, advertised address, TLS files,
+  execution timeout, and command allowlist settings
+- register with the coordinator on startup
+- continue sending registration requests as heartbeats
+- expose `/execute`
+- execute only locally allowlisted command jobs
+- enforce fixed execution timeout and bounded output capture
+- return execution result fields to the coordinator
+
+The current registration payload includes node id and address. Agents do not
+report capabilities, load, GPU state, queue depth, or task-level progress today.
+
+### pmctl
+
+`pmctl` is the current operator interface. It is intentionally thin.
+
+Supported operations:
+
+- `pmctl status`
+- `pmctl nodes list`
+- `pmctl jobs list`
+- `pmctl jobs inspect <job-id>`
+- `pmctl submit command <command> [args...]`
+
+`pmctl` sends the protocol version header, supports JSON output, and can be
+configured with a coordinator URL plus optional CA/cert/key files for secure
+coordinator access. It does not own scheduling, validation, retries, storage, or
+state transitions.
+
+### Storage
+
+Coordinator storage holds:
+
+- nodes
+- jobs
+
+Default storage is in-memory. This keeps local development simple and ordinary
+`go test ./...` DB-free.
+
+When `COORDINATOR_DATABASE_URL` is configured, the coordinator uses Postgres for
+durable nodes/jobs. ADR 0006 records the Postgres decision. ADR 0010 records the
+lightweight schema readiness metadata.
+
+Postgres behavior today:
+
+- embedded schema initialization at startup
+- `schema_version` table with current version `1`
+- backfill missing schema metadata on existing databases
+- reject databases marked with a newer schema version than the running binary
+  expects
+- expose schema readiness through startup logs, `/status`, `/metrics`,
+  `pmctl --json status`, tests, and the Postgres smoke workflow
+- mark persisted `RUNNING` jobs as `FAILED` during coordinator startup with:
+  `coordinator restarted before result was recorded`
+
+This is not a full migration framework.
+
+### Command Execution Model
+
+The current real workload type is `command`.
+
+Submission:
+
+```json
+{
+  "type": "command",
+  "command": "echo",
+  "args": ["hello mesh"]
+}
+```
+
+Rules:
+
+- `command` is a logical allowlist key.
+- `args` is an argument vector.
+- `payload` is rejected for `type="command"`.
+- Agents map logical command keys to local executable paths through
+  `AGENT_COMMAND_ALLOWLIST`.
+- Agents execute with `exec.CommandContext`.
+- Agents never invoke a shell.
+- The execution timeout is fixed by agent config, default `30s`.
+- Stdout and stderr are captured separately.
+- Each stream is capped at `1 MiB` and reports a truncation flag when clipped.
+- Non-zero command exit is terminal and is not retried by the coordinator.
+
+This is allowlisted direct process execution. It is not strong sandbox,
+container, VM, or multi-tenant isolation.
+
+### Scheduling and Dispatch
+
+Current dispatch behavior:
+
+1. Client submits a job to `POST /jobs`.
 2. Coordinator validates and stores the job as `QUEUED`.
-3. Coordinator chooses a healthy node and dispatches one execution request.
-4. Coordinator marks the job `RUNNING` for each dispatch attempt.
-5. Agent executes the allowlisted command directly with a fixed timeout and
-   bounded stdout/stderr capture.
-6. Coordinator records the terminal job result as `COMPLETED` or `FAILED`.
+3. A goroutine attempts dispatch immediately.
+4. Coordinator lists nodes and picks the first `HEALTHY` node.
+5. Coordinator marks the job `RUNNING` for each attempt.
+6. Coordinator sends an HTTP/JSON `POST /execute` request to the selected agent.
+7. Coordinator records the terminal result as `COMPLETED` or `FAILED`.
 
-On coordinator startup with Postgres storage, any persisted `RUNNING` jobs are
-marked `FAILED` with `coordinator restarted before result was recorded`. This
-is intentionally coordinator-owned recovery; agents do not reconcile completed
-but unrecorded work in v0.
+Retry behavior:
 
-### 6.4 Failure Handling and Retry
+- transport errors, coordinator request timeout, and agent `5xx` responses are
+  retryable under the dispatch policy
+- validation errors, allowlist rejection, protocol mismatch, and non-zero
+  command exit are terminal
+- retry attempts use exponential backoff
+- node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
+  in-flight execution attempt in v0
 
-1. If an agent stops sending heartbeats or fails to report results:
-   - Coordinator detects stale heartbeat or task timeout.
-2. Transport errors, coordinator request timeout, and agent `5xx` responses are
-   retried under the dispatch policy.
-3. Validation failures, allowlist rejection, protocol mismatch, and non-zero
-   command exit are terminal.
-4. If retry attempts are exhausted, the job is marked `FAILED`.
+There is no scheduler loop that later revisits queued jobs left behind because
+no healthy node existed at submission time.
 
----
+### Node Registration and Health
 
-## 7. Networking and Protocol
+Registration flow:
 
-### 7.1 Transport and APIs
+1. Agent starts with coordinator URL, node id, listen address, and advertised
+   address.
+2. Agent sends `POST /register` with node id and address.
+3. Coordinator creates or updates the node record.
+4. The same request is repeated as heartbeat.
 
-The long-term architecture may still use a structured RPC framework (for
-example, gRPC) for:
+Health flow:
 
-- Coordinator ↔ Agent
-  - `REGISTER_NODE`
-  - `HEARTBEAT`
-  - `ASSIGN_TASK`
-  - `TASK_RESULT`
-- Client / Dashboard ↔ Coordinator
-  - `SUBMIT_JOB`
-  - `GET_JOB_STATUS`
-  - `LIST_JOBS`
-  - `LIST_NODES`
-  - `GET_COORDINATOR_STATUS`
-  - Metrics endpoint (HTTP).
+- registration/heartbeat sets the node to `HEALTHY`
+- a background health checker marks stale nodes `SUSPECT`
+- nodes stale for longer are marked `OFFLINE`
 
-For the current merged baseline and near-term roadmap, coordinator-agent and
-client-coordinator communication use HTTP/JSON with explicit versioning. This is
-documented in ADR 0003. Coordinator-agent communication can be upgraded to
-mutual TLS without changing the JSON wire shape, as documented in ADR 0007.
+Current thresholds are implementation details. Health state affects new dispatch
+selection but does not cancel already in-flight execution.
 
-### 7.2 Discovery
+### Security Model
 
-Possible approaches:
+Planetary Mesh supports opt-in mTLS and node allowlists today, but plain HTTP
+remains available for local development unless configuration changes.
 
-- **Static configuration**
-  - Agents are configured with the coordinator’s address through environment
-    variables or env-style local config files.
-  - Simple and predictable for v0.
-- **mDNS-based discovery**
-  - Coordinator advertises its presence via mDNS.
-  - Agents discover coordinator on the LAN.
+Current secure mode:
 
-The current implementation uses static configuration. mDNS discovery can be
-added once basic functionality is stable.
+- coordinator and agents are configured manually with CA, certificate, and key
+  files
+- coordinator secure mode requires allowed node identities or fingerprints
+- agents validate the coordinator certificate against the configured CA
+- coordinator validates agent client certificates against the configured CA
+- coordinator rejects `/register` unless node id matches an allowlisted
+  certificate identity or fingerprint
+- coordinator dispatch to agent `/execute` uses HTTPS and presents the
+  coordinator certificate as a client certificate
+- node inspection includes certificate subject, DNS/IP/URI identities,
+  fingerprint, and expiration metadata when present
 
----
+Certificate issuance, distribution, enrollment, and rotation are manual.
 
-## 8. Security Model (v0)
+## Current Limitations
 
-Current security model:
+Current private-mesh limitations:
 
-- **Identity**
-  - Agents can be configured with a unique certificate and private key.
-  - Coordinator can be configured with its own certificate and private key.
-  - Certificate distribution is manual for v0.
-- **Authentication**
-  - In secure mode, agents validate the coordinator certificate against a trusted CA.
-  - In secure mode, the coordinator validates agent certificates against the same trusted CA.
-- **Authorization**
-  - Secure coordinator mode requires allowed node identities or fingerprints.
-  - Only allowlisted nodes may register and receive work.
-  - Future work may add more granular roles and multi-tenant controls.
-- **Confidentiality and Integrity**
-  - In secure mode, coordinator-agent control-plane communication uses TLS for encryption and integrity.
-  - Job payloads can be encrypted or signed as needed (future refinement).
-- **Sandboxing**
-  - Current: command jobs run as allowlisted direct processes with bounded output
-    and a fixed timeout.
-  - Container-based isolation is a future extension.
+- no scheduler loop for queued jobs
+- no load-aware or capability-aware scheduling
+- no cross-node reassignment after a selected node exhausts retry attempts
+- no agent reconciliation after coordinator restart
+- no strong sandbox/container/VM isolation
+- no per-job timeout override
+- no file upload/result download workflow
+- no dashboard
+- no generated API contract such as OpenAPI or protobuf
+- no production image or packaged release workflow
+- no automated mTLS certificate lifecycle
+- no multi-tenant authorization model
 
-Advanced verifiable compute (redundant execution, proofs, TEEs) is a later phase and not part of v0.
+Current product-scope limitations:
 
----
+- no public marketplace
+- no payment, payout, dispute, reputation, or transaction-fee system
+- no approved shared compute pool
+- no remote private mesh networking
+- no implemented GPU/storage/bandwidth pooling
 
-## 9. Observability
+See [current-limitations.md](current-limitations.md) for a risk-oriented view.
 
-### 9.1 Logging
+## Future Architecture Directions
 
-- Coordinator logs:
-  - Node register/unregister.
-  - Heartbeat state changes (healthy → suspect → offline).
-  - Job submission and completion.
-  - Dispatch attempts, retries, and failures.
-- Agent logs:
-  - Command execution start, completion, and failure.
-  - Local sandbox errors and resource issues.
-  - Connectivity problems.
+These are planned or possible directions, not current implementation.
 
-Logs should be structured enough (for example, JSON) to be consumed by log processors if needed.
+Private mesh hardening:
 
-### 9.2 Metrics
+- queued-job scheduler/re-dispatch loop
+- cross-node reassignment
+- explicit job state transition documentation
+- node capabilities/load reporting
+- operator runbooks
+- API inventory and contract decision
+- better install/release workflow
+- certificate/onboarding helper
+- agent reconciliation strategy after coordinator restart
 
-Coordinator and optionally agents expose metrics such as:
+Productized private mesh:
 
-- Number of nodes by state.
-- Number of jobs per status (queued, running, completed, failed).
-- Number of persisted running jobs recovered during coordinator startup.
-- Postgres schema readiness and recorded/expected schema versions when Postgres
-  storage is enabled.
-- Number of dispatch attempts and errors.
-- Average job latency.
-- Scheduler decisions (for example, jobs per node).
+- richer CLI or dashboard
+- job templates
+- logs UX
+- file/result handling for selected workflows
+- private AI/batch demo pipelines
+- stronger packaging and release story
 
-These can be exposed via an HTTP endpoint for tools like Prometheus.
+Remote private mesh:
 
-Why metrics from v0:
+- secure remote registration
+- stronger node identity model
+- access control
+- remote health checks
+- network failure handling
+- TLS/cert lifecycle tooling
 
-- Scheduling and retry logic are sensitive to configuration and environment.
-- Metrics provide feedback to tune thresholds and coefficients.
-- They help validate that the system is doing what we expect under load and failure.
+Trusted shared pool:
 
----
+- admin-approved nodes
+- trust levels
+- usage accounting
+- quotas/credits
+- approved workload templates
+- internal chargeback reports
 
-## 10. Future Evolution (Beyond v0)
+Overflow marketplace exploration:
 
-The v0 architecture is deliberately simple but should support:
+- verified provider onboarding
+- benchmarking
+- pricing and metering
+- payouts and platform fee
+- reputation/uptime scoring
+- disputes/refunds
+- abuse prevention
+- stronger sandboxing and tenant isolation
+- strict acceptable-use controls
 
-- Multiple coordinators
-  - Sharding by region or job type.
-  - Coordinator failover.
-- WAN / Cross-site mesh
-  - Registry service for gluing meshes together.
-  - Latency-aware routing between regions.
-- Verifiable and incentivized compute
-  - Redundant task execution and comparison.
-  - Integration with TEEs or cryptographic proofs.
-  - Credit or token systems tied to real work done.
-- Multi-tenant features
-  - Strong isolation between tenants.
-  - Authorization and quota per org or user.
-
-Those directions are not implemented in v0, but the current architecture should not block them.
-
----
+Marketplace and payment systems should not be implemented until the private mesh
+and trusted shared-pool foundations are mature and explicitly planned.

@@ -1,262 +1,348 @@
-# Planetary Mesh Roadmap
+# Roadmap
 
-This document is the canonical roadmap for Planetary Mesh after Milestone 9
-Postgres schema migration readiness.
+This is the canonical roadmap for Planetary Mesh. It separates the current
+implemented baseline from future product direction.
 
-## Current Stage
+Planetary Mesh starts as a private/local compute mesh: users run jobs across
+machines they already own or control. Remote private mesh, trusted shared compute
+pools, and overflow compute marketplace features are later stages, not current
+capabilities.
 
-- Baseline: `main` after PR #13 (`07088d8`)
-- Stage: command-capable control-plane prototype with durable coordinator state, lightweight Postgres schema readiness metadata, opt-in coordinator-agent mTLS, an operator CLI, file-based local config, repeatable local smoke workflows, and opt-in durable Postgres verification
-- Current capabilities:
-  - thin `cmd/agent` and `cmd/coordinator` entrypoints
-  - reusable logic in `internal/agent` and `internal/coordinator`
-  - HTTP/JSON control plane with protocol versioning, job detail, and metrics
-  - allowlisted direct command execution with bounded stdout/stderr capture
-  - optional Postgres persistence for nodes and jobs
-  - optional mTLS between coordinator and agents with node allowlisting
-  - `pmctl` for status, node/job listing, job inspection, and command job submission
-  - env-style local config files for coordinator, agents, and `pmctl`
-  - config-driven local smoke demo for one coordinator, two agents, and `pmctl`
-  - opt-in Postgres smoke workflow for durable-state and restart-recovery verification
-  - Postgres schema readiness metadata exposed through `/status`, `/metrics`,
-    logs, tests, and the Postgres smoke workflow
-  - startup recovery metric for persisted `RUNNING` jobs failed during coordinator startup
-  - structured logging, graceful shutdown, retry/backoff, and E2E/failure tests
+## Current Baseline
 
-Milestones 1 through 9 are complete.
+- Baseline: `main` after PR #14 / Milestone 9 (`46a0af2`)
+- Stage: Go 1.25.4 LAN/private-network command-job prototype
+- Positioning: lightweight private compute mesh for running command-based jobs
+  across machines you own or control, with a future path toward trusted overflow
+  compute
 
-## Milestone 2: Real Command Execution
+Implemented capability:
 
-Goal: replace the stub `/execute` path with a real, safe, direct-process workload.
+- `cmd/coordinator`, `cmd/agent`, and `cmd/pmctl`
+- HTTP/JSON coordinator/agent control plane
+- `X-Planetary-Protocol-Version: 1` protocol header
+- node registration and heartbeat
+- node health states: `HEALTHY`, `SUSPECT`, `OFFLINE`
+- command job submission with `type="command"`, `command`, and optional `args`
+- first-healthy-node dispatch at job submission time
+- allowlisted direct command execution using `exec.CommandContext`
+- no shell execution
+- bounded stdout/stderr capture with truncation flags
+- retry handling for retryable dispatch failures
+- optional Postgres persistence for nodes/jobs
+- Postgres schema readiness metadata version `1`
+- startup recovery for persisted `RUNNING` jobs
+- opt-in mTLS and node allowlists with manual certificate lifecycle
+- coordinator `/status` and `/metrics`
+- env-style config files
+- local in-memory smoke script
+- Postgres durability smoke script
+- thin CLI for status, node/job listing, job inspection, and command submission
+- CI/build/test health with default DB-free tests
 
-Implemented in PR #7:
+Current limitations are tracked in
+[current-limitations.md](current-limitations.md).
 
-- `POST /jobs` supports `type="command"`, `command`, and optional `args`
-- `payload` is rejected for `type="command"` instead of being silently ignored
-- `GET /jobs` and `GET /jobs/{id}` expose execution detail fields:
-  - `attempts`
-  - `started_at`
-  - `completed_at`
-  - `exit_code`
-  - `stdout`
-  - `stderr`
-  - `stdout_truncated`
-  - `stderr_truncated`
-  - `last_error`
-- All control-plane HTTP requests require `X-Planetary-Protocol-Version: 1`
-- Agent executes only allowlisted commands using `exec.CommandContext`
-- Fixed agent-configured timeout, default `30s`
-- Stdout and stderr are capped at `1 MiB` each and marked as truncated when clipped
-- Add `examples/demo.sh` as the living smoke demo
+## Completed Baseline / Milestones 1-9
+
+The first nine milestones established a working private LAN/trusted-network
+prototype. This history remains useful because it explains why the current
+baseline is intentionally narrow.
+
+### Milestone 1: Control-Plane Foundation
+
+Goal: establish the first coordinator/agent shape and basic docs.
+
+Completed outcomes:
+
+- Go coordinator and agent services
+- HTTP/JSON control plane decision
+- initial node/job model
+- in-memory state for fast local development
+- lightweight process, architecture, and ADR documentation
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 2: Real Command Execution
 
-- A real allowlisted command can be submitted and completed end to end
-- Success, non-zero exit, timeout, allowlist rejection, truncation, and
-  protocol mismatch are all test-covered
+Goal: replace the stub `/execute` path with a real, constrained workload.
 
-## Milestone 3: Durable Coordinator State
+Completed outcomes:
+
+- `POST /jobs` supports `type="command"`, `command`, and optional `args`
+- command jobs reject `payload`
+- job responses include attempts, timestamps, exit code, stdout, stderr,
+  truncation flags, and last error
+- all control-plane requests use `X-Planetary-Protocol-Version: 1`
+- agent executes only allowlisted commands with `exec.CommandContext`
+- no shell execution
+- fixed agent timeout, default `30s`
+- stdout and stderr capped at `1 MiB` each
+- success, non-zero exit, timeout, allowlist rejection, truncation, protocol
+  mismatch, and retry/terminal failure behavior are test-covered
+- `examples/demo.sh` became the living local smoke demo
+
+Status: complete
+
+### Milestone 3: Durable Coordinator State
 
 Goal: preserve node/job history across coordinator restarts.
 
-Implementation changes:
+Completed outcomes:
 
-- Introduce narrow storage interfaces aligned to coordinator needs
-- Keep in-memory implementations for fast unit tests
-- Add a Postgres-backed implementation for runtime and integration tests
-- Persist nodes and jobs only; task fanout is still out of scope
-- Add Compose support for coordinator + Postgres + agent
-- On startup, any persisted `RUNNING` jobs are marked `FAILED` with a
-  restart-specific error
+- narrow node/job storage interfaces
+- in-memory stores retained for default tests and local fallback
+- optional Postgres store for runtime/integration use
+- nodes and jobs persisted; task fanout remains out of scope
+- Compose support for coordinator + Postgres + agent
+- persisted `RUNNING` jobs marked `FAILED` on coordinator startup with
+  `coordinator restarted before result was recorded`
 
-Status: complete
-
-Known v0 limitation:
+Known limitation:
 
 - If an agent completed a job before a crash but the coordinator did not record
-  the result, that result is lost. There is no best-effort agent reconciliation
-  in v0.
-
-## Milestone 4: Trusted LAN Security
-
-Goal: secure coordinator-agent communication and node admission.
-
-Implemented changes:
-
-- Add mTLS between coordinator and agents
-- Add CA/cert/key/allowlist configuration
-- Enforce node allowlisting during registration
-- Extend node inspection with certificate identity metadata
-- Keep manual certificate distribution for v0
+  the result, that result is lost. There is no agent reconciliation today.
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 4: Trusted LAN Security
 
-- Coordinator-agent registration and dispatch can run over HTTPS with mutual
-  certificate authentication
-- Unauthorized nodes are rejected during registration
-- Node inspection includes operator-facing certificate metadata
-- Handshake success/failure and secured dispatch are test-covered without
-  requiring external services
+Goal: support authenticated coordinator-agent communication and explicit node
+admission for trusted LAN operation.
 
-## Milestone 5: Operator CLI
+Completed outcomes:
 
-Goal: make the product usable without `curl`.
+- opt-in mTLS between coordinator and agents
+- CA/cert/key configuration
+- node allowlisting by certificate identity or SHA-256 fingerprint
+- registration rejects unauthorized nodes in secure mode
+- node inspection includes certificate identity metadata
+- manual certificate distribution for v0
+- handshake success/failure, unauthorized node rejection, and secured dispatch
+  are test-covered
 
-Implemented changes:
+Important current-state note:
 
-- Add a thin CLI under `cmd/pmctl`
-- Support:
-  - submit command job
-  - list nodes
-  - list jobs
-  - inspect job
-  - show coordinator status/config
-- Keep the CLI as a pure client over coordinator APIs
+- mTLS is supported but not the default. Plain HTTP remains available for local
+  development unless secure configuration is supplied.
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 5: Operator CLI
 
-- Operators can submit command jobs, list nodes/jobs, inspect a job, and view
-  non-secret coordinator status/config without writing `curl` requests
-- Plain local development works by default
-- Secure coordinator access works with CA/cert/key configuration
-- CLI tests cover command behavior and an in-process coordinator smoke flow
+Goal: make common operator workflows possible without hand-written `curl`.
 
-## Milestone 6: Config and Install Ergonomics
+Completed outcomes:
 
-Goal: improve local operator ergonomics without changing env-based runtime
-behavior.
-
-Implemented changes:
-
-- Add optional env-style config files for coordinator, agent, and `pmctl`
-- Keep existing environment variables working
-- Add `--config <path>` and per-binary config path env vars
-- Define precedence as defaults, config file, non-empty environment variables,
-  then CLI flags where supported
-- Add tracked config examples for a coordinator, two local agents, and `pmctl`
-- Document `go install ./cmd/pmctl` so operators can run `pmctl` directly
+- thin CLI under `cmd/pmctl`
+- coordinator status/config inspection
+- node listing
+- job listing
+- job inspection
+- command job submission
+- secure coordinator access with manually configured CA/cert/key files
+- in-process coordinator smoke coverage
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 6: Config and Install Ergonomics
 
-- Existing env-only coordinator, agent, and `pmctl` runs keep working
-- Local two-agent development can be run from example config files
-- Config parsing, precedence, and runtime wiring are test-covered
-- Default `go test ./...` remains free of external services
+Goal: improve local operator ergonomics while preserving env-based runtime
+configuration.
 
-## Milestone 7: Local Smoke and Release Workflow
+Completed outcomes:
 
-Goal: make the current local operator workflow repeatable and easy to verify
-end to end from a fresh checkout.
-
-Implementation changes:
-
-- Update `examples/demo.sh` into the canonical local smoke workflow
-- Start one coordinator and two agents from tracked env-style config examples
-- Use `pmctl` for coordinator status, node listing, command submission, job
-  inspection, and job listing
-- Keep the smoke workflow plain-HTTP and in-memory by default so it requires no
-  external services
-- Align `compose.yaml` with a coordinator + Postgres + two-agent demo stack
-- Add lightweight tests that keep tracked config examples and demo script syntax
-  from drifting
+- optional env-style config files for coordinator, agent, and `pmctl`
+- existing environment variables continue to work
+- `--config <path>` support
+- per-binary config path env vars
+- precedence: defaults, config file, non-empty env vars, CLI flags where
+  supported
+- tracked config examples for one coordinator, two agents, and `pmctl`
+- documented `go install ./cmd/pmctl`
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 7: Local Smoke and Release Workflow
 
-- `./examples/demo.sh` proves coordinator, two agents, config files, command
-  execution, and `pmctl` work together locally
-- Compose demo wiring includes two distinct agents without changing Postgres
-  storage behavior
-- Existing env var behavior, config precedence, command execution, storage,
-  mTLS, and `pmctl` behavior are preserved
-- Default `go test ./...` remains fast and free of external services
+Goal: make the current local workflow repeatable from a fresh checkout.
 
-## Milestone 8: Postgres Ops Readiness
+Completed outcomes:
 
-Goal: make durable coordinator operation easier to verify and reason about
-without changing the v0 control-plane model.
+- `examples/demo.sh` runs coordinator, two agents, config files, command
+  execution, and `pmctl` end to end
+- smoke workflow uses plain HTTP and in-memory storage by default
+- `compose.yaml` runs coordinator + Postgres + two agents
+- tests protect tracked config examples and demo script syntax from drift
 
-Implemented changes:
+Status: complete
 
-- Add opt-in Postgres integration coverage for schema initialization
-  idempotency, job ID continuity across store reopen, and restart recovery
-  preserving terminal jobs
-- Add `examples/postgres_smoke.sh` as the durable-state smoke workflow
-- Keep `examples/demo.sh` as the default in-memory smoke workflow
-- Parameterize Compose host ports while preserving existing defaults
-- Expose `planetary_jobs_recovered_on_startup_total` from `/metrics`
-- Document the split between fast DB-free tests and opt-in durable Postgres
+### Milestone 8: Postgres Ops Readiness
+
+Goal: make durable coordinator operation easier to verify.
+
+Completed outcomes:
+
+- opt-in Postgres integration coverage for schema initialization idempotency,
+  job ID continuity, and restart recovery
+- `examples/postgres_smoke.sh` durable-state workflow
+- default in-memory smoke workflow preserved
+- Compose host ports can be overridden
+- `planetary_jobs_recovered_on_startup_total` exposed from `/metrics`
+- documented split between DB-free default tests and opt-in durable Postgres
   verification
 
 Status: complete
 
-Acceptance criteria:
+### Milestone 9: Postgres Schema Migration Readiness
 
-- A Postgres-backed coordinator can be started, inspected through `pmctl`,
-  restarted, and used again after restart
-- A persisted `RUNNING` job is marked `FAILED` on coordinator startup with the
-  restart-specific error
-- Operators can inspect durable smoke failures through captured Compose logs,
-  `/status`, `/metrics`, and `pmctl jobs inspect`
-- Existing env var/config file behavior, command execution, Postgres storage,
-  mTLS, `pmctl`, config precedence, and in-memory smoke behavior are preserved
-- Default `go test ./...` remains fast and free of external services
+Goal: make future Postgres schema changes safer without introducing a full
+migration framework or changing runtime behavior.
 
-## Milestone 9: Postgres Schema Migration Readiness
+Completed outcomes:
 
-Goal: make future Postgres schema changes safer and easier to reason about
-without introducing a full migration framework or changing runtime behavior.
-
-Implemented changes:
-
-- Keep embedded Postgres schema initialization as the runtime model
-- Add a `schema_version` metadata table with current schema version `1`
-- Backfill missing schema metadata on existing Postgres databases
-- Reject databases marked with a newer schema version than the coordinator
-  binary expects
-- Expose schema readiness through startup logs, `/status`, `/metrics`, opt-in
-  Postgres tests, and the Postgres smoke workflow
-- Keep default tests DB-free and keep Postgres as the only durable persistence
-  target
+- embedded Postgres schema initialization remains the runtime model
+- `schema_version` metadata table added
+- current schema version recorded as `1`
+- missing metadata backfilled on existing Postgres databases
+- databases with newer schema versions rejected at startup
+- schema readiness exposed through startup logs, `/status`, `/metrics`,
+  opt-in Postgres tests, `pmctl --json status`, and the Postgres smoke workflow
+- default tests remain DB-free
 
 Status: complete
 
-Acceptance criteria:
+## Phase 1: Private Mesh Hardening
 
-- Existing in-memory, command execution, config, mTLS, `pmctl`, local smoke, and
-  Postgres restart-recovery behavior is preserved
-- Operators can inspect Postgres schema readiness with `pmctl --json status` and
-  `/metrics`
-- A database initialized before schema metadata is backfilled without losing
-  nodes, jobs, or job ID continuity
-- A database with a newer recorded schema version is rejected on startup
-- Default `go test ./...` remains fast and free of external services
+Goal: make the current local/trusted mesh more reliable and easier to operate.
+
+Potential work:
+
+- queued-job scheduler/re-dispatch loop
+- cross-node reassignment after dispatch failure
+- simple node capabilities/load reporting
+- clearer job state transitions
+- agent reconciliation strategy after coordinator restart
+- better operator runbooks
+- API inventory and API contract decision
+- improved local install workflow
+- certificate/onboarding helper planning
+- stronger docs around execution risks
+
+Non-goals:
+
+- marketplace features
+- payment systems
+- public-node onboarding
+- remote private mesh networking
+- dashboard unless explicitly scoped as operator UX work
+
+## Phase 2: Productized Private Mesh
+
+Goal: make the private mesh usable by a real developer or small team.
+
+Potential work:
+
+- richer CLI/operator UX or dashboard
+- API keys or another user-facing auth model
+- job templates for repeatable private workloads
+- file upload/result download if needed by selected workflows
+- persistent job history improvements
+- logs UX
+- packaged release or production image
+- demo pipeline such as OCR, transcription, embeddings, image conversion, or
+  developer batch jobs
+- private deployment runbooks
+
+Non-goals:
+
+- public marketplace
+- arbitrary untrusted compute
+- payment/payout systems
+- production multi-tenant cloud platform behavior
+
+## Phase 3: Remote Private Mesh
+
+Goal: support trusted machines outside the LAN while still owned or controlled
+by the same user/team.
+
+Potential work:
+
+- secure remote node registration
+- authenticated remote communication
+- TLS/cert lifecycle tooling
+- node identity model suitable for remote nodes
+- operator-facing access control
+- network failure handling
+- remote health checks
+- NAT/firewall deployment guidance
+
+This phase is still private-first. It is not a public marketplace.
+
+## Phase 4: Trusted Shared Compute Pool
+
+Goal: allow approved users, devices, contractors, labs, teams, or partner
+machines to contribute compute in a controlled group.
+
+Long-term exploration only. This phase should not start until the private mesh
+and remote private mesh are mature.
+
+Potential work:
+
+- admin-approved nodes
+- trust levels
+- usage accounting
+- quotas/credits
+- approved workload templates
+- internal chargeback reports
+- stronger operator auditing
+- tighter isolation requirements
+
+This is a controlled bridge between private mesh and possible overflow compute,
+not an open public network.
+
+## Phase 5: Overflow Compute Marketplace
+
+Goal: explore verified external capacity only after the private mesh and trusted
+shared pool are mature.
+
+Long-term exploration only. Marketplace functionality is not part of the current
+prototype and should not be implied as implemented.
+
+Potential work:
+
+- provider onboarding
+- hardware and runtime benchmarking
+- pricing and metering
+- payouts and platform fee
+- reputation/uptime scoring
+- disputes/refunds
+- stronger sandboxing and tenant isolation
+- strict acceptable-use controls
+- abuse prevention
+- provider/buyer trust and compliance model
+
+The long-term framing is trusted overflow compute: when private resources are
+not enough, users may rent verified external capacity. It is not an early
+open arbitrary-code compute marketplace.
 
 ## Later Operational Options
 
-These are not required for v0 milestones, but may be useful once the core LAN
-mesh behavior is stable:
+These options may be useful once the private mesh is stable:
 
-- Evaluate hosted Postgres providers, including Supabase, for managed database
-  hosting, visual table inspection, SQL editing, and operational visibility.
-- Keep the coordinator database integration provider-neutral through
-  `COORDINATOR_DATABASE_URL`; do not depend on Supabase-specific APIs unless a
-  future product requirement needs them.
-- Revisit a full schema migration framework once existing deployments need
+- Evaluate managed Postgres providers for database operations and visual
+  inspection while keeping `COORDINATOR_DATABASE_URL` provider-neutral.
+- Revisit a full schema migration framework once deployments need
   multi-version database upgrades beyond the lightweight readiness marker.
+- Decide whether to add OpenAPI/protobuf contract generation after the API
+  surface stabilizes.
 
 ## Delivery Model
 
-- One PR per milestone
-- README stays concise and links here
-- `go build ./...`, `go test ./...`, and `gofmt` are the baseline gate for
-  every milestone
+- One PR per milestone or documentation slice.
+- Keep branches focused.
+- README stays concise and links to deeper docs.
+- Behavior-changing PRs update docs in the same branch.
+- `gofmt -l .`, `git diff --check`, `go build ./...`, `go test ./...`, and
+  `go vet ./...` are the default validation gates.
+- Postgres integration tests stay opt-in so default tests remain DB-free.
