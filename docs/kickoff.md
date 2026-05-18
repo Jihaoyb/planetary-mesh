@@ -1,6 +1,12 @@
 # Planetary Mesh - Kickoff Plan
 
-This document describes the initial plan for Planetary Meash using standard software development lifecycle (SDLC) practices.
+> Historical note: this document preserves the original kickoff framing. It is
+> not the current source of truth for product positioning, architecture, or
+> roadmap sequencing. For current guidance, use `README.md`,
+> `docs/product-positioning.md`, `docs/roadmap.md`, `docs/architecture.md`, and
+> `docs/current-limitations.md`.
+
+This document describes the initial plan for Planetary Mesh using standard software development lifecycle (SDLC) practices.
 It covers objectives, scope, requirements, architecture direction, and the first stages of delivery.
 
 ---

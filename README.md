@@ -1,164 +1,158 @@
 # Planetary Mesh
 
-## Overview
+Planetary Mesh is a lightweight private compute mesh for running
+command-based jobs across machines you own or control, with a future path
+toward trusted overflow compute.
 
-Planetary Mesh is a decentralized compute network that pools idle CPU/GPU, storage, and bandwidth across devices on a local or trusted network.  
-Instead of sending work to a central cloud, clients submit jobs to a coordinator, which schedules tasks across participating agent nodes.
+The current project is a Go 1.25.4 LAN/private-network prototype. It is useful
+for proving coordinator-agent job dispatch, allowlisted command execution,
+optional durability, and operator workflows before expanding into remote or
+shared compute scenarios.
 
----
+## Current Status
 
-## Status
+- **Stage**: Trusted LAN/private-network prototype after PR #14 / Milestone 9
+  schema readiness.
+- **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
+  to the first healthy node, exposes metrics and status, and can persist nodes
+  and jobs in Postgres.
+- **Agent**: registers with the coordinator, sends heartbeats, and executes
+  allowlisted command jobs without invoking a shell.
+- **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
+  inspection, and command job submission.
+- **Security**: plain HTTP is available for local development; mTLS and node
+  allowlists are supported but opt-in and manually configured.
+- **Persistence**: in-memory storage is the default; Postgres durability is
+  optional and includes lightweight schema readiness metadata version `1`.
 
-- **Stage**: Early prototype — control plane, allowlisted command execution, optional Postgres persistence with schema readiness metadata, opt-in coordinator-agent mTLS, operator CLI, local config files, repeatable local smoke workflow, and opt-in durable Postgres verification working end-to-end
-- **Code**:
-  - Coordinator: node registry with health states and certificate metadata, job dispatch to healthy agents, job detail, metrics, optional Postgres persistence, and mTLS node admission
-  - Agent: auto-registration, periodic heartbeat, allowlisted direct command execution, and optional mTLS
-  - CLI: `pmctl` for coordinator status, node/job listing, job inspection, and command job submission
-  - Config: optional env-style local config files for coordinator, agent, and `pmctl`
-  - Smoke: config-driven local demo for one coordinator, two agents, and `pmctl`
-  - Ops: opt-in Postgres smoke workflow for durable-state, schema readiness, and restart-recovery verification
-  - CI: gofmt + build + tests on every push
-- **Scope**: LAN-focused prototype with trusted nodes; dashboard work remains future work
+## What Works Today
 
-For more details, see:
+- HTTP/JSON control plane with `X-Planetary-Protocol-Version: 1`.
+- Coordinator `GET /healthz`, `GET /status`, `POST /register`, `GET /nodes`,
+  `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, and `GET /metrics`.
+- Agent `GET /healthz` and `POST /execute`.
+- Node registration and heartbeat through repeated `POST /register` calls.
+- Node health states: `HEALTHY`, `SUSPECT`, and `OFFLINE`.
+- Command job submission with `type="command"`, `command`, and optional `args`.
+- Allowlisted direct process execution using `exec.CommandContext`.
+- No shell execution and no arbitrary executable paths from job submissions.
+- Fixed agent execution timeout, default `30s`.
+- Bounded stdout and stderr capture with per-stream truncation flags.
+- Retry handling for retryable dispatch failures such as transport errors and
+  agent `5xx` responses.
+- Optional Postgres persistence for nodes/jobs, startup recovery for persisted
+  `RUNNING` jobs, and schema readiness reporting.
+- Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
-- [Kickoff Plan](docs/kickoff.md)
-- [Architecture](docs/architecture.md)
-- [Tech Choices](docs/tech-choices.md)
-- [Roadmap](docs/roadmap.md)
+## Not Implemented Yet
 
----
+- Strong sandbox, container, VM, or multi-tenant isolation.
+- Public marketplace, payment, payout, dispute, reputation, or public provider
+  onboarding features.
+- GPU, storage, or bandwidth pooling as implemented product capabilities.
+- Dashboard or rich operator UI.
+- OpenAPI, protobuf, or generated API contracts.
+- Production Docker image or packaged release workflow.
+- Load-aware, capability-aware, or queue-aware scheduling.
+- Scheduler loop for later re-dispatch of jobs left queued when no healthy node
+  exists at submission time.
+- Agent reconciliation after coordinator restart.
+- Automated certificate issuance, enrollment, or rotation.
+- Remote private mesh, trusted shared pool, or overflow marketplace features.
 
-## Goals for v0 (Prototype)
+See [docs/current-limitations.md](docs/current-limitations.md) for the current
+limitation and risk register.
 
-The initial prototype targets a **3–5 node LAN mesh** with:
+## Architecture Summary
 
-- Secure node registration and mutual TLS between components.
-- Basic job submission API (e.g., simple batch tasks).
-- Coordinator-based scheduling and task dispatch.
-- Agent execution in a sandboxed environment.
-- Heartbeats, timeouts, and automatic reassignment on failure.
-- Operator CLI with node list, job list, job inspection, submission, and status.
+Planetary Mesh has three runtime components:
 
----
+- **Coordinator**: the single v0 control plane. It owns validation, node state,
+  job state, dispatch, retry policy, storage selection, metrics, and status.
+- **Agent**: a worker daemon on a trusted machine. It registers with the
+  coordinator, sends heartbeats, exposes `/execute`, and runs only locally
+  allowlisted commands.
+- **pmctl**: a thin operator CLI over the coordinator HTTP/JSON API. It does not
+  own scheduling, validation, state transitions, or storage behavior.
 
-## High-Level Architecture
+The default local runtime uses in-memory coordinator storage and plain HTTP.
+When `COORDINATOR_DATABASE_URL` is configured, the coordinator persists nodes
+and jobs in Postgres. When TLS files and node allowlists are configured, the
+coordinator-agent path can run with mTLS and explicit node admission.
 
-Core components:
+The detailed architecture is in [docs/architecture.md](docs/architecture.md).
 
-- **Coordinator**
-  - Maintains node registry and health.
-  - Accepts jobs from clients.
-  - Schedules and dispatches tasks to agents.
-  - Aggregates results and updates job status.
+## Execution and Security Model
 
-- **Agent**
-  - Runs on each participant device.
-  - Registers with the coordinator and advertises capabilities.
-  - Executes tasks in a sandbox (e.g., container or restricted process).
-  - Sends heartbeats and progress updates.
+Command execution is security-sensitive. The current implementation narrows the
+trust boundary but is not a strong sandbox:
 
-- **Network Layer**
-  - Static coordinator address configuration for v0.
-  - HTTP/JSON control messages with explicit protocol versioning.
-  - Optional TLS with mutual authentication for trusted LAN coordinator-agent traffic.
+- Job submissions name a logical command key, not an executable path.
+- Agents map logical command names to executable paths through
+  `AGENT_COMMAND_ALLOWLIST`.
+- Agents execute commands directly with `exec.CommandContext`.
+- Agents never execute through a shell.
+- Stdout and stderr are captured separately and capped at `1 MiB` per stream.
+- mTLS and node allowlists are supported for trusted LAN operation, but
+  certificate generation, distribution, enrollment, and rotation are manual.
 
-- **CLI**
-  - Shows nodes, jobs, and coordinator status.
-  - Provides a simple interface to submit and inspect command jobs.
-  - Dashboard work remains future work.
+Use the current prototype only with machines and workloads you trust.
 
-The detailed design is in [docs/architecture.md](docs/architecture.md).
-
----
-
-## Project Structure
-
-Current structure:
+## Repository Layout
 
 ```text
 planetary-mesh/
   README.md
+  AGENTS.md
   go.mod
 
-  .github/workflows/
-    ci.yml             # gofmt + build + test on every push/PR
-
-  docs/
-    kickoff.md
-    architecture.md
-    tech-choices.md
-    roadmap.md
-    adr/
-      0000-template.md
-      0001-process-and-docs.md
-      0002-language-choice.md
-      0003-http-json-control-plane-for-v0.md
-      0004-in-memory-storage-for-v0.md
-      0005-command-execution-v0.md
-      0006-postgres-coordinator-persistence.md
-      0007-mtls-trusted-lan-security.md
-      0008-operator-cli.md
-      0009-env-style-local-config-files.md
-
-  config/
-    coordinator.env.example
-    agent-1.env.example
-    agent-2.env.example
-    pmctl.env.example
-
-  compose.yaml         # local coordinator + Postgres + agent demo
-
   cmd/
-    coordinator/       # Coordinator service binary (Go, package main)
-      main.go          # Thin entrypoint wiring coordinator runtime
-    agent/             # Agent daemon binary (Go, package main)
-      main.go          # Thin entrypoint wiring agent runtime
-    pmctl/             # Operator CLI binary (Go, package main)
+    coordinator/       # Coordinator service entrypoint
+    agent/             # Agent daemon entrypoint
+    pmctl/             # Operator CLI entrypoint
 
   internal/
-    coordinator/       # Coordinator HTTP handlers, stores, metrics, tests
-    agent/             # Agent HTTP handlers, coordinator client, tests
+    coordinator/       # Coordinator handlers, stores, dispatch, metrics, tests
+    agent/             # Agent handlers, coordinator client, executor, tests
     pmctl/             # CLI command parsing, output, and coordinator client
     protocol/          # Shared protocol constants and wire structs
-    security/          # Shared TLS, certificate identity, and allowlist helpers
+    security/          # TLS, certificate identity, and allowlist helpers
+    configfile/        # Env-style config file parser
+
+  config/              # Tracked example config files
+  docs/                # Roadmap, architecture, product, ADRs, limitations
+  examples/            # Local and Postgres smoke workflows
+  compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 
-Planned (not yet present): `proto/` for any future gRPC work.
+## Build and Test
 
----
+```bash
+go build ./...
+go test ./...
+go vet ./...
+gofmt -l .
+git diff --check
+```
 
-## Quickstart (Development)
+If the Go cache must be pinned outside the default location:
 
-### Requirements
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-build go build ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...
+GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...
+```
 
-- Go 1.25+ (check with `go version`)
+Postgres integration tests are opt-in:
 
-### Configuration precedence
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-postgres \
+go test -tags postgres ./internal/coordinator
+```
 
-Coordinator, agent, and `pmctl` still work with environment variables. They can
-also load env-style config files that use the same keys as the environment.
+The default `go test ./...` path remains DB-free.
 
-Config precedence is:
-
-1. compiled defaults
-2. config file values
-3. non-empty environment variables
-4. CLI flags, where supported
-
-Each binary accepts `--config <path>`. You can also set a config path with
-`COORDINATOR_CONFIG_FILE`, `AGENT_CONFIG_FILE`, or `PMCTL_CONFIG_FILE`.
-
-If present, these default local files are auto-loaded:
-
-- `config/coordinator.env`
-- `config/agent.env`
-- `config/pmctl.env`
-
-Local `config/*.env` files are ignored by git. The tracked `*.env.example` files
-are safe starting points.
-
-### Run the local smoke demo
+## Local Smoke Demo
 
 From a fresh checkout with Go, `curl`, and `python3` available:
 
@@ -168,128 +162,85 @@ From a fresh checkout with Go, `curl`, and `python3` available:
 
 The demo builds temporary local binaries, starts one coordinator and two agents
 from tracked config examples, submits an allowlisted command through `pmctl`,
-lists nodes/jobs through `pmctl`, and inspects the completed job. It uses
-in-memory coordinator storage and plain HTTP by default.
+lists nodes/jobs, and inspects the completed job. It uses in-memory storage and
+plain HTTP by default.
 
-Logs are written under `/tmp` or `$TMPDIR` and printed at the end of the run.
-
-### Run the Postgres durability smoke demo
-
-For an opt-in durable-state check, run the Postgres-backed smoke workflow with
-Docker Compose available:
+For durable-state verification with Docker Compose:
 
 ```bash
 ./examples/postgres_smoke.sh
 ```
 
-This starts the Compose stack on isolated high host ports by default, verifies
-`pmctl status` reports Postgres storage, verifies `pmctl --json status` reports
-schema readiness version `1`, submits a completed command job, restarts the
-coordinator while a job is `RUNNING`, verifies startup recovery marks that job
-`FAILED`, checks `/metrics`, and submits another command after restart. It
-cleans up its Compose project and volume unless
-`KEEP_POSTGRES_SMOKE=1` is set.
+That workflow starts coordinator + Postgres + agents, verifies status and schema
+readiness, checks restart recovery for persisted `RUNNING` jobs, checks
+`/metrics`, and submits another command after restart.
 
-To run the opt-in Postgres integration tests against an existing database:
+## Run Manually
+
+Start the coordinator:
 
 ```bash
-POSTGRES_TEST_DSN='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
-go test -tags postgres ./internal/coordinator
+COORDINATOR_ADDR=:8080 go run ./cmd/coordinator
 ```
 
-The default `go test ./...` remains free of external services.
-
-### Run the coordinator
-
-From the repo root:
+Start an agent in another terminal:
 
 ```bash
-go run ./cmd/coordinator
+COORDINATOR_URL=http://localhost:8080 \
+AGENT_ADDR=:8081 \
+AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+go run ./cmd/agent
 ```
 
-By default it listens on `:8080`. You can change the address with:
+Health checks:
 
 ```bash
-COORDINATOR_ADDR=":9090" go run ./cmd/coordinator
+curl http://localhost:8080/healthz
+curl http://localhost:8081/healthz
 ```
 
-By default the coordinator uses in-memory storage. To persist nodes and jobs in
-Postgres, set `COORDINATOR_DATABASE_URL`:
+Submit a command job:
+
+```bash
+curl -X POST http://localhost:8080/jobs \
+  -H 'X-Planetary-Protocol-Version: 1' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"command","command":"echo","args":["hello mesh"]}'
+```
+
+List nodes and jobs:
+
+```bash
+curl http://localhost:8080/nodes \
+  -H 'X-Planetary-Protocol-Version: 1'
+
+curl http://localhost:8080/jobs \
+  -H 'X-Planetary-Protocol-Version: 1'
+```
+
+## Optional Postgres Storage
+
+By default, coordinator state is in-memory. To persist nodes and jobs:
 
 ```bash
 COORDINATOR_DATABASE_URL='postgres://planetary:planetary@localhost:5432/planetary_mesh?sslmode=disable' \
 go run ./cmd/coordinator
 ```
 
-Postgres startup still uses the embedded schema initialization model. The
-coordinator records a lightweight `schema_version` marker and exposes it through
-`/status`, `/metrics`, and `pmctl --json status`:
+Postgres startup uses embedded schema initialization plus lightweight schema
+readiness metadata. `schema_version` value `1` represents the current nodes/jobs
+schema plus readiness marker. The coordinator exposes schema readiness through
+startup logs, `/status`, `/metrics`, `pmctl --json status`, tests, and the
+Postgres smoke workflow.
 
-```bash
-pmctl --json status
-```
+This is not a full migration framework. A database marked with a newer schema
+version than the running coordinator expects is rejected at startup.
 
-For Postgres storage, the `schema` object should report `ready: true`,
-`version: 1`, and `expected_version: 1`. A database marked with a newer schema
-version is rejected at startup so an older coordinator does not run against a
-newer schema. This is readiness metadata, not a full migration framework.
+## Optional mTLS Mode
 
-You can also run from a config file:
-
-```bash
-go run ./cmd/coordinator --config config/coordinator.env.example
-```
-
-Health check:
-
-```bash
-curl http://localhost:8080/healthz
-# → ok
-```
-
-### Run the agent
-
-In another terminal:
-
-```bash
-go run ./cmd/agent
-```
-
-By default it listens on `:8081`. You can change the address with:
-
-```bash
-AGENT_ADDR=":9091" go run ./cmd/agent
-```
-
-For command jobs, agents execute only allowlisted logical command names:
-
-```bash
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' go run ./cmd/agent
-```
-
-If the address agents listen on is different from the address the coordinator
-should call, set `AGENT_ADVERTISE_ADDR`.
-
-You can also run from config files. For a local two-agent setup, open separate
-terminals:
-
-```bash
-go run ./cmd/agent --config config/agent-1.env.example
-go run ./cmd/agent --config config/agent-2.env.example
-```
-
-Agent health check:
-
-```bash
-curl http://localhost:8081/healthz
-# → ok
-```
-
-### Secure coordinator-agent mode
-
-Plain HTTP remains the default for local development. To enable mTLS between the
+Plain HTTP remains the default for local development. To enable mTLS between
 coordinator and agents, manually provision a CA plus coordinator and agent
-certificates, then start both processes with TLS file paths.
+certificates, then configure both sides.
 
 Coordinator:
 
@@ -321,25 +272,11 @@ allowlists use SHA-256 certificate fingerprints:
 COORDINATOR_ALLOWED_NODE_FINGERPRINTS='agent-1=<sha256-hex-fingerprint>'
 ```
 
-Secure `curl` requests to the coordinator need the CA and a client certificate:
-
-```bash
-curl --cacert ./certs/ca.pem \
-  --cert ./certs/operator.pem \
-  --key ./certs/operator-key.pem \
-  https://localhost:8080/nodes \
-  -H 'X-Planetary-Protocol-Version: 1'
-```
-
-Certificate generation, distribution, enrollment, and rotation remain manual in
-v0.
-
----
+Certificate generation, distribution, enrollment, and rotation remain manual.
 
 ## Operator CLI
 
-`pmctl` is a thin client over the coordinator HTTP/JSON API. It defaults to the
-local plain-HTTP coordinator:
+`pmctl` is a thin client over the coordinator API:
 
 ```bash
 go install ./cmd/pmctl
@@ -351,10 +288,7 @@ pmctl submit command echo hello mesh
 pmctl jobs inspect job-1
 ```
 
-Make sure `$(go env GOPATH)/bin` or your configured `GOBIN` is on `PATH`.
-`go run ./cmd/pmctl ...` still works for development.
-
-Use `--json` for automation-friendly output:
+Use JSON output for automation:
 
 ```bash
 pmctl --json jobs inspect job-1
@@ -364,13 +298,11 @@ Point at another coordinator with a flag, environment variable, or config file:
 
 ```bash
 pmctl --coordinator-url http://localhost:9090 status
-
 PMCTL_COORDINATOR_URL=http://localhost:9090 pmctl nodes list
-
 pmctl --config config/pmctl.env.example status
 ```
 
-For a secure coordinator, provide the CA and operator client certificate:
+For secure coordinator access, provide the CA and operator client certificate:
 
 ```bash
 pmctl \
@@ -381,58 +313,24 @@ pmctl \
   nodes list
 ```
 
-Equivalent environment variables are `PMCTL_TLS_CA_FILE`,
-`PMCTL_TLS_CERT_FILE`, and `PMCTL_TLS_KEY_FILE`.
-
----
-
-## Submitting a Job
-
-Once a coordinator and at least one agent are running:
-
-```bash
-# Submit a job
-curl -X POST http://localhost:8080/jobs \
-  -H 'X-Planetary-Protocol-Version: 1' \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"command","command":"echo","args":["hello mesh"]}'
-
-# List nodes
-curl http://localhost:8080/nodes \
-  -H 'X-Planetary-Protocol-Version: 1'
-
-# List jobs
-curl http://localhost:8080/jobs \
-  -H 'X-Planetary-Protocol-Version: 1'
-```
-
-Command jobs reject `payload`; use `command` and optional `args`.
-
 ## Compose Demo
 
-To run a local coordinator + Postgres + two-agent stack:
+Run a local coordinator + Postgres + two-agent stack:
 
 ```bash
 docker compose up
 ```
 
-In another terminal, inspect the mesh with `pmctl`:
+In another terminal:
 
 ```bash
 go run ./cmd/pmctl nodes list
-```
-
-Submit a command job and inspect the returned job id:
-
-```bash
 go run ./cmd/pmctl submit command echo "hello from compose"
 go run ./cmd/pmctl jobs inspect job-1
 ```
 
-Expected output includes `Status COMPLETED` and captured `Stdout`.
-
 The default Compose host ports are `5432`, `8080`, `8081`, and `8082`. Override
-them when another local stack is already running:
+them if another stack is running:
 
 ```bash
 POSTGRES_HOST_PORT=15432 \
@@ -442,6 +340,30 @@ AGENT2_HOST_PORT=18082 \
 docker compose up
 ```
 
-## Next Steps
+## Documentation Index
 
-The v0 milestone plan lives in [docs/roadmap.md](docs/roadmap.md).
+Current sources of truth:
+
+- [Product Positioning](docs/product-positioning.md)
+- [Roadmap](docs/roadmap.md)
+- [Architecture](docs/architecture.md)
+- [Current Limitations](docs/current-limitations.md)
+- [Product Requirements](docs/product-requirements.md)
+- [Tech Choices](docs/tech-choices.md)
+
+Historical context:
+
+- [Kickoff Plan](docs/kickoff.md)
+
+Architecture Decision Records:
+
+- [ADR 0001: Process and docs](docs/adr/0001-process-and-docs.md)
+- [ADR 0002: Go for coordinator and agent services](docs/adr/0002-language-choice.md)
+- [ADR 0003: HTTP/JSON for v0 control plane](docs/adr/0003-http-json-control-plane-for-v0.md)
+- [ADR 0004: In-memory storage for v0 control plane](docs/adr/0004-in-memory-storage-for-v0.md)
+- [ADR 0005: Allowlisted direct command execution](docs/adr/0005-command-execution-v0.md)
+- [ADR 0006: Postgres durable coordinator state](docs/adr/0006-postgres-coordinator-persistence.md)
+- [ADR 0007: mTLS trusted LAN security](docs/adr/0007-mtls-trusted-lan-security.md)
+- [ADR 0008: Thin operator CLI](docs/adr/0008-operator-cli.md)
+- [ADR 0009: Env-style local config files](docs/adr/0009-env-style-local-config-files.md)
+- [ADR 0010: Postgres schema readiness metadata](docs/adr/0010-postgres-schema-readiness.md)
