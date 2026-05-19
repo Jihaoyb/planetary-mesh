@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -16,6 +17,8 @@ const (
 	JobStatusFailed    JobStatus = "FAILED"
 	JobStatusCancelled JobStatus = "CANCELLED"
 )
+
+const QueuedJobExpiredError = "queued job expired before a healthy node became available"
 
 // Job is the coordinator's view of a unit of work.
 // Payload is an opaque string for now; may become structured JSON later.
@@ -64,10 +67,12 @@ type JobResult struct {
 type JobStorage interface {
 	Create(in JobCreateInput) (Job, error)
 	List() ([]Job, error)
+	ListQueuedIDs() ([]string, error)
 	Get(id string) (Job, bool, error)
 	StartAttempt(id, nodeID string) (Job, error)
 	Complete(id, nodeID string, result JobResult) (Job, error)
 	Fail(id, nodeID string, result JobResult) (Job, error)
+	ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error)
 	FailRunningJobs(lastError string) (int64, error)
 }
 
@@ -122,6 +127,31 @@ func (s *JobStore) List() ([]Job, error) {
 	return result, nil
 }
 
+// ListQueuedIDs returns queued job IDs in deterministic creation order.
+func (s *JobStore) ListQueuedIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	queued := make([]Job, 0)
+	for _, j := range s.jobs {
+		if j.Status == JobStatusQueued {
+			queued = append(queued, *j)
+		}
+	}
+	sort.Slice(queued, func(i, j int) bool {
+		if queued[i].CreatedAt.Equal(queued[j].CreatedAt) {
+			return queued[i].ID < queued[j].ID
+		}
+		return queued[i].CreatedAt.Before(queued[j].CreatedAt)
+	})
+
+	ids := make([]string, 0, len(queued))
+	for _, j := range queued {
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
 // Get returns a single job by ID. The boolean is false if not found.
 func (s *JobStore) Get(id string) (Job, bool, error) {
 	s.mu.Lock()
@@ -161,6 +191,9 @@ func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
 	if !ok {
 		return Job{}, fmt.Errorf("job %q not found", id)
 	}
+	if j.Status != JobStatusQueued && j.Status != JobStatusRunning {
+		return Job{}, fmt.Errorf("job %q is %s, not dispatchable", id, j.Status)
+	}
 
 	now := time.Now().UTC()
 	j.Status = JobStatusRunning
@@ -180,6 +213,31 @@ func (s *JobStore) Complete(id, nodeID string, result JobResult) (Job, error) {
 
 func (s *JobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+// ExpireQueuedJobs marks queued jobs older than maxAge as failed.
+func (s *JobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
+	if maxAge <= 0 {
+		return 0, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now = now.UTC()
+	cutoff := now.Add(-maxAge)
+	var count int64
+	for _, j := range s.jobs {
+		if j.Status != JobStatusQueued || j.CreatedAt.After(cutoff) {
+			continue
+		}
+		j.Status = JobStatusFailed
+		j.LastError = lastError
+		j.CompletedAt = &now
+		j.UpdatedAt = now
+		count++
+	}
+	return count, nil
 }
 
 // FailRunningJobs marks jobs left RUNNING across a coordinator restart as failed.

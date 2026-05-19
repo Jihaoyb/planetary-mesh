@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"planetary-mesh/internal/protocol"
@@ -40,6 +41,9 @@ type RuntimeConfig struct {
 	SecureMode     bool
 }
 
+const defaultQueuedSchedulerInterval = 5 * time.Second
+const defaultQueuedJobMaxAge = 24 * time.Hour
+
 // DefaultDispatchConfig returns sensible defaults for v0.
 func DefaultDispatchConfig() DispatchConfig {
 	return DispatchConfig{
@@ -59,6 +63,9 @@ type Server struct {
 	security   SecurityConfig
 	runtime    RuntimeConfig
 	logger     *slog.Logger
+
+	activeDispatchMu sync.Mutex
+	activeDispatches map[string]struct{}
 }
 
 // NewServer constructs a Server with default dispatch config.
@@ -117,6 +124,8 @@ func NewServerWithRuntime(
 		security:   securityConfig,
 		runtime:    runtimeConfig,
 		logger:     logger.With("component", "coordinator"),
+
+		activeDispatches: make(map[string]struct{}),
 	}
 }
 
@@ -417,10 +426,101 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// StartQueuedJobScheduler starts a coordinator-owned loop that revisits queued
+// jobs left behind when no healthy node was available during submission.
+func (s *Server) StartQueuedJobScheduler(stopCh <-chan struct{}) {
+	s.startQueuedJobScheduler(stopCh, defaultQueuedSchedulerInterval)
+}
+
+func (s *Server) startQueuedJobScheduler(stopCh <-chan struct{}, interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultQueuedSchedulerInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+
+		s.dispatchQueuedJobs()
+		for {
+			select {
+			case <-ticker.C:
+				s.dispatchQueuedJobs()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) dispatchQueuedJobs() {
+	expired, err := s.jobs.ExpireQueuedJobs(time.Now().UTC(), defaultQueuedJobMaxAge, QueuedJobExpiredError)
+	if err != nil {
+		s.logger.Error("expire queued jobs failed", "err", err)
+		return
+	}
+	if expired > 0 {
+		s.metrics.JobsFailed.Add(uint64(expired))
+		s.logger.Warn("expired queued jobs", "count", expired, "max_age", defaultQueuedJobMaxAge.String())
+	}
+
+	queuedIDs, err := s.jobs.ListQueuedIDs()
+	if err != nil {
+		s.logger.Error("list queued jobs failed", "err", err)
+		return
+	}
+	if len(queuedIDs) == 0 {
+		return
+	}
+
+	nodes, err := s.registry.List()
+	if err != nil {
+		s.logger.Error("list nodes during queued scheduler failed", "err", err)
+		return
+	}
+	if !hasHealthyNode(nodes) {
+		s.logger.Warn("queued jobs waiting; no healthy nodes", "queued_jobs", len(queuedIDs))
+		return
+	}
+
+	for _, jobID := range queuedIDs {
+		go s.dispatchJob(jobID)
+	}
+}
+
+func hasHealthyNode(nodes []Node) bool {
+	for _, node := range nodes {
+		if node.State == NodeStateHealthy {
+			return true
+		}
+	}
+	return false
+}
+
 // dispatchJob picks a healthy node, marks the job RUNNING, and POSTs to its
 // /execute endpoint. It retries on transport or retryable server errors up to
 // dispatch.MaxAttempts with exponential backoff (base = dispatch.BaseBackoff).
 func (s *Server) dispatchJob(jobID string) {
+	if !s.beginDispatch(jobID) {
+		s.logger.Debug("dispatch already active; skipping duplicate", "job_id", jobID)
+		return
+	}
+	defer s.endDispatch(jobID)
+
+	job, ok, err := s.jobs.Get(jobID)
+	if err != nil {
+		s.logger.Error("get job during dispatch failed", "job_id", jobID, "err", err)
+		return
+	}
+	if !ok {
+		s.logger.Error("job missing during dispatch", "job_id", jobID)
+		return
+	}
+	if job.Status != JobStatusQueued {
+		s.logger.Debug("job is no longer queued; skipping dispatch", "job_id", jobID, "status", job.Status)
+		return
+	}
+
 	nodes, err := s.registry.List()
 	if err != nil {
 		s.logger.Error("list nodes during dispatch failed", "job_id", jobID, "err", err)
@@ -437,16 +537,6 @@ func (s *Server) dispatchJob(jobID string) {
 
 	if target == nil {
 		s.logger.Warn("no healthy nodes; leaving job QUEUED", "job_id", jobID)
-		return
-	}
-
-	job, ok, err := s.jobs.Get(jobID)
-	if err != nil {
-		s.logger.Error("get job during dispatch failed", "job_id", jobID, "err", err)
-		return
-	}
-	if !ok {
-		s.logger.Error("job missing during dispatch", "job_id", jobID)
 		return
 	}
 
@@ -507,6 +597,24 @@ func (s *Server) dispatchJob(jobID string) {
 
 	s.failJob(jobID, target.ID, lastResult)
 	logger.Error("job failed after retries", "attempts", maxAttempts, "last_error", lastResult.LastError)
+}
+
+func (s *Server) beginDispatch(jobID string) bool {
+	s.activeDispatchMu.Lock()
+	defer s.activeDispatchMu.Unlock()
+
+	if _, ok := s.activeDispatches[jobID]; ok {
+		return false
+	}
+	s.activeDispatches[jobID] = struct{}{}
+	return true
+}
+
+func (s *Server) endDispatch(jobID string) {
+	s.activeDispatchMu.Lock()
+	defer s.activeDispatchMu.Unlock()
+
+	delete(s.activeDispatches, jobID)
 }
 
 // tryDispatch performs one HTTP attempt. Returns (result, success, retryable).

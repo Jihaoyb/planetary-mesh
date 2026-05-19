@@ -368,6 +368,24 @@ func (s *PostgresJobStore) List() ([]Job, error) {
 	return scanJobs(rows)
 }
 
+func (s *PostgresJobStore) ListQueuedIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE status = $1 ORDER BY created_at, id`, JobStatusQueued)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *PostgresJobStore) Get(id string) (Job, bool, error) {
 	row := s.db.QueryRow(jobSelectSQL+` WHERE id = $1`, id)
 	job, err := scanJob(row)
@@ -390,10 +408,11 @@ SET status = $2,
     started_at = COALESCE(started_at, $4),
     updated_at = $4
 WHERE id = $1
-RETURNING `+jobColumns, id, JobStatusRunning, nodeID, now)
+  AND status IN ($5, $6)
+RETURNING `+jobColumns, id, JobStatusRunning, nodeID, now, JobStatusQueued, JobStatusRunning)
 	job, err := scanJob(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Job{}, fmt.Errorf("job %q not found", id)
+		return Job{}, fmt.Errorf("job %q not found or not dispatchable", id)
 	}
 	return job, err
 }
@@ -404,6 +423,27 @@ func (s *PostgresJobStore) Complete(id, nodeID string, result JobResult) (Job, e
 
 func (s *PostgresJobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+func (s *PostgresJobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
+	if maxAge <= 0 {
+		return 0, nil
+	}
+
+	now = now.UTC()
+	res, err := s.db.Exec(`
+UPDATE jobs
+SET status = $1,
+    completed_at = $2,
+    last_error = $3,
+    updated_at = $2
+WHERE status = $4
+  AND created_at <= $5
+`, JobStatusFailed, now, lastError, JobStatusQueued, now.Add(-maxAge))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (s *PostgresJobStore) finish(id, nodeID string, status JobStatus, result JobResult) (Job, error) {

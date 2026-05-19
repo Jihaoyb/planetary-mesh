@@ -114,6 +114,7 @@ func main() {
 
 	stopCh := make(chan struct{})
 	coordinator.StartHealthChecker(registry, stopCh)
+	srv.StartQueuedJobScheduler(stopCh)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
