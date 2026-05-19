@@ -10,7 +10,7 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after PR #14 / Milestone 9 (`46a0af2`)
+- Baseline: `main` after Milestone 10 queued scheduler hardening
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -25,6 +25,8 @@ Implemented capability:
 - node health states: `HEALTHY`, `SUSPECT`, `OFFLINE`
 - command job submission with `type="command"`, `command`, and optional `args`
 - first-healthy-node dispatch at job submission time
+- periodic queued-job scheduler/re-dispatch loop
+- queued jobs expire as `FAILED` after 24 hours
 - allowlisted direct command execution using `exec.CommandContext`
 - no shell execution
 - bounded stdout/stderr capture with truncation flags
@@ -43,9 +45,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-9
+## Completed Baseline / Milestones 1-10
 
-The first nine milestones established a working private LAN/trusted-network
+The first ten milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -212,13 +214,31 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 10: Queued Job Scheduler
+
+Goal: make jobs submitted while no healthy node exists run later once capacity
+appears.
+
+Completed outcomes:
+
+- coordinator-owned periodic scheduler lists jobs still in `QUEUED` state
+- queued jobs are re-dispatched when at least one `HEALTHY` node exists
+- queued jobs are marked `FAILED` after 24 hours without a healthy node
+- duplicate concurrent dispatch of the same job is skipped within one running
+  coordinator process
+- HTTP/JSON API shape and protocol version behavior unchanged
+- in-memory default tests remain DB-free
+- optional Postgres still persists nodes/jobs only, with no schema version bump
+- docs now describe scheduler behavior and remaining scheduling limits
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
 
 Potential work:
 
-- queued-job scheduler/re-dispatch loop
 - cross-node reassignment after dispatch failure
 - simple node capabilities/load reporting
 - clearer job state transitions

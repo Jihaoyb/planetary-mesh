@@ -197,12 +197,18 @@ Current behavior:
 - a job is stored as `QUEUED`
 - dispatch attempts immediately after submission
 - coordinator selects the first node currently in `HEALTHY` state
+- a coordinator-owned scheduler periodically revisits jobs that remain `QUEUED`
 - retryable dispatch failures are retried against the selected node
-- if no healthy node exists at submission time, the job can remain queued
+- if no healthy node exists, the job remains queued until a later scheduler pass
+  sees a healthy node
+- if no healthy node becomes available within 24 hours, the queued job is marked
+  `FAILED`
+- duplicate concurrent dispatch of the same job is skipped within one running
+  coordinator process
 
 Future decisions:
 
-- queued-job scheduler/re-dispatch loop
+- configurable queued-job expiration
 - cross-node reassignment
 - capability-aware scheduling
 - load-aware scheduling

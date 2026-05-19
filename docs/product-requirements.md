@@ -22,7 +22,8 @@ for trusted command-based jobs before expanding into remote or shared compute.
 
 Near-term MVP work should harden the private/local mesh:
 
-- reliable queued job processing
+- reliable queued job processing, starting with periodic coordinator-owned
+  re-dispatch for jobs left queued without a healthy node
 - clearer scheduler behavior
 - cross-node reassignment after retryable dispatch failure
 - better node health/capability visibility

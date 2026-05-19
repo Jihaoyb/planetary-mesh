@@ -199,6 +199,18 @@ Current dispatch behavior:
 6. Coordinator sends an HTTP/JSON `POST /execute` request to the selected agent.
 7. Coordinator records the terminal result as `COMPLETED` or `FAILED`.
 
+Queued scheduler behavior:
+
+- the coordinator periodically lists jobs still in `QUEUED` state
+- if no healthy node exists, queued jobs remain queued
+- if a healthy node exists, the coordinator starts re-dispatch for queued jobs
+- if a queued job is still waiting after 24 hours, the coordinator marks it
+  `FAILED` with `queued job expired before a healthy node became available`
+- duplicate concurrent dispatch of the same job is skipped within the running
+  coordinator process
+- persisted `QUEUED` jobs can be picked up after coordinator restart when
+  Postgres storage is enabled
+
 Retry behavior:
 
 - transport errors, coordinator request timeout, and agent `5xx` responses are
@@ -209,8 +221,8 @@ Retry behavior:
 - node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
   in-flight execution attempt in v0
 
-There is no scheduler loop that later revisits queued jobs left behind because
-no healthy node existed at submission time.
+The scheduler is still simple first-healthy-node dispatch. It does not perform
+load-aware scheduling, capability matching, queue fairness, or cross-node retry.
 
 ### Node Registration and Health
 
@@ -256,7 +268,8 @@ Certificate issuance, distribution, enrollment, and rotation are manual.
 
 Current private-mesh limitations:
 
-- no scheduler loop for queued jobs
+- queued-job scheduling is periodic, first-healthy-node only, and uses a fixed
+  24-hour queued-job expiration window
 - no load-aware or capability-aware scheduling
 - no cross-node reassignment after a selected node exhausts retry attempts
 - no agent reconciliation after coordinator restart
@@ -285,7 +298,6 @@ These are planned or possible directions, not current implementation.
 
 Private mesh hardening:
 
-- queued-job scheduler/re-dispatch loop
 - cross-node reassignment
 - explicit job state transition documentation
 - node capabilities/load reporting
