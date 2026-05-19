@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,6 +112,151 @@ func TestEndToEndCommandLifecycle(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Errorf("expected 1 agent call, got %d", calls.Load())
+	}
+}
+
+func TestQueuedSchedulerDispatchesJobAfterNodeRegisters(t *testing.T) {
+	client, calls := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{
+		Status: "ok",
+		Stdout: "scheduled\n",
+	})
+
+	reg := NewNodeRegistry()
+	store := NewJobStore()
+	srv := NewServerWithConfig(reg, store, client, DefaultDispatchConfig(), nil)
+	mux := srv.Mux()
+
+	job := submitCommandJob(t, mux, "echo", "scheduled")
+	time.Sleep(50 * time.Millisecond)
+	if calls.Load() != 0 {
+		t.Fatalf("expected no dispatch attempts before a healthy node exists, got %d", calls.Load())
+	}
+	queued, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get queued job: %v", err)
+	}
+	if queued.Status != JobStatusQueued {
+		t.Fatalf("expected job to remain QUEUED, got %s", queued.Status)
+	}
+
+	registerNode(t, mux, "agent-scheduler", "agent.local:8081")
+	srv.dispatchQueuedJobs()
+	final := waitForJobStatus(t, mux, job.ID, JobStatusCompleted, 2*time.Second)
+
+	if final.NodeID != "agent-scheduler" {
+		t.Errorf("expected NodeID agent-scheduler, got %s", final.NodeID)
+	}
+	if final.Stdout != "scheduled\n" {
+		t.Errorf("expected scheduler stdout to be recorded, got %q", final.Stdout)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("expected one scheduler dispatch attempt, got %d", calls.Load())
+	}
+}
+
+func TestQueuedSchedulerExpiresOldQueuedJobs(t *testing.T) {
+	client, calls := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{Status: "ok"})
+
+	reg := NewNodeRegistry()
+	store := NewJobStore()
+	srv := NewServerWithConfig(reg, store, client, DefaultDispatchConfig(), nil)
+	mux := srv.Mux()
+
+	job := submitCommandJob(t, mux, "echo", "expired")
+	now := time.Now().UTC()
+	store.mu.Lock()
+	store.jobs[job.ID].CreatedAt = now.Add(-25 * time.Hour)
+	store.jobs[job.ID].UpdatedAt = now.Add(-25 * time.Hour)
+	store.mu.Unlock()
+
+	srv.dispatchQueuedJobs()
+
+	final, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get expired job: %v", err)
+	}
+	if final.Status != JobStatusFailed {
+		t.Fatalf("expected expired job to be FAILED, got %s", final.Status)
+	}
+	if final.LastError != QueuedJobExpiredError {
+		t.Fatalf("expected queued expiration error, got %q", final.LastError)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("expected no dispatch calls for expired job, got %d", calls.Load())
+	}
+	if got := srv.Metrics().JobsFailed.Load(); got != 1 {
+		t.Fatalf("expected failed metric to include expired job, got %d", got)
+	}
+}
+
+func TestDispatchSkipsDuplicateConcurrentJob(t *testing.T) {
+	var calls atomic.Uint64
+	var once sync.Once
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			once.Do(func() { close(requestStarted) })
+			<-releaseRequest
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+
+	reg := NewNodeRegistry()
+	store := NewJobStore()
+	cfg := DispatchConfig{Timeout: time.Second, MaxAttempts: 1, BaseBackoff: time.Millisecond}
+	srv := NewServerWithConfig(reg, store, client, cfg, nil)
+	mux := srv.Mux()
+	registerNode(t, mux, "agent-duplicate", "agent.local:8081")
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		srv.dispatchJob(job.ID)
+		close(done)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for first dispatch attempt")
+	}
+
+	srv.dispatchJob(job.ID)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected duplicate dispatch to be skipped, got %d calls", got)
+	}
+	close(releaseRequest)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for dispatch to finish")
+	}
+}
+
+func TestDispatchSkipsNonQueuedJob(t *testing.T) {
+	client, calls := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{Status: "ok"})
+
+	reg := NewNodeRegistry()
+	store := NewJobStore()
+	srv := NewServerWithConfig(reg, store, client, DefaultDispatchConfig(), nil)
+	mux := srv.Mux()
+	registerNode(t, mux, "agent-stale", "agent.local:8081")
+
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(job.ID, "agent-stale"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	srv.dispatchJob(job.ID)
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("expected stale non-queued dispatch to be skipped, got %d calls", got)
 	}
 }
 

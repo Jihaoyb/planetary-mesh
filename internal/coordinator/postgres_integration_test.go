@@ -171,6 +171,115 @@ func TestPostgresJobLifecyclePersistence(t *testing.T) {
 	}
 }
 
+func TestPostgresListQueuedIDs(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	j1, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job 1: %v", err)
+	}
+	j2, err := jobs.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create job 2: %v", err)
+	}
+	j3, err := jobs.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create job 3: %v", err)
+	}
+	if _, err := jobs.StartAttempt(j2.ID, "node-pg"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	ids, err := jobs.ListQueuedIDs()
+	if err != nil {
+		t.Fatalf("list queued ids: %v", err)
+	}
+	want := []string{j1.ID, j3.ID}
+	if len(ids) != len(want) {
+		t.Fatalf("expected queued ids %v, got %v", want, ids)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("expected queued ids %v, got %v", want, ids)
+		}
+	}
+}
+
+func TestPostgresExpireQueuedJobs(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+	jobs := store.Jobs()
+
+	expired, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create expired job: %v", err)
+	}
+	fresh, err := jobs.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create fresh job: %v", err)
+	}
+	running, err := jobs.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create running job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(running.ID, "node-pg"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	now := time.Now().UTC()
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(`UPDATE jobs SET created_at = $1, updated_at = $1 WHERE id = $2`, now.Add(-25*time.Hour), expired.ID); err != nil {
+		t.Fatalf("age expired job: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE jobs SET created_at = $1, updated_at = $1 WHERE id = $2`, now.Add(-time.Hour), fresh.ID); err != nil {
+		t.Fatalf("age fresh job: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE jobs SET created_at = $1, updated_at = $1 WHERE id = $2`, now.Add(-25*time.Hour), running.ID); err != nil {
+		t.Fatalf("age running job: %v", err)
+	}
+
+	count, err := jobs.ExpireQueuedJobs(now, 24*time.Hour, QueuedJobExpiredError)
+	if err != nil {
+		t.Fatalf("expire queued jobs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one expired queued job, got %d", count)
+	}
+
+	gotExpired, ok, err := jobs.Get(expired.ID)
+	if err != nil {
+		t.Fatalf("get expired job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected expired job")
+	}
+	if gotExpired.Status != JobStatusFailed || gotExpired.LastError != QueuedJobExpiredError || gotExpired.CompletedAt == nil {
+		t.Fatalf("unexpected expired job: %+v", gotExpired)
+	}
+	gotFresh, ok, err := jobs.Get(fresh.ID)
+	if err != nil {
+		t.Fatalf("get fresh job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected fresh job")
+	}
+	if gotFresh.Status != JobStatusQueued {
+		t.Fatalf("expected fresh job to remain QUEUED, got %s", gotFresh.Status)
+	}
+	gotRunning, ok, err := jobs.Get(running.ID)
+	if err != nil {
+		t.Fatalf("get running job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected running job")
+	}
+	if gotRunning.Status != JobStatusRunning {
+		t.Fatalf("expected running job to remain RUNNING, got %s", gotRunning.Status)
+	}
+}
+
 func TestPostgresFailRunningJobs(t *testing.T) {
 	store := openPostgresTestStore(t)
 	jobs := store.Jobs()

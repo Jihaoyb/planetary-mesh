@@ -1,6 +1,10 @@
 package coordinator
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestJobStoreCreateAndList(t *testing.T) {
 	store := NewJobStore()
@@ -42,6 +46,99 @@ func TestJobStoreCreateAndList(t *testing.T) {
 	}
 }
 
+func TestJobStoreListQueuedIDs(t *testing.T) {
+	store := NewJobStore()
+
+	j1, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job 1: %v", err)
+	}
+	j2, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create job 2: %v", err)
+	}
+	j3, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create job 3: %v", err)
+	}
+	if _, err := store.StartAttempt(j2.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	ids, err := store.ListQueuedIDs()
+	if err != nil {
+		t.Fatalf("list queued ids: %v", err)
+	}
+	want := []string{j1.ID, j3.ID}
+	if len(ids) != len(want) {
+		t.Fatalf("expected queued ids %v, got %v", want, ids)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("expected queued ids %v, got %v", want, ids)
+		}
+	}
+}
+
+func TestJobStoreExpireQueuedJobs(t *testing.T) {
+	store := NewJobStore()
+	expired, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create expired job: %v", err)
+	}
+	fresh, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create fresh job: %v", err)
+	}
+	running, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create running job: %v", err)
+	}
+	if _, err := store.StartAttempt(running.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	now := time.Now().UTC()
+	store.mu.Lock()
+	store.jobs[expired.ID].CreatedAt = now.Add(-25 * time.Hour)
+	store.jobs[expired.ID].UpdatedAt = now.Add(-25 * time.Hour)
+	store.jobs[fresh.ID].CreatedAt = now.Add(-time.Hour)
+	store.jobs[fresh.ID].UpdatedAt = now.Add(-time.Hour)
+	store.jobs[running.ID].CreatedAt = now.Add(-25 * time.Hour)
+	store.jobs[running.ID].UpdatedAt = now.Add(-25 * time.Hour)
+	store.mu.Unlock()
+
+	count, err := store.ExpireQueuedJobs(now, 24*time.Hour, QueuedJobExpiredError)
+	if err != nil {
+		t.Fatalf("expire queued jobs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one expired queued job, got %d", count)
+	}
+
+	gotExpired, _, err := store.Get(expired.ID)
+	if err != nil {
+		t.Fatalf("get expired job: %v", err)
+	}
+	if gotExpired.Status != JobStatusFailed || gotExpired.LastError != QueuedJobExpiredError || gotExpired.CompletedAt == nil {
+		t.Fatalf("unexpected expired job: %+v", gotExpired)
+	}
+	gotFresh, _, err := store.Get(fresh.ID)
+	if err != nil {
+		t.Fatalf("get fresh job: %v", err)
+	}
+	if gotFresh.Status != JobStatusQueued {
+		t.Fatalf("expected fresh job to remain QUEUED, got %s", gotFresh.Status)
+	}
+	gotRunning, _, err := store.Get(running.ID)
+	if err != nil {
+		t.Fatalf("get running job: %v", err)
+	}
+	if gotRunning.Status != JobStatusRunning {
+		t.Fatalf("expected running job to remain RUNNING, got %s", gotRunning.Status)
+	}
+}
+
 func TestJobStoreGet(t *testing.T) {
 	store := NewJobStore()
 	j, err := store.Create(JobCreateInput{Type: "echo", Payload: "hello"})
@@ -64,6 +161,22 @@ func TestJobStoreGet(t *testing.T) {
 		t.Fatalf("get missing job: %v", err)
 	} else if ok {
 		t.Fatalf("expected Get on missing id to return false")
+	}
+}
+
+func TestJobStoreStartAttemptRejectsNonQueuedJob(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.Fail(j.ID, "", JobResult{LastError: "expired"}); err != nil {
+		t.Fatalf("fail job: %v", err)
+	}
+	if _, err := store.StartAttempt(j.ID, "node-1"); err == nil {
+		t.Fatalf("expected terminal job start attempt to fail")
+	} else if !strings.Contains(err.Error(), "not dispatchable") {
+		t.Fatalf("expected not dispatchable error, got %v", err)
 	}
 }
 
