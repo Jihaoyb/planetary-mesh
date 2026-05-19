@@ -26,6 +26,39 @@ func jsonResponse(status int, body any) *http.Response {
 	}
 }
 
+type staticNodeStore struct {
+	nodes []Node
+}
+
+func (s staticNodeStore) Register(NodeRegistration) (Node, error) {
+	return Node{}, nil
+}
+
+func (s staticNodeStore) List() ([]Node, error) {
+	nodes := make([]Node, len(s.nodes))
+	copy(nodes, s.nodes)
+	return nodes, nil
+}
+
+func (s staticNodeStore) UpdateHealthStates(time.Time, time.Duration, time.Duration) error {
+	return nil
+}
+
+func (s staticNodeStore) CountByState() (NodeStateCounts, error) {
+	var counts NodeStateCounts
+	for _, node := range s.nodes {
+		switch node.State {
+		case NodeStateHealthy:
+			counts.Healthy++
+		case NodeStateSuspect:
+			counts.Suspect++
+		case NodeStateOffline:
+			counts.Offline++
+		}
+	}
+	return counts, nil
+}
+
 func TestDispatchJobSuccess(t *testing.T) {
 	jobStore := NewJobStore()
 	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
@@ -104,5 +137,179 @@ func TestDispatchJobNoHealthyNodes(t *testing.T) {
 	}
 	if unchanged.Status != JobStatusQueued {
 		t.Fatalf("expected job status QUEUED, got %s", unchanged.Status)
+	}
+}
+
+func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	calls := map[string]int{}
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls[r.URL.Host]++
+			switch r.URL.Host {
+			case "node-a.local:8081":
+				return jsonResponse(http.StatusInternalServerError, protocol.ExecuteResponse{
+					Status:    "error",
+					LastError: "node-a retryable failure",
+				}), nil
+			case "node-b.local:8081":
+				return jsonResponse(http.StatusOK, protocol.ExecuteResponse{
+					Status: "ok",
+					Stdout: "node-b completed\n",
+				}), nil
+			default:
+				t.Fatalf("unexpected agent host %q", r.URL.Host)
+				return nil, nil
+			}
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{ID: "node-offline", Address: "node-offline.local:8081", State: NodeStateOffline},
+		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy},
+		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy},
+	}}
+	cfg := DispatchConfig{Timeout: 500 * time.Millisecond, MaxAttempts: 2, BaseBackoff: time.Millisecond}
+	srv := NewServerWithConfig(nodes, jobStore, client, cfg, nil)
+
+	srv.dispatchJob(job.ID)
+
+	final, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if final.Status != JobStatusCompleted {
+		t.Fatalf("expected job status COMPLETED, got %s", final.Status)
+	}
+	if final.NodeID != "node-b" {
+		t.Fatalf("expected final node node-b, got %q", final.NodeID)
+	}
+	if final.Attempts != 3 {
+		t.Fatalf("expected 3 total attempts, got %d", final.Attempts)
+	}
+	if final.Stdout != "node-b completed\n" {
+		t.Fatalf("expected node-b stdout, got %q", final.Stdout)
+	}
+	if calls["node-a.local:8081"] != 2 {
+		t.Fatalf("expected node-a to exhaust 2 attempts, got %d", calls["node-a.local:8081"])
+	}
+	if calls["node-b.local:8081"] != 1 {
+		t.Fatalf("expected node-b to be called once, got %d", calls["node-b.local:8081"])
+	}
+	if calls["node-offline.local:8081"] != 0 {
+		t.Fatalf("expected offline node to be skipped, got %d calls", calls["node-offline.local:8081"])
+	}
+}
+
+func TestDispatchFailsAfterAllHealthyNodesFailRetryably(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	calls := map[string]int{}
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls[r.URL.Host]++
+			return jsonResponse(http.StatusInternalServerError, protocol.ExecuteResponse{
+				Status:    "error",
+				LastError: r.URL.Host + " retryable failure",
+			}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy},
+		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy},
+	}}
+	cfg := DispatchConfig{Timeout: 500 * time.Millisecond, MaxAttempts: 2, BaseBackoff: time.Millisecond}
+	srv := NewServerWithConfig(nodes, jobStore, client, cfg, nil)
+
+	srv.dispatchJob(job.ID)
+
+	final, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if final.Status != JobStatusFailed {
+		t.Fatalf("expected job status FAILED, got %s", final.Status)
+	}
+	if final.NodeID != "node-b" {
+		t.Fatalf("expected final node node-b, got %q", final.NodeID)
+	}
+	if final.Attempts != 4 {
+		t.Fatalf("expected 4 total attempts, got %d", final.Attempts)
+	}
+	if final.LastError != "node-b.local:8081 retryable failure" {
+		t.Fatalf("expected last retryable error from node-b, got %q", final.LastError)
+	}
+	if calls["node-a.local:8081"] != 2 || calls["node-b.local:8081"] != 2 {
+		t.Fatalf("expected each healthy node to receive 2 attempts, got calls=%v", calls)
+	}
+	if got := srv.Metrics().DispatchAttempts.Load(); got != 4 {
+		t.Fatalf("expected 4 dispatch attempts metric, got %d", got)
+	}
+	if got := srv.Metrics().DispatchErrors.Load(); got != 4 {
+		t.Fatalf("expected 4 dispatch errors metric, got %d", got)
+	}
+	if got := srv.Metrics().JobsFailed.Load(); got != 1 {
+		t.Fatalf("expected 1 failed job metric, got %d", got)
+	}
+}
+
+func TestDispatchDoesNotReassignTerminalFailure(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	exitCode := 2
+	calls := map[string]int{}
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls[r.URL.Host]++
+			if r.URL.Host != "node-a.local:8081" {
+				t.Fatalf("terminal failure should not reassign to %q", r.URL.Host)
+			}
+			return jsonResponse(http.StatusUnprocessableEntity, protocol.ExecuteResponse{
+				Status:    "error",
+				ExitCode:  &exitCode,
+				Stderr:    "boom\n",
+				LastError: "command exited with code 2",
+			}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy},
+		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy},
+	}}
+	cfg := DispatchConfig{Timeout: 500 * time.Millisecond, MaxAttempts: 3, BaseBackoff: time.Millisecond}
+	srv := NewServerWithConfig(nodes, jobStore, client, cfg, nil)
+
+	srv.dispatchJob(job.ID)
+
+	final, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if final.Status != JobStatusFailed {
+		t.Fatalf("expected job status FAILED, got %s", final.Status)
+	}
+	if final.NodeID != "node-a" {
+		t.Fatalf("expected final node node-a, got %q", final.NodeID)
+	}
+	if final.Attempts != 1 {
+		t.Fatalf("expected 1 attempt for terminal failure, got %d", final.Attempts)
+	}
+	if final.ExitCode == nil || *final.ExitCode != 2 {
+		t.Fatalf("expected exit code 2, got %#v", final.ExitCode)
+	}
+	if calls["node-a.local:8081"] != 1 || calls["node-b.local:8081"] != 0 {
+		t.Fatalf("expected only node-a to be called once, got calls=%v", calls)
 	}
 }
