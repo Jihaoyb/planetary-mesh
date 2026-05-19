@@ -11,11 +11,12 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 10 queued
-  scheduler hardening.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 11
+  cross-node reassignment.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
-  to the first healthy node, periodically revisits queued jobs, exposes metrics
-  and status, and can persist nodes and jobs in Postgres.
+  first to the first healthy node, reassigns after retryable dispatch failures,
+  periodically revisits queued jobs, exposes metrics and status, and can persist
+  nodes and jobs in Postgres.
 - **Agent**: registers with the coordinator, sends heartbeats, and executes
   allowlisted command jobs without invoking a shell.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
@@ -40,6 +41,8 @@ shared compute scenarios.
 - Bounded stdout and stderr capture with per-stream truncation flags.
 - Retry handling for retryable dispatch failures such as transport errors and
   agent `5xx` responses.
+- Cross-node reassignment after retryable dispatch failures when the selected
+  healthy node exhausts its configured attempts.
 - Periodic coordinator-owned re-dispatch for jobs left `QUEUED` because no
   healthy node existed at submission time.
 - Queued jobs expire as `FAILED` after 24 hours if no healthy node becomes

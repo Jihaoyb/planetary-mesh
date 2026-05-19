@@ -184,7 +184,8 @@ Future decisions:
 
 ## Scheduling Strategy
 
-Choice: simple first-healthy-node dispatch.
+Choice: simple first-healthy-node initial dispatch with cross-node retry for
+retryable dispatch failures.
 
 Why:
 
@@ -198,7 +199,12 @@ Current behavior:
 - dispatch attempts immediately after submission
 - coordinator selects the first node currently in `HEALTHY` state
 - a coordinator-owned scheduler periodically revisits jobs that remain `QUEUED`
-- retryable dispatch failures are retried against the selected node
+- retryable dispatch failures are retried against the selected node up to the
+  configured attempt count
+- after those retryable attempts are exhausted, the coordinator tries another
+  `HEALTHY` node that has not already been attempted in that dispatch cycle
+- if all eligible healthy nodes fail retryably, the job is marked `FAILED` with
+  the last retryable error
 - if no healthy node exists, the job remains queued until a later scheduler pass
   sees a healthy node
 - if no healthy node becomes available within 24 hours, the queued job is marked
@@ -209,7 +215,6 @@ Current behavior:
 Future decisions:
 
 - configurable queued-job expiration
-- cross-node reassignment
 - capability-aware scheduling
 - load-aware scheduling
 - priorities, quotas, and fairness

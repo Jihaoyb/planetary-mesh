@@ -10,7 +10,7 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 10 queued scheduler hardening
+- Baseline: `main` after Milestone 11 cross-node reassignment
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -24,7 +24,8 @@ Implemented capability:
 - node registration and heartbeat
 - node health states: `HEALTHY`, `SUSPECT`, `OFFLINE`
 - command job submission with `type="command"`, `command`, and optional `args`
-- first-healthy-node dispatch at job submission time
+- first-healthy-node initial dispatch at job submission time
+- cross-node reassignment after retryable dispatch failures
 - periodic queued-job scheduler/re-dispatch loop
 - queued jobs expire as `FAILED` after 24 hours
 - allowlisted direct command execution using `exec.CommandContext`
@@ -45,9 +46,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-10
+## Completed Baseline / Milestones 1-11
 
-The first ten milestones established a working private LAN/trusted-network
+The first eleven milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -233,13 +234,32 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 11: Cross-Node Reassignment
+
+Goal: let a command job try another healthy node when the selected node has
+retryable dispatch failures.
+
+Completed outcomes:
+
+- coordinator still selects the first `HEALTHY` node for the initial dispatch
+- retryable failures exhaust the selected node's configured attempts before
+  moving to another `HEALTHY` node
+- terminal failures still stop dispatch immediately
+- jobs fail with the last retryable error when all eligible healthy nodes fail
+- duplicate concurrent dispatch protection still covers the whole dispatch
+  cycle in one coordinator process
+- HTTP/JSON API shape, protocol version behavior, command execution rules,
+  in-memory tests, and optional Postgres schema version `1` are unchanged
+- docs now describe cross-node reassignment and remaining scheduler limits
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
 
 Potential work:
 
-- cross-node reassignment after dispatch failure
 - simple node capabilities/load reporting
 - clearer job state transitions
 - agent reconciliation strategy after coordinator restart

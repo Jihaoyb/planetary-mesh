@@ -85,7 +85,8 @@ Coordinator responsibilities:
 - update node health states based on heartbeat age
 - validate job submissions
 - store job metadata and execution result fields
-- select the first healthy node for a dispatch attempt
+- select the first healthy node for initial dispatch and reassign to other
+  healthy nodes after retryable dispatch failures
 - dispatch to agent `/execute`
 - retry retryable transport errors and agent `5xx` responses
 - mark terminal job outcomes as `COMPLETED` or `FAILED`
@@ -197,7 +198,9 @@ Current dispatch behavior:
 4. Coordinator lists nodes and picks the first `HEALTHY` node.
 5. Coordinator marks the job `RUNNING` for each attempt.
 6. Coordinator sends an HTTP/JSON `POST /execute` request to the selected agent.
-7. Coordinator records the terminal result as `COMPLETED` or `FAILED`.
+7. Retryable failures are retried on that node up to the configured attempt
+   count, then reassigned to another eligible `HEALTHY` node.
+8. Coordinator records the terminal result as `COMPLETED` or `FAILED`.
 
 Queued scheduler behavior:
 
@@ -217,12 +220,17 @@ Retry behavior:
   retryable under the dispatch policy
 - validation errors, allowlist rejection, protocol mismatch, and non-zero
   command exit are terminal
-- retry attempts use exponential backoff
+- retry attempts use exponential backoff per selected node
+- when a selected node exhausts retryable attempts, the coordinator tries the
+  next healthy node not already attempted in that dispatch cycle
+- if all eligible healthy nodes fail retryably, the job fails with the last
+  retryable error
 - node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
   in-flight execution attempt in v0
 
-The scheduler is still simple first-healthy-node dispatch. It does not perform
-load-aware scheduling, capability matching, queue fairness, or cross-node retry.
+The scheduler is still simple first-healthy-node initial dispatch with
+cross-node retry. It does not perform load-aware scheduling, capability
+matching, or queue fairness.
 
 ### Node Registration and Health
 
@@ -268,10 +276,9 @@ Certificate issuance, distribution, enrollment, and rotation are manual.
 
 Current private-mesh limitations:
 
-- queued-job scheduling is periodic, first-healthy-node only, and uses a fixed
-  24-hour queued-job expiration window
+- queued-job scheduling is periodic, first-healthy-node initial dispatch, and
+  uses a fixed 24-hour queued-job expiration window
 - no load-aware or capability-aware scheduling
-- no cross-node reassignment after a selected node exhausts retry attempts
 - no agent reconciliation after coordinator restart
 - no strong sandbox/container/VM isolation
 - no per-job timeout override
@@ -298,7 +305,6 @@ These are planned or possible directions, not current implementation.
 
 Private mesh hardening:
 
-- cross-node reassignment
 - explicit job state transition documentation
 - node capabilities/load reporting
 - operator runbooks
