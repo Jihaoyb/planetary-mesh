@@ -45,11 +45,13 @@ func (e *HTTPError) Error() string {
 }
 
 type Node struct {
-	ID          string                       `json:"id"`
-	Address     string                       `json:"address"`
-	LastSeen    time.Time                    `json:"last_seen"`
-	State       string                       `json:"state"`
-	Certificate security.CertificateMetadata `json:"certificate,omitempty"`
+	ID           string                       `json:"id"`
+	Address      string                       `json:"address"`
+	LastSeen     time.Time                    `json:"last_seen"`
+	State        string                       `json:"state"`
+	Capabilities []string                     `json:"capabilities"`
+	Load         protocol.NodeLoad            `json:"load"`
+	Certificate  security.CertificateMetadata `json:"certificate,omitempty"`
 }
 
 type Job struct {
@@ -125,13 +127,33 @@ func (c *Client) Status(ctx context.Context) (protocol.CoordinatorStatusResponse
 func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	var out []Node
 	err := c.doJSON(ctx, http.MethodGet, "/nodes", nil, &out)
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	if err := normalizeNodes(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) ListJobs(ctx context.Context) ([]Job, error) {
 	var out []Job
 	err := c.doJSON(ctx, http.MethodGet, "/jobs", nil, &out)
 	return out, err
+}
+
+func normalizeNodes(nodes []Node) error {
+	for i := range nodes {
+		capabilities, err := protocol.NormalizeNodeCapabilities(nodes[i].Capabilities)
+		if err != nil {
+			return fmt.Errorf("invalid capabilities for node %q: %w", nodes[i].ID, err)
+		}
+		if err := protocol.ValidateNodeLoad(nodes[i].Load); err != nil {
+			return fmt.Errorf("invalid load for node %q: %w", nodes[i].ID, err)
+		}
+		nodes[i].Capabilities = capabilities
+	}
+	return nil
 }
 
 func (c *Client) GetJob(ctx context.Context, id string) (Job, error) {

@@ -28,11 +28,13 @@ func writeStatus(w io.Writer, s protocol.CoordinatorStatusResponse) error {
 
 func writeNodes(w io.Writer, nodes []Node) error {
 	tw := newTabWriter(w)
-	fmt.Fprintln(tw, "ID\tSTATE\tADDRESS\tLAST_SEEN\tCERTIFICATE")
+	fmt.Fprintln(tw, "ID\tSTATE\tACTIVE\tCAPABILITIES\tADDRESS\tLAST_SEEN\tCERTIFICATE")
 	for _, node := range nodes {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			node.ID,
 			node.State,
+			node.Load.ActiveExecutions,
+			formatCapabilities(node.Capabilities),
 			node.Address,
 			formatTime(node.LastSeen),
 			shortFingerprint(node.Certificate.SHA256Fingerprint),
@@ -108,6 +110,13 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func formatCapabilities(capabilities []string) string {
+	if len(capabilities) == 0 {
+		return "-"
+	}
+	return strings.Join(capabilities, ",")
 }
 
 func shortFingerprint(fingerprint string) string {

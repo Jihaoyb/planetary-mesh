@@ -101,6 +101,22 @@ func TestRunCommandJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRunCommandNodesJSONOutputIncludesMetadataDefaults(t *testing.T) {
+	client := &fakeClient{nodes: []Node{{ID: "node-1", State: "HEALTHY"}}}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{"nodes", "list"}, &out, true)
+	if err != nil {
+		t.Fatalf("nodes list: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{`"id": "node-1"`, `"capabilities": []`, `"active_executions": 0`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected JSON output to contain %q, got:\n%s", want, text)
+		}
+	}
+}
+
 func TestRunCommandUsageErrors(t *testing.T) {
 	err := runCommandWithClient(context.Background(), &fakeClient{}, []string{"jobs"}, ioDiscard{}, false)
 	if err == nil || !isUsageError(err) {
@@ -212,10 +228,17 @@ func TestConfigFromSourcesRejectsMissingExplicitFile(t *testing.T) {
 func TestWriteNodesAndJobs(t *testing.T) {
 	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
 	var out bytes.Buffer
-	if err := writeNodes(&out, []Node{{ID: "node-1", State: "HEALTHY", Address: "localhost:8081", LastSeen: now}}); err != nil {
+	if err := writeNodes(&out, []Node{{
+		ID:           "node-1",
+		State:        "HEALTHY",
+		Address:      "localhost:8081",
+		LastSeen:     now,
+		Capabilities: []string{"profile:local", "role:worker"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 2},
+	}}); err != nil {
 		t.Fatalf("write nodes: %v", err)
 	}
-	if !strings.Contains(out.String(), "node-1") || !strings.Contains(out.String(), "HEALTHY") {
+	if !strings.Contains(out.String(), "ACTIVE") || !strings.Contains(out.String(), "node-1") || !strings.Contains(out.String(), "HEALTHY") || !strings.Contains(out.String(), "profile:local,role:worker") {
 		t.Fatalf("unexpected nodes output:\n%s", out.String())
 	}
 

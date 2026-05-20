@@ -70,6 +70,8 @@ func TestClientMethodsDecodeResponses(t *testing.T) {
 	}
 	if nodes, err := client.ListNodes(context.Background()); err != nil || len(nodes) != 1 {
 		t.Fatalf("nodes = %+v, %v", nodes, err)
+	} else if nodes[0].Capabilities == nil || nodes[0].Load.ActiveExecutions != 0 {
+		t.Fatalf("expected node metadata defaults, got %+v", nodes[0])
 	}
 	if jobs, err := client.ListJobs(context.Background()); err != nil || len(jobs) != 1 {
 		t.Fatalf("jobs = %+v, %v", jobs, err)
