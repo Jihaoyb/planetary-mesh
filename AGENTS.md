@@ -21,10 +21,9 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after PR #14 / Milestone 9 schema readiness at commit
-`46a0af2`.
+Current `main` is after Milestone 12 node capability/load visibility.
 
-Milestones 1 through 9 are complete:
+Milestones 1 through 12 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -36,7 +35,10 @@ Milestones 1 through 9 are complete:
 - thin `pmctl` operator CLI
 - env-style local config files
 - local and Postgres smoke workflows
-- Postgres schema readiness metadata version `1`
+- queued-job scheduler/re-dispatch loop
+- cross-node reassignment after retryable dispatch failure
+- simple node capability/load reporting for operators
+- Postgres schema readiness metadata version `2`
 
 The next phase should focus on documentation accuracy and private mesh
 hardening. Do not jump to marketplace, payment, dashboard, public-node, or
@@ -263,7 +265,7 @@ Preserve these rules:
   the result was not persisted, that result is lost.
 - Do not implement agent reconciliation unless it is the explicit task.
 - Postgres integration tests must be opt-in or separately gated.
-- Schema readiness metadata version `1` is current. It is not a full migration
+- Schema readiness metadata version `2` is current. It is not a full migration
   framework.
 
 ## Security Rules
@@ -304,7 +306,7 @@ Allowed near-term direction is private mesh hardening:
 
 - queued-job scheduler/re-dispatch loop
 - cross-node reassignment after dispatch failure
-- node capabilities/load reporting
+- scheduler policy for reported node capabilities/load
 - clearer job state transitions
 - agent reconciliation strategy after coordinator restart
 - operator runbooks and API inventory

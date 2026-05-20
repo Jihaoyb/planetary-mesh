@@ -33,9 +33,11 @@ For product framing and sequencing, see:
 Current runtime components:
 
 - **Coordinator**: single v0 control plane for node registry, health state, job
-  validation, job state, dispatch, retry policy, storage, status, and metrics.
+  validation, node capability/load metadata, job state, dispatch, retry policy,
+  storage, status, and metrics.
 - **Agent**: daemon on a trusted machine. It registers with the coordinator,
-  sends heartbeats, and executes allowlisted command jobs through `/execute`.
+  sends heartbeats with node metadata, and executes allowlisted command jobs
+  through `/execute`.
 - **pmctl**: thin operator CLI over the coordinator HTTP/JSON API.
 - **Postgres**: optional durable store for coordinator nodes/jobs. In-memory
   storage remains the default for local runs and ordinary unit tests.
@@ -80,8 +82,8 @@ Coordinator responsibilities:
 - load listen address, storage, TLS, and node allowlist settings from defaults,
   optional env-style config files, environment variables, and supported flags
 - accept agent registration and heartbeat requests
-- store node id, address, last seen timestamp, health state, and certificate
-  metadata when present
+- store node id, address, last seen timestamp, health state, reported
+  capabilities, active execution count, and certificate metadata when present
 - update node health states based on heartbeat age
 - validate job submissions
 - store job metadata and execution result fields
@@ -100,17 +102,20 @@ transitions. These responsibilities should not move into agents or `pmctl`.
 
 Agent responsibilities:
 
-- load coordinator URL, node id, listen address, advertised address, TLS files,
-  execution timeout, and command allowlist settings
+- load coordinator URL, node id, listen address, advertised address, optional
+  static capabilities, TLS files, execution timeout, and command allowlist
+  settings
 - register with the coordinator on startup
-- continue sending registration requests as heartbeats
+- continue sending registration requests as heartbeats, including the current
+  active command execution count
 - expose `/execute`
 - execute only locally allowlisted command jobs
 - enforce fixed execution timeout and bounded output capture
 - return execution result fields to the coordinator
 
-The current registration payload includes node id and address. Agents do not
-report capabilities, load, GPU state, queue depth, or task-level progress today.
+The current registration payload includes node id, address, optional static
+capabilities, and an approximate active command execution count. Agents do not
+report capacity, queue depth, GPU state, or task-level progress today.
 
 ### pmctl
 
@@ -126,14 +131,15 @@ Supported operations:
 
 `pmctl` sends the protocol version header, supports JSON output, and can be
 configured with a coordinator URL plus optional CA/cert/key files for secure
-coordinator access. It does not own scheduling, validation, retries, storage, or
-state transitions.
+coordinator access. `pmctl nodes list` shows node state, active execution count,
+capabilities, address, last seen time, and certificate fingerprint. It does not
+own scheduling, validation, retries, storage, or state transitions.
 
 ### Storage
 
 Coordinator storage holds:
 
-- nodes
+- nodes, including reported capabilities/load metadata
 - jobs
 
 Default storage is in-memory. This keeps local development simple and ordinary
@@ -141,12 +147,14 @@ Default storage is in-memory. This keeps local development simple and ordinary
 
 When `COORDINATOR_DATABASE_URL` is configured, the coordinator uses Postgres for
 durable nodes/jobs. ADR 0006 records the Postgres decision. ADR 0010 records the
-lightweight schema readiness metadata.
+lightweight schema readiness metadata. ADR 0011 records the node
+capability/load reporting decision.
 
 Postgres behavior today:
 
 - embedded schema initialization at startup
-- `schema_version` table with current version `1`
+- `schema_version` table with current version `2`
+- node rows include `capabilities` and `active_executions`
 - backfill missing schema metadata on existing databases
 - reject databases marked with a newer schema version than the running binary
   expects
@@ -229,8 +237,9 @@ Retry behavior:
   in-flight execution attempt in v0
 
 The scheduler is still simple first-healthy-node initial dispatch with
-cross-node retry. It does not perform load-aware scheduling, capability
-matching, or queue fairness.
+cross-node retry. Reported capabilities and active execution counts are
+operator-visible only; they do not affect node selection, priority,
+reassignment, or queue fairness.
 
 ### Node Registration and Health
 
@@ -238,9 +247,30 @@ Registration flow:
 
 1. Agent starts with coordinator URL, node id, listen address, and advertised
    address.
-2. Agent sends `POST /register` with node id and address.
-3. Coordinator creates or updates the node record.
+2. Agent sends `POST /register` with node id, address, optional capabilities,
+   and current active execution count.
+3. Coordinator validates the node metadata and creates or updates the node
+   record.
 4. The same request is repeated as heartbeat.
+
+Registration payload:
+
+```json
+{
+  "id": "local-agent-1",
+  "address": "http://localhost:8081",
+  "capabilities": ["profile:local", "role:worker"],
+  "load": {
+    "active_executions": 1
+  }
+}
+```
+
+Older agents that omit `capabilities` and `load` remain compatible. The
+coordinator records empty capabilities and zero active executions for those
+heartbeats. Capability labels are static operator-provided strings; active
+executions are a last-heartbeat snapshot and may be stale for `SUSPECT` or
+`OFFLINE` nodes.
 
 Health flow:
 
@@ -278,7 +308,8 @@ Current private-mesh limitations:
 
 - queued-job scheduling is periodic, first-healthy-node initial dispatch, and
   uses a fixed 24-hour queued-job expiration window
-- no load-aware or capability-aware scheduling
+- reported node capabilities/load are visibility fields only; there is no
+  load-aware or capability-aware scheduling
 - no agent reconciliation after coordinator restart
 - no strong sandbox/container/VM isolation
 - no per-job timeout override
@@ -306,7 +337,7 @@ These are planned or possible directions, not current implementation.
 Private mesh hardening:
 
 - explicit job state transition documentation
-- node capabilities/load reporting
+- scheduler policy for reported node capabilities/load
 - operator runbooks
 - API inventory and contract decision
 - better install/release workflow

@@ -26,7 +26,7 @@ Near-term MVP work should harden the private/local mesh:
   re-dispatch for jobs left queued without a healthy node
 - clearer scheduler behavior
 - cross-node reassignment after retryable dispatch failure
-- better node health/capability visibility
+- better node health, capability, and load visibility
 - agent reconciliation strategy after coordinator restart
 - stronger execution-risk docs and runbooks
 - improved install/onboarding workflow
@@ -52,7 +52,7 @@ Practical MVP success means:
 - a user can run coordinator + agent locally
 - a user can submit an allowlisted command job
 - a user can inspect job result, stdout, stderr, and errors
-- a user can see node state
+- a user can see node state, configured capabilities, and active execution count
 - a user can choose in-memory or Postgres coordinator storage
 - default build/test checks pass without external services
 - Postgres durability checks are opt-in and documented

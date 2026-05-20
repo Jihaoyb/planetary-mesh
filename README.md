@@ -11,20 +11,21 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 11
-  cross-node reassignment.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 12 node
+  capability/load visibility.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
-  periodically revisits queued jobs, exposes metrics and status, and can persist
-  nodes and jobs in Postgres.
-- **Agent**: registers with the coordinator, sends heartbeats, and executes
+  periodically revisits queued jobs, exposes metrics and status, stores reported
+  node capabilities/load, and can persist nodes and jobs in Postgres.
+- **Agent**: registers with the coordinator, sends heartbeats with optional
+  static capabilities and current active execution count, and executes
   allowlisted command jobs without invoking a shell.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
   inspection, and command job submission.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
-  optional and includes lightweight schema readiness metadata version `1`.
+  optional and includes lightweight schema readiness metadata version `2`.
 
 ## What Works Today
 
@@ -34,6 +35,8 @@ shared compute scenarios.
 - Agent `GET /healthz` and `POST /execute`.
 - Node registration and heartbeat through repeated `POST /register` calls.
 - Node health states: `HEALTHY`, `SUSPECT`, and `OFFLINE`.
+- Operator-visible node capabilities and active execution counts reported
+  through registration/heartbeat, `GET /nodes`, and `pmctl nodes list`.
 - Command job submission with `type="command"`, `command`, and optional `args`.
 - Allowlisted direct process execution using `exec.CommandContext`.
 - No shell execution and no arbitrary executable paths from job submissions.
@@ -47,8 +50,8 @@ shared compute scenarios.
   healthy node existed at submission time.
 - Queued jobs expire as `FAILED` after 24 hours if no healthy node becomes
   available.
-- Optional Postgres persistence for nodes/jobs, startup recovery for persisted
-  `RUNNING` jobs, and schema readiness reporting.
+- Optional Postgres persistence for nodes/jobs, node capability/load metadata,
+  startup recovery for persisted `RUNNING` jobs, and schema readiness reporting.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -72,8 +75,9 @@ limitation and risk register.
 
 Planetary Mesh has three runtime components:
 
-- **Coordinator**: the single v0 control plane. It owns validation, node state,
-  job state, dispatch, retry policy, storage selection, metrics, and status.
+- **Coordinator**: the single v0 control plane. It owns validation, node state
+  and metadata, job state, dispatch, retry policy, storage selection, metrics,
+  and status.
 - **Agent**: a worker daemon on a trusted machine. It registers with the
   coordinator, sends heartbeats, exposes `/execute`, and runs only locally
   allowlisted commands.
@@ -95,6 +99,7 @@ trust boundary but is not a strong sandbox:
 - Job submissions name a logical command key, not an executable path.
 - Agents map logical command names to executable paths through
   `AGENT_COMMAND_ALLOWLIST`.
+- Operators can label agents with static `AGENT_CAPABILITIES`.
 - Agents execute commands directly with `exec.CommandContext`.
 - Agents never execute through a shell.
 - Stdout and stderr are captured separately and capped at `1 MiB` per stream.
@@ -193,6 +198,7 @@ Start an agent in another terminal:
 ```bash
 COORDINATOR_URL=http://localhost:8080 \
 AGENT_ADDR=:8081 \
+AGENT_CAPABILITIES='profile:local,role:worker' \
 AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
 go run ./cmd/agent
 ```
@@ -233,10 +239,10 @@ go run ./cmd/coordinator
 ```
 
 Postgres startup uses embedded schema initialization plus lightweight schema
-readiness metadata. `schema_version` value `1` represents the current nodes/jobs
-schema plus readiness marker. The coordinator exposes schema readiness through
-startup logs, `/status`, `/metrics`, `pmctl --json status`, tests, and the
-Postgres smoke workflow.
+readiness metadata. `schema_version` value `2` represents the current nodes/jobs
+schema, node capability/load columns, and readiness marker. The coordinator
+exposes schema readiness through startup logs, `/status`, `/metrics`,
+`pmctl --json status`, tests, and the Postgres smoke workflow.
 
 This is not a full migration framework. A database marked with a newer schema
 version than the running coordinator expects is rejected at startup.
@@ -265,6 +271,7 @@ NODE_ID=agent-1 \
 AGENT_TLS_CA_FILE=./certs/ca.pem \
 AGENT_TLS_CERT_FILE=./certs/agent-1.pem \
 AGENT_TLS_KEY_FILE=./certs/agent-1-key.pem \
+AGENT_CAPABILITIES='profile:local,role:worker' \
 AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
 go run ./cmd/agent
 ```
@@ -297,6 +304,7 @@ Use JSON output for automation:
 
 ```bash
 pmctl --json jobs inspect job-1
+pmctl --json nodes list
 ```
 
 Point at another coordinator with a flag, environment variable, or config file:
@@ -372,3 +380,4 @@ Architecture Decision Records:
 - [ADR 0008: Thin operator CLI](docs/adr/0008-operator-cli.md)
 - [ADR 0009: Env-style local config files](docs/adr/0009-env-style-local-config-files.md)
 - [ADR 0010: Postgres schema readiness metadata](docs/adr/0010-postgres-schema-readiness.md)
+- [ADR 0011: Node capability and load visibility](docs/adr/0011-node-capability-load-visibility.md)
