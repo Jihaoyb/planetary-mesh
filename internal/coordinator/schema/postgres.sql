@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   address TEXT NOT NULL,
   last_seen TIMESTAMPTZ NOT NULL,
   state TEXT NOT NULL,
+  capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
+  active_executions INTEGER NOT NULL DEFAULT 0,
   certificate_subject TEXT NOT NULL DEFAULT '',
   certificate_dns_names JSONB NOT NULL DEFAULT '[]'::jsonb,
   certificate_ip_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -20,6 +22,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS active_executions INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_subject TEXT NOT NULL DEFAULT '';
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_dns_names JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS certificate_ip_addresses JSONB NOT NULL DEFAULT '[]'::jsonb;

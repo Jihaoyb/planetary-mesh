@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"planetary-mesh/internal/protocol"
 	"planetary-mesh/internal/security"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -83,8 +84,10 @@ func TestPostgresNodePersistence(t *testing.T) {
 
 	notAfter := time.Now().Add(time.Hour).UTC()
 	registered, err := nodes.Register(NodeRegistration{
-		ID:      "node-pg",
-		Address: "http://agent:8081",
+		ID:           "node-pg",
+		Address:      "http://agent:8081",
+		Capabilities: []string{"role:worker", "profile:postgres", "role:worker"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 2},
 		Certificate: security.CertificateMetadata{
 			Subject:           "CN=node-pg",
 			DNSNames:          []string{"node-pg.local"},
@@ -98,6 +101,12 @@ func TestPostgresNodePersistence(t *testing.T) {
 	if registered.State != NodeStateHealthy {
 		t.Fatalf("expected HEALTHY, got %s", registered.State)
 	}
+	if len(registered.Capabilities) != 2 || registered.Capabilities[0] != "profile:postgres" || registered.Capabilities[1] != "role:worker" {
+		t.Fatalf("unexpected registered capabilities: %+v", registered.Capabilities)
+	}
+	if registered.Load.ActiveExecutions != 2 {
+		t.Fatalf("unexpected registered load: %+v", registered.Load)
+	}
 
 	listed, err := nodes.List()
 	if err != nil {
@@ -108,6 +117,25 @@ func TestPostgresNodePersistence(t *testing.T) {
 	}
 	if listed[0].Certificate.Subject != "CN=node-pg" || listed[0].Certificate.DNSNames[0] != "node-pg.local" {
 		t.Fatalf("unexpected certificate metadata: %+v", listed[0].Certificate)
+	}
+	if len(listed[0].Capabilities) != 2 || listed[0].Capabilities[0] != "profile:postgres" || listed[0].Capabilities[1] != "role:worker" {
+		t.Fatalf("unexpected listed capabilities: %+v", listed[0].Capabilities)
+	}
+	if listed[0].Load.ActiveExecutions != 2 {
+		t.Fatalf("unexpected listed load: %+v", listed[0].Load)
+	}
+
+	updated, err := nodes.Register(NodeRegistration{
+		ID:           "node-pg",
+		Address:      "http://agent:8082",
+		Capabilities: []string{"role:updated"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 0},
+	})
+	if err != nil {
+		t.Fatalf("update node: %v", err)
+	}
+	if updated.Address != "http://agent:8082" || len(updated.Capabilities) != 1 || updated.Capabilities[0] != "role:updated" || updated.Load.ActiveExecutions != 0 {
+		t.Fatalf("unexpected updated node: %+v", updated)
 	}
 
 	counts, err := nodes.CountByState()
@@ -478,6 +506,47 @@ VALUES (
 	}
 	if next.ID != "job-2" {
 		t.Fatalf("expected job sequence to continue at job-2, got %s", next.ID)
+	}
+}
+
+func TestPostgresSchemaVersionOneUpgradesNodeMetadataDefaults(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(oldPostgresSchemaSQL); err != nil {
+		t.Fatalf("initialize version 1 schema: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE schema_version (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_version (id, version) VALUES ($1, 1);
+`, postgresSchemaVersionID); err != nil {
+		t.Fatalf("seed version 1 schema metadata: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO nodes (id, address, last_seen, state, created_at)
+VALUES ('v1-node', 'http://agent:8081', now(), 'HEALTHY', now())
+`); err != nil {
+		t.Fatalf("insert version 1 node: %v", err)
+	}
+
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+
+	if got := querySchemaVersion(t, dsn); got != PostgresExpectedSchemaVersion {
+		t.Fatalf("expected upgraded schema version %d, got %d", PostgresExpectedSchemaVersion, got)
+	}
+	nodes, err := store.Nodes().List()
+	if err != nil {
+		t.Fatalf("list upgraded nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != "v1-node" {
+		t.Fatalf("unexpected upgraded nodes: %+v", nodes)
+	}
+	if len(nodes[0].Capabilities) != 0 || nodes[0].Load.ActiveExecutions != 0 {
+		t.Fatalf("expected metadata defaults after upgrade, got %+v", nodes[0])
 	}
 }
 

@@ -45,7 +45,7 @@ func TestProtocolVersionRequired(t *testing.T) {
 }
 
 func TestHandleStatus(t *testing.T) {
-	schema := protocol.SchemaStatus{Ready: true, Version: 1, ExpectedVersion: 1}
+	schema := protocol.SchemaStatus{Ready: true, Version: 2, ExpectedVersion: 2}
 	srv := NewServerWithRuntime(
 		NewNodeRegistry(),
 		NewJobStore(),
@@ -73,7 +73,7 @@ func TestHandleStatus(t *testing.T) {
 	if got.StorageBackend != "postgres" || !got.SecureMode || !got.NodeAllowlistEnabled {
 		t.Fatalf("unexpected runtime metadata: %+v", got)
 	}
-	if got.Schema == nil || !got.Schema.Ready || got.Schema.Version != 1 || got.Schema.ExpectedVersion != 1 {
+	if got.Schema == nil || !got.Schema.Ready || got.Schema.Version != 2 || got.Schema.ExpectedVersion != 2 {
 		t.Fatalf("unexpected schema metadata: %+v", got.Schema)
 	}
 	if got.Dispatch.MaxAttempts != 2 {

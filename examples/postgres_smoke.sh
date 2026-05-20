@@ -98,8 +98,8 @@ ok = (
     status.get("status") == "ok"
     and status.get("storage_backend") == "postgres"
     and schema.get("ready") is True
-    and schema.get("version") == 1
-    and schema.get("expected_version") == 1
+    and schema.get("version") == 2
+    and schema.get("expected_version") == 2
 )
 sys.exit(0 if ok else 1)
 ' <<<"${status_json}"; then
@@ -163,8 +163,8 @@ require_metrics() {
   grep -q 'planetary_jobs_recovered_on_startup_total 1' <<<"${metrics}"
   grep -q 'planetary_nodes{state="HEALTHY"}' <<<"${metrics}"
   grep -q 'planetary_postgres_schema_ready 1' <<<"${metrics}"
-  grep -q 'planetary_postgres_schema_version 1' <<<"${metrics}"
-  grep -q 'planetary_postgres_schema_expected_version 1' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_version 2' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_expected_version 2' <<<"${metrics}"
 }
 
 require_command docker
