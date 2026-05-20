@@ -171,6 +171,62 @@ func TestPostgresJobLifecyclePersistence(t *testing.T) {
 	}
 }
 
+func TestPostgresJobAttemptReassignmentPersistence(t *testing.T) {
+	store := openPostgresTestStore(t)
+	status := store.SchemaStatus()
+	if !status.Ready || status.Version != PostgresExpectedSchemaVersion || status.ExpectedVersion != PostgresExpectedSchemaVersion {
+		t.Fatalf("unexpected schema status: %+v", status)
+	}
+
+	jobs := store.Jobs()
+	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	first, err := jobs.StartAttempt(created.ID, "node-a")
+	if err != nil {
+		t.Fatalf("start first attempt: %v", err)
+	}
+	if first.Attempts != 1 || first.NodeID != "node-a" || first.StartedAt == nil {
+		t.Fatalf("unexpected first attempt state: %+v", first)
+	}
+	startedAt := *first.StartedAt
+
+	second, err := jobs.StartAttempt(created.ID, "node-a")
+	if err != nil {
+		t.Fatalf("start second attempt: %v", err)
+	}
+	if second.Attempts != 2 || second.NodeID != "node-a" || second.StartedAt == nil || !second.StartedAt.Equal(startedAt) {
+		t.Fatalf("unexpected second attempt state: %+v", second)
+	}
+
+	third, err := jobs.StartAttempt(created.ID, "node-b")
+	if err != nil {
+		t.Fatalf("start reassigned attempt: %v", err)
+	}
+	if third.Attempts != 3 || third.NodeID != "node-b" || third.StartedAt == nil || !third.StartedAt.Equal(startedAt) {
+		t.Fatalf("unexpected reassigned attempt state: %+v", third)
+	}
+
+	failed, err := jobs.Fail(created.ID, "node-b", JobResult{LastError: "node-b retryable failure"})
+	if err != nil {
+		t.Fatalf("fail reassigned job: %v", err)
+	}
+	if failed.Status != JobStatusFailed || failed.NodeID != "node-b" || failed.Attempts != 3 {
+		t.Fatalf("unexpected failed job state: %+v", failed)
+	}
+	if failed.StartedAt == nil || !failed.StartedAt.Equal(startedAt) {
+		t.Fatalf("expected started_at to remain %s, got %+v", startedAt, failed.StartedAt)
+	}
+	if failed.CompletedAt == nil {
+		t.Fatalf("expected completed_at to be set")
+	}
+	if failed.LastError != "node-b retryable failure" {
+		t.Fatalf("expected final retryable error, got %q", failed.LastError)
+	}
+}
+
 func TestPostgresListQueuedIDs(t *testing.T) {
 	store := openPostgresTestStore(t)
 	jobs := store.Jobs()

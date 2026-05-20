@@ -20,7 +20,7 @@ import (
 type DispatchConfig struct {
 	// Timeout is the per-attempt HTTP timeout.
 	Timeout time.Duration
-	// MaxAttempts is the total number of attempts (1 = no retry).
+	// MaxAttempts is the number of attempts per eligible node (1 = no retry).
 	MaxAttempts int
 	// BaseBackoff is the initial backoff between retries; doubles each attempt.
 	BaseBackoff time.Duration
@@ -497,9 +497,10 @@ func hasHealthyNode(nodes []Node) bool {
 	return false
 }
 
-// dispatchJob picks a healthy node, marks the job RUNNING, and POSTs to its
-// /execute endpoint. It retries on transport or retryable server errors up to
-// dispatch.MaxAttempts with exponential backoff (base = dispatch.BaseBackoff).
+// dispatchJob picks healthy nodes, marks the job RUNNING, and POSTs to each
+// selected agent's /execute endpoint. It retries retryable failures on the
+// selected node up to dispatch.MaxAttempts with exponential backoff, then
+// reassigns to the next healthy node from the dispatch candidate list.
 func (s *Server) dispatchJob(jobID string) {
 	if !s.beginDispatch(jobID) {
 		s.logger.Debug("dispatch already active; skipping duplicate", "job_id", jobID)
@@ -527,15 +528,14 @@ func (s *Server) dispatchJob(jobID string) {
 		return
 	}
 
-	var target *Node
+	healthyNodes := make([]Node, 0, len(nodes))
 	for i := range nodes {
 		if nodes[i].State == NodeStateHealthy {
-			target = &nodes[i]
-			break
+			healthyNodes = append(healthyNodes, nodes[i])
 		}
 	}
 
-	if target == nil {
+	if len(healthyNodes) == 0 {
 		s.logger.Warn("no healthy nodes; leaving job QUEUED", "job_id", jobID)
 		return
 	}
@@ -550,53 +550,74 @@ func (s *Server) dispatchJob(jobID string) {
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		s.logger.Error("marshal execute request failed", "job_id", jobID, "err", err)
-		s.failJob(jobID, target.ID, JobResult{LastError: err.Error()})
+		s.failJob(jobID, healthyNodes[0].ID, JobResult{LastError: err.Error()})
 		return
 	}
-
-	agentURL := buildAgentBaseURL(target.Address, s.security.Enabled()) + "/execute"
-	logger := s.logger.With("job_id", jobID, "node_id", target.ID, "agent_url", agentURL)
 
 	maxAttempts := s.dispatch.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	backoff := s.dispatch.BaseBackoff
 
 	lastResult := JobResult{}
+	lastNodeID := healthyNodes[len(healthyNodes)-1].ID
 
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if _, err := s.jobs.StartAttempt(jobID, target.ID); err != nil {
-			logger.Error("failed to mark job RUNNING", "err", err)
-			return
-		}
+	for nodeIndex := range healthyNodes {
+		target := healthyNodes[nodeIndex]
+		agentURL := buildAgentBaseURL(target.Address, s.security.Enabled()) + "/execute"
+		logger := s.logger.With("job_id", jobID, "node_id", target.ID, "agent_url", agentURL)
+		backoff := s.dispatch.BaseBackoff
 
-		s.metrics.DispatchAttempts.Add(1)
-		logger.Info("dispatch attempt", "attempt", attempt, "max", maxAttempts)
-
-		result, ok, retryable := s.tryDispatch(agentURL, bodyBytes, logger)
-		lastResult = result
-		if ok {
-			if _, err := s.jobs.Complete(jobID, target.ID, result); err != nil {
-				logger.Error("failed to mark job COMPLETED", "err", err)
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			started, err := s.jobs.StartAttempt(jobID, target.ID)
+			if err != nil {
+				logger.Error("failed to mark job RUNNING", "err", err)
+				return
 			}
-			s.metrics.JobsCompleted.Add(1)
-			logger.Info("job completed")
-			return
+
+			s.metrics.DispatchAttempts.Add(1)
+			logger.Info(
+				"dispatch attempt",
+				"attempt", started.Attempts,
+				"node_attempt", attempt,
+				"max_node_attempts", maxAttempts,
+			)
+
+			result, ok, retryable := s.tryDispatch(agentURL, bodyBytes, logger)
+			lastResult = result
+			lastNodeID = target.ID
+			if ok {
+				if _, err := s.jobs.Complete(jobID, target.ID, result); err != nil {
+					logger.Error("failed to mark job COMPLETED", "err", err)
+				}
+				s.metrics.JobsCompleted.Add(1)
+				logger.Info("job completed")
+				return
+			}
+
+			s.metrics.DispatchErrors.Add(1)
+			if !retryable {
+				s.failJob(jobID, target.ID, result)
+				logger.Error("job failed with terminal dispatch error", "attempt", started.Attempts, "last_error", result.LastError)
+				return
+			}
+			if attempt == maxAttempts {
+				break
+			}
+
+			logger.Warn("dispatch attempt failed; backing off", "attempt", started.Attempts, "node_attempt", attempt, "backoff", backoff.String(), "last_error", result.LastError)
+			time.Sleep(backoff)
+			backoff *= 2
 		}
 
-		s.metrics.DispatchErrors.Add(1)
-		if !retryable || attempt == maxAttempts {
-			break
+		if nodeIndex < len(healthyNodes)-1 {
+			next := healthyNodes[nodeIndex+1]
+			logger.Warn("node retry attempts exhausted; reassigning job", "attempts_on_node", maxAttempts, "next_node_id", next.ID, "last_error", lastResult.LastError)
 		}
-
-		logger.Warn("dispatch attempt failed; backing off", "attempt", attempt, "backoff", backoff.String(), "last_error", result.LastError)
-		time.Sleep(backoff)
-		backoff *= 2
 	}
 
-	s.failJob(jobID, target.ID, lastResult)
-	logger.Error("job failed after retries", "attempts", maxAttempts, "last_error", lastResult.LastError)
+	s.failJob(jobID, lastNodeID, lastResult)
+	s.logger.Error("job failed after all eligible healthy nodes exhausted", "job_id", jobID, "node_count", len(healthyNodes), "attempts_per_node", maxAttempts, "last_node_id", lastNodeID, "last_error", lastResult.LastError)
 }
 
 func (s *Server) beginDispatch(jobID string) bool {
