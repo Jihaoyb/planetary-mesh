@@ -46,18 +46,26 @@ func main() {
 		}
 	}
 
-	if err := agent.RegisterWithCoordinatorClient(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr); err != nil {
+	loadTracker := agent.NewLoadTracker()
+	registrationMetadata := func() agent.RegistrationMetadata {
+		return agent.RegistrationMetadata{
+			Capabilities: cfg.Capabilities,
+			Load:         loadTracker.Snapshot(),
+		}
+	}
+
+	if err := agent.RegisterWithCoordinatorClientWithMetadata(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr, registrationMetadata()); err != nil {
 		logger.Warn("initial registration failed", "err", err)
 	} else {
 		logger.Info("registered with coordinator", "node_id", cfg.NodeID)
 	}
 
 	stopCh := make(chan struct{})
-	agent.StartHeartbeatLoopWithClient(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr, stopCh)
+	agent.StartHeartbeatLoopWithClientAndMetadata(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr, registrationMetadata, stopCh)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           agent.MuxWithConfig(cfg.Executor),
+		Handler:           agent.MuxWithConfigAndLoadTracker(cfg.Executor, loadTracker),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         serverTLSConfig,
 	}

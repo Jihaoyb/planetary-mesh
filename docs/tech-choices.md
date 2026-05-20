@@ -93,6 +93,7 @@ Related ADRs:
 - [ADR 0004](adr/0004-in-memory-storage-for-v0.md)
 - [ADR 0006](adr/0006-postgres-coordinator-persistence.md)
 - [ADR 0010](adr/0010-postgres-schema-readiness.md)
+- [ADR 0011](adr/0011-node-capability-load-visibility.md)
 
 Current constraints:
 
@@ -101,7 +102,8 @@ Current constraints:
 - no SQLite or alternate durable backend today
 - Postgres tests are opt-in
 - embedded schema initialization remains current
-- schema readiness metadata version `1` is current
+- schema readiness metadata version `2` is current
+- node rows store reported capabilities and active execution count
 - schema readiness metadata is not a full migration framework
 
 Future decisions:
@@ -198,6 +200,8 @@ Current behavior:
 - a job is stored as `QUEUED`
 - dispatch attempts immediately after submission
 - coordinator selects the first node currently in `HEALTHY` state
+- reported node capabilities and active execution counts are visible to
+  operators but are not used for scheduling
 - a coordinator-owned scheduler periodically revisits jobs that remain `QUEUED`
 - retryable dispatch failures are retried against the selected node up to the
   configured attempt count
@@ -218,6 +222,38 @@ Future decisions:
 - capability-aware scheduling
 - load-aware scheduling
 - priorities, quotas, and fairness
+
+## Node Capability and Load Reporting
+
+Choice: agents report optional static capabilities and approximate active
+execution count through registration/heartbeat.
+
+Why:
+
+- private mesh operators need more useful node inspection than id/address/state
+- static labels are simple to configure and do not require hardware discovery
+- active command execution count is feasible with the current agent execution
+  model
+- keeping reporting separate from scheduling preserves current dispatch behavior
+
+Current behavior:
+
+- `AGENT_CAPABILITIES` is a comma-separated list of labels such as
+  `profile:local,role:worker`
+- labels are validated, deduplicated, sorted, and stored as node metadata
+- `active_executions` counts accepted command executions currently running on
+  the agent
+- missing metadata from older agents defaults to empty capabilities and zero
+  active executions
+- `GET /nodes` and `pmctl nodes list` expose the metadata
+- Postgres persists the metadata in the `nodes` table
+
+Future decisions:
+
+- capacity reporting
+- queue depth reporting
+- hardware or runtime discovery
+- capability-aware or load-aware scheduler policy
 
 ## Security Model
 
@@ -270,6 +306,10 @@ Current commands:
 - `pmctl jobs inspect <job-id>`
 - `pmctl submit command <command> [args...]`
 
+`pmctl nodes list` includes node state, active execution count, capabilities,
+address, last seen time, and certificate fingerprint. JSON output includes the
+same node metadata for automation.
+
 Future decisions:
 
 - richer CLI UX
@@ -286,6 +326,7 @@ Current observability:
 - coordinator and agent structured logs
 - `/status` for non-secret runtime status/config
 - `/metrics` for Prometheus-style counters and gauges
+- `/nodes` and `pmctl nodes list` for node capability/load visibility
 - Postgres schema readiness metrics when Postgres is enabled
 - startup recovery metric for persisted `RUNNING` jobs
 

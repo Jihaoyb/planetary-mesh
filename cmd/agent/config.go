@@ -24,6 +24,7 @@ type agentConfig struct {
 	CoordinatorURL string
 	AdvertiseAddr  string
 	NodeID         string
+	Capabilities   []string
 	TLSFiles       security.TLSFiles
 	Executor       agent.ExecutorConfig
 	SecureMode     bool
@@ -90,6 +91,11 @@ func loadAgentConfig(args []string) (agentConfig, error) {
 	if err != nil {
 		return agentConfig{}, fmt.Errorf("invalid AGENT_COMMAND_ALLOWLIST %q: %w", allowlistRaw, err)
 	}
+	capabilitiesRaw := source.get("AGENT_CAPABILITIES", agent.DefaultCapabilities)
+	capabilities, err := agent.ParseCapabilities(capabilitiesRaw)
+	if err != nil {
+		return agentConfig{}, fmt.Errorf("invalid AGENT_CAPABILITIES %q: %w", capabilitiesRaw, err)
+	}
 
 	return agentConfig{
 		ConfigFile:     path,
@@ -97,6 +103,7 @@ func loadAgentConfig(args []string) (agentConfig, error) {
 		CoordinatorURL: coordURL,
 		AdvertiseAddr:  advertiseAddr,
 		NodeID:         source.get("NODE_ID", agent.DefaultNodeID()),
+		Capabilities:   capabilities,
 		TLSFiles:       tlsFiles,
 		Executor:       agent.ExecutorConfig{Allowlist: allowlist, Timeout: timeout},
 		SecureMode:     secureMode,

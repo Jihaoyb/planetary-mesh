@@ -205,6 +205,44 @@ func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {
 	}
 }
 
+func TestDispatchIgnoresCapabilitiesAndLoadForSelection(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	var calledHost string
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calledHost = r.URL.Host
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{
+			ID:      "node-a",
+			Address: "node-a.local:8081",
+			State:   NodeStateHealthy,
+			Load:    protocol.NodeLoad{ActiveExecutions: 99},
+		},
+		{
+			ID:           "node-b",
+			Address:      "node-b.local:8081",
+			State:        NodeStateHealthy,
+			Capabilities: []string{"role:worker"},
+			Load:         protocol.NodeLoad{ActiveExecutions: 0},
+		},
+	}}
+	srv := NewServerWithConfig(nodes, jobStore, client, DispatchConfig{Timeout: time.Second, MaxAttempts: 1, BaseBackoff: time.Millisecond}, nil)
+
+	srv.dispatchJob(job.ID)
+
+	if calledHost != "node-a.local:8081" {
+		t.Fatalf("expected first healthy node to be selected, got %q", calledHost)
+	}
+}
+
 func TestDispatchFailsAfterAllHealthyNodesFailRetryably(t *testing.T) {
 	jobStore := NewJobStore()
 	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})

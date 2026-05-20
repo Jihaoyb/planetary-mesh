@@ -15,7 +15,7 @@ import (
 )
 
 const RestartRecoveryError = "coordinator restarted before result was recorded"
-const PostgresExpectedSchemaVersion = 1
+const PostgresExpectedSchemaVersion = 2
 
 const postgresSchemaVersionID = "coordinator"
 
@@ -156,6 +156,18 @@ WHERE id = $1
 }
 
 func (s *PostgresNodeStore) Register(in NodeRegistration) (Node, error) {
+	capabilities, err := protocol.NormalizeNodeCapabilities(in.Capabilities)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := protocol.ValidateNodeLoad(in.Load); err != nil {
+		return Node{}, err
+	}
+	capabilitiesJSON, err := json.Marshal(capabilities)
+	if err != nil {
+		return Node{}, err
+	}
+
 	now := time.Now().UTC()
 	dnsJSON, err := json.Marshal(in.Certificate.DNSNames)
 	if err != nil {
@@ -174,9 +186,10 @@ func (s *PostgresNodeStore) Register(in NodeRegistration) (Node, error) {
 INSERT INTO nodes (
   id, address, last_seen, state, created_at,
   certificate_subject, certificate_dns_names, certificate_ip_addresses,
-  certificate_uris, certificate_sha256_fingerprint, certificate_not_after
+  certificate_uris, certificate_sha256_fingerprint, certificate_not_after,
+  capabilities, active_executions
 )
-VALUES ($1, $2, $3, $4, $3, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10)
+VALUES ($1, $2, $3, $4, $3, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11::jsonb, $12)
 ON CONFLICT (id) DO UPDATE
 SET address = EXCLUDED.address,
     last_seen = EXCLUDED.last_seen,
@@ -186,7 +199,9 @@ SET address = EXCLUDED.address,
     certificate_ip_addresses = EXCLUDED.certificate_ip_addresses,
     certificate_uris = EXCLUDED.certificate_uris,
     certificate_sha256_fingerprint = EXCLUDED.certificate_sha256_fingerprint,
-    certificate_not_after = EXCLUDED.certificate_not_after
+    certificate_not_after = EXCLUDED.certificate_not_after,
+    capabilities = EXCLUDED.capabilities,
+    active_executions = EXCLUDED.active_executions
 RETURNING `+nodeColumns,
 		in.ID,
 		in.Address,
@@ -198,6 +213,8 @@ RETURNING `+nodeColumns,
 		string(uriJSON),
 		in.Certificate.SHA256Fingerprint,
 		in.Certificate.NotAfter,
+		string(capabilitiesJSON),
+		in.Load.ActiveExecutions,
 	)
 
 	node, err := scanNode(row)
@@ -274,12 +291,13 @@ GROUP BY state
 }
 
 const nodeColumns = `
-id, address, last_seen, state, certificate_subject, certificate_dns_names,
-certificate_ip_addresses, certificate_uris, certificate_sha256_fingerprint,
-certificate_not_after`
+id, address, last_seen, state, capabilities, active_executions,
+certificate_subject, certificate_dns_names, certificate_ip_addresses,
+certificate_uris, certificate_sha256_fingerprint, certificate_not_after`
 
 func scanNode(row rowScanner) (Node, error) {
 	var node Node
+	var capabilitiesJSON []byte
 	var dnsJSON []byte
 	var ipJSON []byte
 	var uriJSON []byte
@@ -290,6 +308,8 @@ func scanNode(row rowScanner) (Node, error) {
 		&node.Address,
 		&node.LastSeen,
 		&node.State,
+		&capabilitiesJSON,
+		&node.Load.ActiveExecutions,
 		&node.Certificate.Subject,
 		&dnsJSON,
 		&ipJSON,
@@ -298,6 +318,20 @@ func scanNode(row rowScanner) (Node, error) {
 		&notAfter,
 	)
 	if err != nil {
+		return Node{}, err
+	}
+	node.Capabilities = []string{}
+	if len(capabilitiesJSON) > 0 {
+		if err := json.Unmarshal(capabilitiesJSON, &node.Capabilities); err != nil {
+			return Node{}, err
+		}
+	}
+	capabilities, err := protocol.NormalizeNodeCapabilities(node.Capabilities)
+	if err != nil {
+		return Node{}, err
+	}
+	node.Capabilities = capabilities
+	if err := protocol.ValidateNodeLoad(node.Load); err != nil {
 		return Node{}, err
 	}
 	if len(dnsJSON) > 0 {

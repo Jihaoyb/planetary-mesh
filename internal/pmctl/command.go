@@ -87,6 +87,9 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 		if err != nil {
 			return err
 		}
+		if err := normalizeNodes(nodes); err != nil {
+			return err
+		}
 		return writeValue(stdout, nodes, jsonOut, writeNodes)
 	case "jobs":
 		if len(args) == 2 && args[1] == "list" {

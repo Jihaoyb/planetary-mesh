@@ -347,7 +347,7 @@ func TestProtocolVersionMismatchOnJobs(t *testing.T) {
 func TestMetricsEndpointExposesCounters(t *testing.T) {
 	client, _ := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{Status: "ok"})
 
-	schema := protocol.SchemaStatus{Ready: true, Version: 1, ExpectedVersion: 1}
+	schema := protocol.SchemaStatus{Ready: true, Version: 2, ExpectedVersion: 2}
 	srv := NewServerWithRuntime(
 		NewNodeRegistry(),
 		NewJobStore(),
@@ -376,8 +376,8 @@ func TestMetricsEndpointExposesCounters(t *testing.T) {
 		"planetary_jobs_recovered_on_startup_total 2",
 		`planetary_nodes{state="HEALTHY"} 1`,
 		"planetary_postgres_schema_ready 1",
-		"planetary_postgres_schema_version 1",
-		"planetary_postgres_schema_expected_version 1",
+		"planetary_postgres_schema_version 2",
+		"planetary_postgres_schema_expected_version 2",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected metrics to contain %q, got:\n%s", want, text)

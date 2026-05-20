@@ -45,7 +45,7 @@ func TestProtocolVersionRequired(t *testing.T) {
 }
 
 func TestHandleStatus(t *testing.T) {
-	schema := protocol.SchemaStatus{Ready: true, Version: 1, ExpectedVersion: 1}
+	schema := protocol.SchemaStatus{Ready: true, Version: 2, ExpectedVersion: 2}
 	srv := NewServerWithRuntime(
 		NewNodeRegistry(),
 		NewJobStore(),
@@ -73,7 +73,7 @@ func TestHandleStatus(t *testing.T) {
 	if got.StorageBackend != "postgres" || !got.SecureMode || !got.NodeAllowlistEnabled {
 		t.Fatalf("unexpected runtime metadata: %+v", got)
 	}
-	if got.Schema == nil || !got.Schema.Ready || got.Schema.Version != 1 || got.Schema.ExpectedVersion != 1 {
+	if got.Schema == nil || !got.Schema.Ready || got.Schema.Version != 2 || got.Schema.ExpectedVersion != 2 {
 		t.Fatalf("unexpected schema metadata: %+v", got.Schema)
 	}
 	if got.Dispatch.MaxAttempts != 2 {
@@ -118,8 +118,10 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 	srv := NewServer(reg, NewJobStore(), nil)
 
 	payload := registerRequest{
-		ID:      "agent-1",
-		Address: ":8081",
+		ID:           "agent-1",
+		Address:      ":8081",
+		Capabilities: []string{"role:worker", "profile:local"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 1},
 	}
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -143,6 +145,9 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&nodeResp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
+	if nodeResp.Load.ActiveExecutions != 1 || len(nodeResp.Capabilities) != 2 {
+		t.Fatalf("expected metadata in register response, got %+v", nodeResp)
+	}
 
 	reqList := newVersionedRequest(http.MethodGet, "/nodes", nil)
 	wList := httptest.NewRecorder()
@@ -150,5 +155,61 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 
 	if wList.Result().StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200 from /nodes, got %d", wList.Result().StatusCode)
+	}
+	var nodes []Node
+	if err := json.NewDecoder(wList.Result().Body).Decode(&nodes); err != nil {
+		t.Fatalf("decode nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Load.ActiveExecutions != 1 || len(nodes[0].Capabilities) != 2 {
+		t.Fatalf("expected metadata in nodes response, got %+v", nodes)
+	}
+}
+
+func TestHandleRegisterDefaultsMissingMetadata(t *testing.T) {
+	reg := NewNodeRegistry()
+	srv := NewServer(reg, NewJobStore(), nil)
+
+	bodyBytes, _ := json.Marshal(map[string]string{
+		"id":      "legacy-agent",
+		"address": ":8081",
+	})
+	req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleRegister(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Result().StatusCode)
+	}
+
+	var node Node
+	if err := json.NewDecoder(w.Result().Body).Decode(&node); err != nil {
+		t.Fatalf("decode node: %v", err)
+	}
+	if node.Capabilities == nil || len(node.Capabilities) != 0 {
+		t.Fatalf("expected empty capabilities for legacy agent, got %+v", node.Capabilities)
+	}
+	if node.Load.ActiveExecutions != 0 {
+		t.Fatalf("expected zero load for legacy agent, got %+v", node.Load)
+	}
+}
+
+func TestHandleRegisterRejectsInvalidMetadata(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+
+	cases := []registerRequest{
+		{ID: "agent-1", Address: ":8081", Capabilities: []string{"-bad"}},
+		{ID: "agent-1", Address: ":8081", Load: protocol.NodeLoad{ActiveExecutions: -1}},
+	}
+	for _, payload := range cases {
+		bodyBytes, _ := json.Marshal(payload)
+		req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleRegister(w, req)
+		if w.Result().StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d for %+v", w.Result().StatusCode, payload)
+		}
 	}
 }

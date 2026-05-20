@@ -10,7 +10,7 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 11 cross-node reassignment
+- Baseline: `main` after Milestone 12 node capability/load visibility
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -23,6 +23,8 @@ Implemented capability:
 - `X-Planetary-Protocol-Version: 1` protocol header
 - node registration and heartbeat
 - node health states: `HEALTHY`, `SUSPECT`, `OFFLINE`
+- node capabilities and active execution count reported through
+  registration/heartbeat, `GET /nodes`, and `pmctl nodes list`
 - command job submission with `type="command"`, `command`, and optional `args`
 - first-healthy-node initial dispatch at job submission time
 - cross-node reassignment after retryable dispatch failures
@@ -32,23 +34,24 @@ Implemented capability:
 - no shell execution
 - bounded stdout/stderr capture with truncation flags
 - retry handling for retryable dispatch failures
-- optional Postgres persistence for nodes/jobs
-- Postgres schema readiness metadata version `1`
+- optional Postgres persistence for nodes/jobs and node metadata
+- Postgres schema readiness metadata version `2`
 - startup recovery for persisted `RUNNING` jobs
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
-- thin CLI for status, node/job listing, job inspection, and command submission
+- thin CLI for status, node/job listing, job inspection, and command submission,
+  including human and JSON node metadata output
 - CI/build/test health with default DB-free tests
 
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-11
+## Completed Baseline / Milestones 1-12
 
-The first eleven milestones established a working private LAN/trusted-network
+The first twelve milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -254,13 +257,36 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 12: Node Capability and Load Visibility
+
+Goal: make node information more useful for private mesh operators without
+changing scheduler scoring or dispatch priority.
+
+Completed outcomes:
+
+- agents can report optional static capabilities through `AGENT_CAPABILITIES`
+- agents report approximate active command execution count on registration and
+  heartbeat
+- coordinator validates and stores capabilities plus active execution count
+- older agents that omit the new fields remain compatible and default to empty
+  capabilities plus zero active executions
+- `GET /nodes`, registration responses, `pmctl nodes list`, and
+  `pmctl --json nodes list` expose the new node metadata
+- optional Postgres persists node metadata in the `nodes` table
+- Postgres schema readiness metadata advanced to version `2`
+- first-healthy-node dispatch, cross-node retry, queued scheduling, protocol
+  version behavior, mTLS allowlisting, and command execution rules are unchanged
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
 
 Potential work:
 
-- simple node capabilities/load reporting
+- scheduler policy that can use reported node capabilities/load when explicitly
+  planned
 - clearer job state transitions
 - agent reconciliation strategy after coordinator restart
 - better operator runbooks

@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"planetary-mesh/internal/protocol"
 )
 
 const (
 	DefaultExecutionTimeout = 30 * time.Second
 	DefaultAllowlist        = "echo=echo,false=false,sleep=sleep"
+	DefaultCapabilities     = ""
 )
 
 type ExecutorConfig struct {
@@ -51,4 +54,21 @@ func ParseAllowlist(raw string) (map[string]string, error) {
 	}
 
 	return out, nil
+}
+
+func ParseCapabilities(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	labels := make([]string, 0, len(parts))
+	for _, part := range parts {
+		label := strings.TrimSpace(part)
+		if label == "" {
+			continue
+		}
+		labels = append(labels, label)
+	}
+	return protocol.NormalizeNodeCapabilities(labels)
 }

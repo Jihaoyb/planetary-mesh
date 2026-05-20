@@ -147,8 +147,10 @@ func (s *Server) Mux() *http.ServeMux {
 
 // registerRequest is the JSON payload agents send to /register.
 type registerRequest struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
+	ID           string            `json:"id"`
+	Address      string            `json:"address"`
+	Capabilities []string          `json:"capabilities,omitempty"`
+	Load         protocol.NodeLoad `json:"load,omitempty"`
 }
 
 type createJobRequest struct {
@@ -198,6 +200,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "id and address are required", http.StatusBadRequest)
 		return
 	}
+	capabilities, err := validateNodeMetadata(req.Capabilities, req.Load)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	certificate := security.CertificateMetadata{}
 	if s.security.Enabled() {
@@ -215,9 +222,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	node, err := s.registry.Register(NodeRegistration{
-		ID:          req.ID,
-		Address:     req.Address,
-		Certificate: certificate,
+		ID:           req.ID,
+		Address:      req.Address,
+		Capabilities: capabilities,
+		Load:         req.Load,
+		Certificate:  certificate,
 	})
 	if err != nil {
 		s.logger.Error("register node failed", "node_id", req.ID, "err", err)

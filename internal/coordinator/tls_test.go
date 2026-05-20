@@ -18,6 +18,7 @@ import (
 	"time"
 
 	agentpkg "planetary-mesh/internal/agent"
+	"planetary-mesh/internal/protocol"
 )
 
 func TestSecureRegisterStoresCertificateMetadata(t *testing.T) {
@@ -34,7 +35,12 @@ func TestSecureRegisterStoresCertificateMetadata(t *testing.T) {
 		nil,
 	)
 
-	body, _ := json.Marshal(registerRequest{ID: "agent-1", Address: "https://agent.local:8081"})
+	body, _ := json.Marshal(registerRequest{
+		ID:           "agent-1",
+		Address:      "https://agent.local:8081",
+		Capabilities: []string{"role:worker"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 1},
+	})
 	req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{agentLeaf}}
@@ -57,6 +63,9 @@ func TestSecureRegisterStoresCertificateMetadata(t *testing.T) {
 	}
 	if len(nodes[0].Certificate.DNSNames) != 1 || nodes[0].Certificate.DNSNames[0] != "agent.local" {
 		t.Fatalf("unexpected certificate DNS metadata: %+v", nodes[0].Certificate)
+	}
+	if len(nodes[0].Capabilities) != 1 || nodes[0].Capabilities[0] != "role:worker" || nodes[0].Load.ActiveExecutions != 1 {
+		t.Fatalf("unexpected node metadata: %+v", nodes[0])
 	}
 }
 
