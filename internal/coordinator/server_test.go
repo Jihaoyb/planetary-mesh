@@ -165,6 +165,35 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 	}
 }
 
+func TestHandleRegisterDefaultsMissingMetadata(t *testing.T) {
+	reg := NewNodeRegistry()
+	srv := NewServer(reg, NewJobStore(), nil)
+
+	bodyBytes, _ := json.Marshal(map[string]string{
+		"id":      "legacy-agent",
+		"address": ":8081",
+	})
+	req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleRegister(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Result().StatusCode)
+	}
+
+	var node Node
+	if err := json.NewDecoder(w.Result().Body).Decode(&node); err != nil {
+		t.Fatalf("decode node: %v", err)
+	}
+	if node.Capabilities == nil || len(node.Capabilities) != 0 {
+		t.Fatalf("expected empty capabilities for legacy agent, got %+v", node.Capabilities)
+	}
+	if node.Load.ActiveExecutions != 0 {
+		t.Fatalf("expected zero load for legacy agent, got %+v", node.Load)
+	}
+}
+
 func TestHandleRegisterRejectsInvalidMetadata(t *testing.T) {
 	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
 
