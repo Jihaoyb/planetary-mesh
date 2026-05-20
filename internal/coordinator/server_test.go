@@ -118,8 +118,10 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 	srv := NewServer(reg, NewJobStore(), nil)
 
 	payload := registerRequest{
-		ID:      "agent-1",
-		Address: ":8081",
+		ID:           "agent-1",
+		Address:      ":8081",
+		Capabilities: []string{"role:worker", "profile:local"},
+		Load:         protocol.NodeLoad{ActiveExecutions: 1},
 	}
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -143,6 +145,9 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&nodeResp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
+	if nodeResp.Load.ActiveExecutions != 1 || len(nodeResp.Capabilities) != 2 {
+		t.Fatalf("expected metadata in register response, got %+v", nodeResp)
+	}
 
 	reqList := newVersionedRequest(http.MethodGet, "/nodes", nil)
 	wList := httptest.NewRecorder()
@@ -150,5 +155,32 @@ func TestHandleRegisterAndListNodes(t *testing.T) {
 
 	if wList.Result().StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200 from /nodes, got %d", wList.Result().StatusCode)
+	}
+	var nodes []Node
+	if err := json.NewDecoder(wList.Result().Body).Decode(&nodes); err != nil {
+		t.Fatalf("decode nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Load.ActiveExecutions != 1 || len(nodes[0].Capabilities) != 2 {
+		t.Fatalf("expected metadata in nodes response, got %+v", nodes)
+	}
+}
+
+func TestHandleRegisterRejectsInvalidMetadata(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+
+	cases := []registerRequest{
+		{ID: "agent-1", Address: ":8081", Capabilities: []string{"-bad"}},
+		{ID: "agent-1", Address: ":8081", Load: protocol.NodeLoad{ActiveExecutions: -1}},
+	}
+	for _, payload := range cases {
+		bodyBytes, _ := json.Marshal(payload)
+		req := newVersionedRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.handleRegister(w, req)
+		if w.Result().StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d for %+v", w.Result().StatusCode, payload)
+		}
 	}
 }

@@ -121,6 +121,43 @@ func TestExecuteHandlerTimeout(t *testing.T) {
 	}
 }
 
+func TestExecuteHandlerTracksActiveExecution(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"sleep": "sleep"},
+		Timeout:   time.Second,
+	}
+	tracker := NewLoadTracker()
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+		Args:    []string{"0.1"},
+	})
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		NewExecuteHandlerWithLoadTracker(cfg, tracker)(w, req)
+	}()
+
+	observedActive := false
+	for i := 0; i < 100; i++ {
+		if tracker.Snapshot().ActiveExecutions == 1 {
+			observedActive = true
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !observedActive {
+		t.Fatalf("expected active execution count to reach 1")
+	}
+	<-done
+	if tracker.Snapshot().ActiveExecutions != 0 {
+		t.Fatalf("expected active execution count to return to 0, got %d", tracker.Snapshot().ActiveExecutions)
+	}
+}
+
 func TestExecuteHandlerLegacyStubStillWorks(t *testing.T) {
 	req := newExecuteRequest(t, protocol.ExecuteRequest{
 		JobID:   "job-1",

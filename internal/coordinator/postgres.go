@@ -156,6 +156,13 @@ WHERE id = $1
 }
 
 func (s *PostgresNodeStore) Register(in NodeRegistration) (Node, error) {
+	if _, err := protocol.NormalizeNodeCapabilities(in.Capabilities); err != nil {
+		return Node{}, err
+	}
+	if err := protocol.ValidateNodeLoad(in.Load); err != nil {
+		return Node{}, err
+	}
+
 	now := time.Now().UTC()
 	dnsJSON, err := json.Marshal(in.Certificate.DNSNames)
 	if err != nil {
@@ -300,6 +307,7 @@ func scanNode(row rowScanner) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
+	node.Capabilities = []string{}
 	if len(dnsJSON) > 0 {
 		if err := json.Unmarshal(dnsJSON, &node.Certificate.DNSNames); err != nil {
 			return Node{}, err

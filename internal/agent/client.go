@@ -14,8 +14,15 @@ import (
 
 // registerPayload matches what the coordinator expects at /register.
 type registerPayload struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
+	ID           string            `json:"id"`
+	Address      string            `json:"address"`
+	Capabilities []string          `json:"capabilities"`
+	Load         protocol.NodeLoad `json:"load"`
+}
+
+type RegistrationMetadata struct {
+	Capabilities []string
+	Load         protocol.NodeLoad
 }
 
 // RegisterWithCoordinator sends a POST /register to the coordinator.
@@ -24,12 +31,25 @@ func RegisterWithCoordinator(coordBaseURL, nodeID, addr string) error {
 }
 
 func RegisterWithCoordinatorClient(client *http.Client, coordBaseURL, nodeID, addr string) error {
+	return RegisterWithCoordinatorClientWithMetadata(client, coordBaseURL, nodeID, addr, RegistrationMetadata{})
+}
+
+func RegisterWithCoordinatorClientWithMetadata(client *http.Client, coordBaseURL, nodeID, addr string, metadata RegistrationMetadata) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	capabilities, err := protocol.NormalizeNodeCapabilities(metadata.Capabilities)
+	if err != nil {
+		return fmt.Errorf("invalid capabilities: %w", err)
+	}
+	if err := protocol.ValidateNodeLoad(metadata.Load); err != nil {
+		return fmt.Errorf("invalid load: %w", err)
+	}
 	payload := registerPayload{
-		ID:      nodeID,
-		Address: addr,
+		ID:           nodeID,
+		Address:      addr,
+		Capabilities: capabilities,
+		Load:         metadata.Load,
 	}
 
 	body, err := json.Marshal(payload)
@@ -67,8 +87,20 @@ func StartHeartbeatLoop(coordBaseURL, nodeID, addr string, stopCh <-chan struct{
 }
 
 func StartHeartbeatLoopWithClient(client *http.Client, coordBaseURL, nodeID, addr string, stopCh <-chan struct{}) {
+	StartHeartbeatLoopWithClientAndMetadata(client, coordBaseURL, nodeID, addr, nil, stopCh)
+}
+
+func StartHeartbeatLoopWithClientAndMetadata(
+	client *http.Client,
+	coordBaseURL, nodeID, addr string,
+	metadataProvider func() RegistrationMetadata,
+	stopCh <-chan struct{},
+) {
 	if client == nil {
 		client = http.DefaultClient
+	}
+	if metadataProvider == nil {
+		metadataProvider = func() RegistrationMetadata { return RegistrationMetadata{} }
 	}
 	interval := 10 * time.Second
 
@@ -78,7 +110,7 @@ func StartHeartbeatLoopWithClient(client *http.Client, coordBaseURL, nodeID, add
 		for {
 			select {
 			case <-ticker.C:
-				if err := RegisterWithCoordinatorClient(client, coordBaseURL, nodeID, addr); err != nil {
+				if err := RegisterWithCoordinatorClientWithMetadata(client, coordBaseURL, nodeID, addr, metadataProvider()); err != nil {
 					slog.Warn("heartbeat failed", "err", err)
 				} else {
 					slog.Debug("heartbeat ok")

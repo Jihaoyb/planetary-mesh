@@ -1,10 +1,18 @@
 package protocol
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"sort"
+	"strings"
+)
 
 const (
 	HeaderName = "X-Planetary-Protocol-Version"
 	Version    = "1"
+
+	MaxNodeCapabilities     = 32
+	MaxNodeCapabilityLength = 64
 )
 
 func SetVersionHeader(h http.Header) {
@@ -31,6 +39,62 @@ type ExecuteResponse struct {
 	StdoutTruncated bool   `json:"stdout_truncated"`
 	StderrTruncated bool   `json:"stderr_truncated"`
 	LastError       string `json:"last_error"`
+}
+
+type NodeLoad struct {
+	ActiveExecutions int `json:"active_executions"`
+}
+
+func NormalizeNodeCapabilities(in []string) ([]string, error) {
+	if len(in) == 0 {
+		return []string{}, nil
+	}
+
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		label := strings.TrimSpace(raw)
+		if label == "" {
+			return nil, fmt.Errorf("node capability label cannot be empty")
+		}
+		if len(label) > MaxNodeCapabilityLength {
+			return nil, fmt.Errorf("node capability %q exceeds %d characters", label, MaxNodeCapabilityLength)
+		}
+		if !isValidNodeCapability(label) {
+			return nil, fmt.Errorf("invalid node capability %q", label)
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, label)
+	}
+	if len(out) > MaxNodeCapabilities {
+		return nil, fmt.Errorf("node capabilities exceed maximum of %d", MaxNodeCapabilities)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func ValidateNodeLoad(load NodeLoad) error {
+	if load.ActiveExecutions < 0 {
+		return fmt.Errorf("active_executions cannot be negative")
+	}
+	return nil
+}
+
+func isValidNodeCapability(label string) bool {
+	for i := 0; i < len(label); i++ {
+		c := label[i]
+		ok := (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			(i > 0 && (c == '.' || c == '_' || c == ':' || c == '-'))
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 type CoordinatorStatusResponse struct {

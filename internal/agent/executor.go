@@ -16,7 +16,8 @@ import (
 const streamLimit = 1 << 20
 
 type executor struct {
-	cfg ExecutorConfig
+	cfg     ExecutorConfig
+	tracker *LoadTracker
 }
 
 // HealthHandler is a basic health check.
@@ -35,7 +36,11 @@ func ExecuteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func NewExecuteHandler(cfg ExecutorConfig) http.HandlerFunc {
-	ex := &executor{cfg: cfg}
+	return NewExecuteHandlerWithLoadTracker(cfg, nil)
+}
+
+func NewExecuteHandlerWithLoadTracker(cfg ExecutorConfig, tracker *LoadTracker) http.HandlerFunc {
+	ex := &executor{cfg: cfg, tracker: tracker}
 	return ex.handleExecute
 }
 
@@ -80,6 +85,9 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	done := e.tracker.BeginExecution()
+	defer done()
 
 	slog.Info("execute start", "job_id", req.JobID, "type", req.Type, "command", req.Command, "args", req.Args)
 
@@ -137,9 +145,13 @@ func Mux() *http.ServeMux {
 }
 
 func MuxWithConfig(cfg ExecutorConfig) *http.ServeMux {
+	return MuxWithConfigAndLoadTracker(cfg, nil)
+}
+
+func MuxWithConfigAndLoadTracker(cfg ExecutorConfig, tracker *LoadTracker) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", HealthHandler)
-	mux.HandleFunc("/execute", NewExecuteHandler(cfg))
+	mux.HandleFunc("/execute", NewExecuteHandlerWithLoadTracker(cfg, tracker))
 	return mux
 }
 

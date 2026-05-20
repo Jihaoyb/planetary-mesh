@@ -24,6 +24,9 @@ func TestLoadAgentConfigDefaults(t *testing.T) {
 	if cfg.Executor.Timeout != 30*time.Second {
 		t.Fatalf("expected default timeout, got %s", cfg.Executor.Timeout)
 	}
+	if len(cfg.Capabilities) != 0 {
+		t.Fatalf("expected no default capabilities, got %q", cfg.Capabilities)
+	}
 	if cfg.SecureMode {
 		t.Fatalf("expected plain mode by default")
 	}
@@ -38,8 +41,10 @@ AGENT_ADVERTISE_ADDR=http://localhost:8082
 COORDINATOR_URL=http://localhost:9090
 AGENT_EXEC_TIMEOUT=5s
 AGENT_COMMAND_ALLOWLIST=echo=echo
+AGENT_CAPABILITIES=role:worker,profile:local
 `)
 	t.Setenv("NODE_ID", "env-agent")
+	t.Setenv("AGENT_CAPABILITIES", "role:override")
 
 	cfg := loadAgentConfigClean(t, []string{"--config", path})
 	if cfg.ConfigFile != path {
@@ -56,6 +61,9 @@ AGENT_COMMAND_ALLOWLIST=echo=echo
 	}
 	if cfg.Executor.Allowlist["echo"] != "echo" {
 		t.Fatalf("unexpected allowlist: %+v", cfg.Executor.Allowlist)
+	}
+	if len(cfg.Capabilities) != 1 || cfg.Capabilities[0] != "role:override" {
+		t.Fatalf("unexpected capabilities: %+v", cfg.Capabilities)
 	}
 }
 
@@ -114,6 +122,9 @@ func TestLoadAgentExampleConfigs(t *testing.T) {
 			if cfg.Executor.Allowlist["echo"] != "echo" {
 				t.Fatalf("expected echo allowlist entry, got %+v", cfg.Executor.Allowlist)
 			}
+			if len(cfg.Capabilities) == 0 {
+				t.Fatalf("expected example capabilities")
+			}
 			if cfg.SecureMode {
 				t.Fatalf("expected example agent config to default to plain mode")
 			}
@@ -168,6 +179,12 @@ func TestLoadAgentConfigRejectsInvalidTimeoutAndAllowlist(t *testing.T) {
 	if err := loadAgentConfigError(t, []string{"--config", allowlistPath}); err == nil || !strings.Contains(err.Error(), "invalid AGENT_COMMAND_ALLOWLIST") {
 		t.Fatalf("expected allowlist error, got %v", err)
 	}
+
+	clearAgentEnv(t)
+	capabilitiesPath := writeAgentTempConfig(t, `AGENT_CAPABILITIES=-bad`)
+	if err := loadAgentConfigError(t, []string{"--config", capabilitiesPath}); err == nil || !strings.Contains(err.Error(), "invalid AGENT_CAPABILITIES") {
+		t.Fatalf("expected capabilities error, got %v", err)
+	}
 }
 
 func TestLoadAgentConfigRejectsMissingExplicitFile(t *testing.T) {
@@ -203,6 +220,7 @@ func clearAgentEnv(t *testing.T) {
 		"NODE_ID",
 		"AGENT_EXEC_TIMEOUT",
 		"AGENT_COMMAND_ALLOWLIST",
+		"AGENT_CAPABILITIES",
 		"AGENT_TLS_CA_FILE",
 		"AGENT_TLS_CERT_FILE",
 		"AGENT_TLS_KEY_FILE",

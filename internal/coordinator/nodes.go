@@ -1,9 +1,11 @@
 package coordinator
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
+	"planetary-mesh/internal/protocol"
 	"planetary-mesh/internal/security"
 )
 
@@ -18,17 +20,21 @@ const (
 
 // Node represents an agent node known to the coordinator.
 type Node struct {
-	ID          string                       `json:"id"`
-	Address     string                       `json:"address"`
-	LastSeen    time.Time                    `json:"last_seen"`
-	State       NodeState                    `json:"state"`
-	Certificate security.CertificateMetadata `json:"certificate,omitempty"`
+	ID           string                       `json:"id"`
+	Address      string                       `json:"address"`
+	LastSeen     time.Time                    `json:"last_seen"`
+	State        NodeState                    `json:"state"`
+	Capabilities []string                     `json:"capabilities"`
+	Load         protocol.NodeLoad            `json:"load"`
+	Certificate  security.CertificateMetadata `json:"certificate,omitempty"`
 }
 
 type NodeRegistration struct {
-	ID          string
-	Address     string
-	Certificate security.CertificateMetadata
+	ID           string
+	Address      string
+	Capabilities []string
+	Load         protocol.NodeLoad
+	Certificate  security.CertificateMetadata
 }
 
 // NodeStateCounts is an aggregate snapshot of known nodes by health state.
@@ -65,6 +71,14 @@ func (r *NodeRegistry) Register(in NodeRegistration) (Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	capabilities, err := protocol.NormalizeNodeCapabilities(in.Capabilities)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := protocol.ValidateNodeLoad(in.Load); err != nil {
+		return Node{}, err
+	}
+
 	n, exists := r.nodes[in.ID]
 	if !exists {
 		n = &Node{ID: in.ID}
@@ -73,6 +87,8 @@ func (r *NodeRegistry) Register(in NodeRegistration) (Node, error) {
 	n.Address = in.Address
 	n.LastSeen = time.Now().UTC()
 	n.State = NodeStateHealthy
+	n.Capabilities = capabilities
+	n.Load = in.Load
 	n.Certificate = cloneCertificateMetadata(in.Certificate)
 
 	// Return a copy so callers can't mutate internal state.
@@ -130,8 +146,27 @@ func (r *NodeRegistry) CountByState() (NodeStateCounts, error) {
 }
 
 func cloneNode(n Node) Node {
+	capabilities, err := protocol.NormalizeNodeCapabilities(n.Capabilities)
+	if err != nil {
+		capabilities = []string{}
+	}
+	if err := protocol.ValidateNodeLoad(n.Load); err != nil {
+		n.Load = protocol.NodeLoad{}
+	}
+	n.Capabilities = capabilities
 	n.Certificate = cloneCertificateMetadata(n.Certificate)
 	return n
+}
+
+func validateNodeMetadata(capabilities []string, load protocol.NodeLoad) ([]string, error) {
+	normalized, err := protocol.NormalizeNodeCapabilities(capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("invalid capabilities: %w", err)
+	}
+	if err := protocol.ValidateNodeLoad(load); err != nil {
+		return nil, fmt.Errorf("invalid load: %w", err)
+	}
+	return normalized, nil
 }
 
 func cloneCertificateMetadata(in security.CertificateMetadata) security.CertificateMetadata {
