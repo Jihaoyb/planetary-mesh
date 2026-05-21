@@ -43,6 +43,9 @@ func TestHandleJobsCreateAndList(t *testing.T) {
 	if jobResp.Command != "echo" {
 		t.Fatalf("expected command echo, got %s", jobResp.Command)
 	}
+	if jobResp.Status != JobStatusQueued || jobResp.NodeID != "" || jobResp.Attempts != 0 || jobResp.StartedAt != nil || jobResp.CompletedAt != nil {
+		t.Fatalf("new job should be returned as queued and unattempted, got %+v", jobResp)
+	}
 
 	reqList := newVersionedRequest(http.MethodGet, "/jobs", nil)
 	wList := httptest.NewRecorder()

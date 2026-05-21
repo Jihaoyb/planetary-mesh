@@ -11,12 +11,13 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 12 node
-  capability/load visibility.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 13 explicit
+  job lifecycle state transitions.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
-  periodically revisits queued jobs, exposes metrics and status, stores reported
-  node capabilities/load, and can persist nodes and jobs in Postgres.
+  periodically revisits queued jobs, owns explicit job lifecycle transitions,
+  exposes metrics and status, stores reported node capabilities/load, and can
+  persist nodes and jobs in Postgres.
 - **Agent**: registers with the coordinator, sends heartbeats with optional
   static capabilities and current active execution count, and executes
   allowlisted command jobs without invoking a shell.
@@ -38,6 +39,8 @@ shared compute scenarios.
 - Operator-visible node capabilities and active execution counts reported
   through registration/heartbeat, `GET /nodes`, and `pmctl nodes list`.
 - Command job submission with `type="command"`, `command`, and optional `args`.
+- Explicit coordinator-owned job lifecycle states: `QUEUED`, `RUNNING`,
+  `COMPLETED`, and `FAILED`.
 - Allowlisted direct process execution using `exec.CommandContext`.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
@@ -64,6 +67,7 @@ shared compute scenarios.
 - OpenAPI, protobuf, or generated API contracts.
 - Production Docker image or packaged release workflow.
 - Load-aware, capability-aware, or queue-aware scheduling.
+- Job cancellation API or cancellation behavior.
 - Agent reconciliation after coordinator restart.
 - Automated certificate issuance, enrollment, or rotation.
 - Remote private mesh, trusted shared pool, or overflow marketplace features.
@@ -381,3 +385,4 @@ Architecture Decision Records:
 - [ADR 0009: Env-style local config files](docs/adr/0009-env-style-local-config-files.md)
 - [ADR 0010: Postgres schema readiness metadata](docs/adr/0010-postgres-schema-readiness.md)
 - [ADR 0011: Node capability and load visibility](docs/adr/0011-node-capability-load-visibility.md)
+- [ADR 0012: Explicit coordinator-owned job lifecycle transitions](docs/adr/0012-job-lifecycle-state-transitions.md)

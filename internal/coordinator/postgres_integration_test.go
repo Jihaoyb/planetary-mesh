@@ -255,6 +255,166 @@ func TestPostgresJobAttemptReassignmentPersistence(t *testing.T) {
 	}
 }
 
+func TestPostgresQueuedJobCanFailWithoutAttempt(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	failed, err := jobs.Fail(created.ID, "", JobResult{LastError: "queued failure"})
+	if err != nil {
+		t.Fatalf("fail queued job: %v", err)
+	}
+	if failed.Status != JobStatusFailed || failed.Attempts != 0 || failed.StartedAt != nil || failed.CompletedAt == nil {
+		t.Fatalf("unexpected failed queued job: %+v", failed)
+	}
+	if failed.NodeID != "" {
+		t.Fatalf("expected empty node id, got %q", failed.NodeID)
+	}
+
+	got, ok, err := jobs.Get(created.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected queued-failed job")
+	}
+	if got.Status != JobStatusFailed || got.LastError != "queued failure" {
+		t.Fatalf("unexpected persisted queued failure: %+v", got)
+	}
+}
+
+func TestPostgresRejectsInvalidJobTransitions(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	queued, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create queued job: %v", err)
+	}
+	if _, err := jobs.Complete(queued.ID, "node-pg", JobResult{Stdout: "should not persist"}); err == nil {
+		t.Fatalf("expected completing queued job to fail")
+	} else if !strings.Contains(err.Error(), "cannot transition from QUEUED to COMPLETED") {
+		t.Fatalf("expected transition error, got %v", err)
+	}
+	gotQueued, ok, err := jobs.Get(queued.ID)
+	if err != nil {
+		t.Fatalf("get queued job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected queued job")
+	}
+	if gotQueued.Status != JobStatusQueued || gotQueued.Stdout != "" || gotQueued.CompletedAt != nil {
+		t.Fatalf("queued job was mutated: %+v", gotQueued)
+	}
+
+	completed, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create completed job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(completed.ID, "node-pg"); err != nil {
+		t.Fatalf("start completed job: %v", err)
+	}
+	exitCode := 0
+	if _, err := jobs.Complete(completed.ID, "node-pg", JobResult{ExitCode: &exitCode, Stdout: "ok\n"}); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+	if _, err := jobs.Fail(completed.ID, "node-other", JobResult{LastError: "overwrite"}); err == nil {
+		t.Fatalf("expected failing completed job to be rejected")
+	}
+	if _, err := jobs.StartAttempt(completed.ID, "node-other"); err == nil {
+		t.Fatalf("expected starting completed job to be rejected")
+	}
+	gotCompleted, ok, err := jobs.Get(completed.ID)
+	if err != nil {
+		t.Fatalf("get completed job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected completed job")
+	}
+	if gotCompleted.Status != JobStatusCompleted || gotCompleted.NodeID != "node-pg" || gotCompleted.Stdout != "ok\n" || gotCompleted.LastError != "" {
+		t.Fatalf("completed job was mutated: %+v", gotCompleted)
+	}
+
+	failed, err := jobs.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create failed job: %v", err)
+	}
+	if _, err := jobs.Fail(failed.ID, "node-pg", JobResult{LastError: "exit status 1"}); err != nil {
+		t.Fatalf("fail job: %v", err)
+	}
+	if _, err := jobs.Complete(failed.ID, "node-other", JobResult{Stdout: "overwrite"}); err == nil {
+		t.Fatalf("expected completing failed job to be rejected")
+	}
+	gotFailed, ok, err := jobs.Get(failed.ID)
+	if err != nil {
+		t.Fatalf("get failed job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected failed job")
+	}
+	if gotFailed.Status != JobStatusFailed || gotFailed.NodeID != "node-pg" || gotFailed.LastError != "exit status 1" || gotFailed.Stdout != "" {
+		t.Fatalf("failed job was mutated: %+v", gotFailed)
+	}
+}
+
+func TestPostgresUnsupportedStatusIsInspectableButNotDispatchable(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+	jobs := store.Jobs()
+
+	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(`UPDATE jobs SET status = $1 WHERE id = $2`, JobStatusCancelled, created.ID); err != nil {
+		t.Fatalf("mark job cancelled: %v", err)
+	}
+
+	got, ok, err := jobs.Get(created.ID)
+	if err != nil {
+		t.Fatalf("get cancelled job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected cancelled job")
+	}
+	if got.Status != JobStatusCancelled {
+		t.Fatalf("expected inspectable CANCELLED job, got %+v", got)
+	}
+
+	queuedIDs, err := jobs.ListQueuedIDs()
+	if err != nil {
+		t.Fatalf("list queued ids: %v", err)
+	}
+	for _, id := range queuedIDs {
+		if id == created.ID {
+			t.Fatalf("unsupported status should not be listed as queued: %v", queuedIDs)
+		}
+	}
+	if _, err := jobs.StartAttempt(created.ID, "node-pg"); err == nil {
+		t.Fatalf("expected starting CANCELLED job to be rejected")
+	}
+	if _, err := jobs.Fail(created.ID, "node-pg", JobResult{LastError: "overwrite"}); err == nil {
+		t.Fatalf("expected failing CANCELLED job to be rejected")
+	}
+
+	got, ok, err = jobs.Get(created.ID)
+	if err != nil {
+		t.Fatalf("get cancelled job after invalid transitions: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected cancelled job after invalid transitions")
+	}
+	if got.Status != JobStatusCancelled || got.NodeID != "" || got.LastError != "" {
+		t.Fatalf("cancelled job was mutated: %+v", got)
+	}
+}
+
 func TestPostgresListQueuedIDs(t *testing.T) {
 	store := openPostgresTestStore(t)
 	jobs := store.Jobs()
@@ -592,6 +752,9 @@ func TestPostgresRestartRecoveryAfterReopenPreservesTerminalJobs(t *testing.T) {
 		t.Fatalf("create completed job: %v", err)
 	}
 	exitCode := 0
+	if _, err := jobs.StartAttempt(completed.ID, "node-pg"); err != nil {
+		t.Fatalf("start completed job: %v", err)
+	}
 	if _, err := jobs.Complete(completed.ID, "node-pg", JobResult{ExitCode: &exitCode, Stdout: "ok\n"}); err != nil {
 		t.Fatalf("complete job: %v", err)
 	}

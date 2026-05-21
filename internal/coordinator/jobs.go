@@ -15,6 +15,9 @@ const (
 	JobStatusRunning   JobStatus = "RUNNING"
 	JobStatusCompleted JobStatus = "COMPLETED"
 	JobStatusFailed    JobStatus = "FAILED"
+
+	// JobStatusCancelled is reserved for a future cancellation model. No current
+	// coordinator path emits it or transitions jobs into it.
 	JobStatusCancelled JobStatus = "CANCELLED"
 )
 
@@ -164,25 +167,6 @@ func (s *JobStore) Get(id string) (Job, bool, error) {
 	return *j, true, nil
 }
 
-// UpdateStatus updates the status (and optionally NodeID) of a job.
-func (s *JobStore) UpdateStatus(id string, status JobStatus, nodeID string) (Job, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	j, ok := s.jobs[id]
-	if !ok {
-		return Job{}, fmt.Errorf("job %q not found", id)
-	}
-
-	j.Status = status
-	if nodeID != "" {
-		j.NodeID = nodeID
-	}
-	j.UpdatedAt = time.Now().UTC()
-
-	return *j, nil
-}
-
 func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,8 +175,8 @@ func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
 	if !ok {
 		return Job{}, fmt.Errorf("job %q not found", id)
 	}
-	if j.Status != JobStatusQueued && j.Status != JobStatusRunning {
-		return Job{}, fmt.Errorf("job %q is %s, not dispatchable", id, j.Status)
+	if err := validateJobTransition(id, j.Status, JobStatusRunning); err != nil {
+		return Job{}, fmt.Errorf("job %q is %s, not dispatchable: %w", id, j.Status, err)
 	}
 
 	now := time.Now().UTC()
@@ -268,6 +252,9 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	if !ok {
 		return Job{}, fmt.Errorf("job %q not found", id)
 	}
+	if err := validateJobTransition(id, j.Status, status); err != nil {
+		return Job{}, err
+	}
 
 	now := time.Now().UTC()
 	j.Status = status
@@ -284,4 +271,37 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	j.UpdatedAt = now
 
 	return *j, nil
+}
+
+func validateJobTransition(id string, from, to JobStatus) error {
+	if !isCurrentJobStatus(to) {
+		return fmt.Errorf("job %q cannot transition to unsupported status %q", id, to)
+	}
+	if !isCurrentJobStatus(from) {
+		return fmt.Errorf("job %q has unsupported status %q", id, from)
+	}
+	if canTransitionJobStatus(from, to) {
+		return nil
+	}
+	return fmt.Errorf("job %q cannot transition from %s to %s", id, from, to)
+}
+
+func canTransitionJobStatus(from, to JobStatus) bool {
+	switch from {
+	case JobStatusQueued:
+		return to == JobStatusRunning || to == JobStatusFailed
+	case JobStatusRunning:
+		return to == JobStatusRunning || to == JobStatusCompleted || to == JobStatusFailed
+	default:
+		return false
+	}
+}
+
+func isCurrentJobStatus(status JobStatus) bool {
+	switch status {
+	case JobStatusQueued, JobStatusRunning, JobStatusCompleted, JobStatusFailed:
+		return true
+	default:
+		return false
+	}
 }

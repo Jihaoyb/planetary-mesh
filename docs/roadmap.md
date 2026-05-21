@@ -10,7 +10,7 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 12 node capability/load visibility
+- Baseline: `main` after Milestone 13 explicit job lifecycle state transitions
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -26,6 +26,8 @@ Implemented capability:
 - node capabilities and active execution count reported through
   registration/heartbeat, `GET /nodes`, and `pmctl nodes list`
 - command job submission with `type="command"`, `command`, and optional `args`
+- explicit coordinator-owned job lifecycle transitions for `QUEUED`,
+  `RUNNING`, `COMPLETED`, and `FAILED`
 - first-healthy-node initial dispatch at job submission time
 - cross-node reassignment after retryable dispatch failures
 - periodic queued-job scheduler/re-dispatch loop
@@ -49,9 +51,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-12
+## Completed Baseline / Milestones 1-13
 
-The first twelve milestones established a working private LAN/trusted-network
+The first thirteen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -279,6 +281,29 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 13: Explicit Job Lifecycle State Transitions
+
+Goal: make job lifecycle/state transitions explicit, documented, and
+test-covered for private mesh reliability and API/operator readiness.
+
+Completed outcomes:
+
+- documented the current coordinator-owned job lifecycle state model
+- kept public job JSON fields and status strings unchanged
+- kept active states to `QUEUED` and `RUNNING`, terminal states to `COMPLETED`
+  and `FAILED`
+- kept `CANCELLED` reserved/unsupported; no cancellation API or behavior was
+  added
+- enforced lifecycle transitions through in-memory and Postgres job stores
+- prevented terminal job rows from being overwritten by later lifecycle methods
+- preserved no-healthy-node queue retention, queued expiration, restart
+  recovery, duplicate dispatch protection, retryable cross-node reassignment,
+  and terminal dispatch failure behavior
+- kept Postgres schema readiness metadata at version `2`
+- added focused default and opt-in Postgres tests for lifecycle transitions
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -287,7 +312,6 @@ Potential work:
 
 - scheduler policy that can use reported node capabilities/load when explicitly
   planned
-- clearer job state transitions
 - agent reconciliation strategy after coordinator restart
 - better operator runbooks
 - API inventory and API contract decision
