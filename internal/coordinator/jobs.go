@@ -82,6 +82,7 @@ type JobStorage interface {
 	Create(in JobCreateInput) (Job, error)
 	List() ([]Job, error)
 	ListQueuedIDs() ([]string, error)
+	ListRunningIDs() ([]string, error)
 	Get(id string) (Job, bool, error)
 	StartAttempt(id, nodeID string) (Job, error)
 	Complete(id, nodeID string, result JobResult) (Job, error)
@@ -89,6 +90,7 @@ type JobStorage interface {
 	AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error)
 	ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error)
 	FailRunningJobs(lastError string) (int64, error)
+	FailRunningJobIDs(ids []string, lastError string) (int64, error)
 }
 
 // JobStore is an in-memory, concurrency-safe job registry.
@@ -162,6 +164,30 @@ func (s *JobStore) ListQueuedIDs() ([]string, error) {
 
 	ids := make([]string, 0, len(queued))
 	for _, j := range queued {
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
+func (s *JobStore) ListRunningIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	running := make([]Job, 0)
+	for _, j := range s.jobs {
+		if j.Status == JobStatusRunning {
+			running = append(running, *j)
+		}
+	}
+	sort.Slice(running, func(i, j int) bool {
+		if running[i].CreatedAt.Equal(running[j].CreatedAt) {
+			return running[i].ID < running[j].ID
+		}
+		return running[i].CreatedAt.Before(running[j].CreatedAt)
+	})
+
+	ids := make([]string, 0, len(running))
+	for _, j := range running {
 		ids = append(ids, j.ID)
 	}
 	return ids, nil
@@ -262,12 +288,32 @@ func (s *JobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastErr
 
 // FailRunningJobs marks jobs left RUNNING across a coordinator restart as failed.
 func (s *JobStore) FailRunningJobs(lastError string) (int64, error) {
+	ids, err := s.ListRunningIDs()
+	if err != nil {
+		return 0, err
+	}
+	return s.FailRunningJobIDs(ids, lastError)
+}
+
+func (s *JobStore) FailRunningJobIDs(ids []string, lastError string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	targets := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		targets[id] = struct{}{}
+	}
+
 	now := time.Now().UTC()
 	var count int64
-	for _, j := range s.jobs {
+	for id, j := range s.jobs {
+		if _, ok := targets[id]; !ok {
+			continue
+		}
 		if j.Status != JobStatusRunning {
 			continue
 		}

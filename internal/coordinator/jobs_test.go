@@ -80,6 +80,51 @@ func TestJobStoreListQueuedIDs(t *testing.T) {
 	}
 }
 
+func TestJobStoreListRunningIDs(t *testing.T) {
+	store := NewJobStore()
+
+	queued, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create queued job: %v", err)
+	}
+	running1, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create running job 1: %v", err)
+	}
+	running2, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create running job 2: %v", err)
+	}
+	if _, err := store.StartAttempt(running1.ID, "node-1"); err != nil {
+		t.Fatalf("start running 1: %v", err)
+	}
+	if _, err := store.StartAttempt(running2.ID, "node-1"); err != nil {
+		t.Fatalf("start running 2: %v", err)
+	}
+
+	ids, err := store.ListRunningIDs()
+	if err != nil {
+		t.Fatalf("list running ids: %v", err)
+	}
+	want := []string{running1.ID, running2.ID}
+	if len(ids) != len(want) {
+		t.Fatalf("expected running ids %v, got %v", want, ids)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("expected running ids %v, got %v", want, ids)
+		}
+	}
+
+	gotQueued, _, err := store.Get(queued.ID)
+	if err != nil {
+		t.Fatalf("get queued job: %v", err)
+	}
+	if gotQueued.Status != JobStatusQueued {
+		t.Fatalf("expected queued job to remain queued, got %+v", gotQueued)
+	}
+}
+
 func TestJobStoreExpireQueuedJobs(t *testing.T) {
 	store := NewJobStore()
 	expired, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
@@ -136,6 +181,59 @@ func TestJobStoreExpireQueuedJobs(t *testing.T) {
 	}
 	if gotRunning.Status != JobStatusRunning {
 		t.Fatalf("expected running job to remain RUNNING, got %s", gotRunning.Status)
+	}
+}
+
+func TestJobStoreFailRunningJobIDsOnlyFailsCapturedIDs(t *testing.T) {
+	store := NewJobStore()
+
+	captured, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create captured job: %v", err)
+	}
+	notCaptured, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create uncaptured job: %v", err)
+	}
+	queued, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create queued job: %v", err)
+	}
+	if _, err := store.StartAttempt(captured.ID, "node-1"); err != nil {
+		t.Fatalf("start captured job: %v", err)
+	}
+	if _, err := store.StartAttempt(notCaptured.ID, "node-1"); err != nil {
+		t.Fatalf("start uncaptured job: %v", err)
+	}
+
+	failed, err := store.FailRunningJobIDs([]string{captured.ID, queued.ID, "missing"}, RestartRecoveryError)
+	if err != nil {
+		t.Fatalf("fail running job ids: %v", err)
+	}
+	if failed != 1 {
+		t.Fatalf("expected one failed captured job, got %d", failed)
+	}
+
+	gotCaptured, _, err := store.Get(captured.ID)
+	if err != nil {
+		t.Fatalf("get captured job: %v", err)
+	}
+	if gotCaptured.Status != JobStatusFailed || gotCaptured.LastError != RestartRecoveryError {
+		t.Fatalf("unexpected captured job: %+v", gotCaptured)
+	}
+	gotNotCaptured, _, err := store.Get(notCaptured.ID)
+	if err != nil {
+		t.Fatalf("get uncaptured job: %v", err)
+	}
+	if gotNotCaptured.Status != JobStatusRunning {
+		t.Fatalf("uncaptured running job should remain RUNNING, got %+v", gotNotCaptured)
+	}
+	gotQueued, _, err := store.Get(queued.ID)
+	if err != nil {
+		t.Fatalf("get queued job: %v", err)
+	}
+	if gotQueued.Status != JobStatusQueued {
+		t.Fatalf("queued job should remain QUEUED, got %+v", gotQueued)
 	}
 }
 

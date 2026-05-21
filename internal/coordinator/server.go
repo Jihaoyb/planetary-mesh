@@ -44,6 +44,8 @@ type RuntimeConfig struct {
 const defaultQueuedSchedulerInterval = 5 * time.Second
 const defaultQueuedJobMaxAge = 24 * time.Hour
 
+const DefaultReconciliationGrace = 30 * time.Second
+
 // DefaultDispatchConfig returns sensible defaults for v0.
 func DefaultDispatchConfig() DispatchConfig {
 	return DispatchConfig{
@@ -585,6 +587,41 @@ func (s *Server) dispatchQueuedJobs() {
 	for _, jobID := range queuedIDs {
 		go s.dispatchJob(jobID)
 	}
+}
+
+func (s *Server) StartReconciliationGrace(stopCh <-chan struct{}, jobIDs []string, grace time.Duration, lastError string) error {
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	if grace <= 0 {
+		failed, err := s.jobs.FailRunningJobIDs(jobIDs, lastError)
+		if err != nil {
+			return err
+		}
+		s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+		s.logger.Warn("startup running jobs failed without reconciliation grace", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
+		return nil
+	}
+
+	s.logger.Info("startup reconciliation grace started", "startup_running_jobs", len(jobIDs), "grace", grace.String())
+	timer := time.NewTimer(grace)
+	go func() {
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			failed, err := s.jobs.FailRunningJobIDs(jobIDs, lastError)
+			if err != nil {
+				s.logger.Error("startup reconciliation grace recovery failed", "err", err)
+				return
+			}
+			s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+			s.logger.Warn("startup reconciliation grace expired", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
+		case <-stopCh:
+			s.logger.Info("startup reconciliation grace stopped before expiry", "startup_running_jobs", len(jobIDs))
+		}
+	}()
+	return nil
 }
 
 func hasHealthyNode(nodes []Node) bool {

@@ -267,6 +267,113 @@ func TestDispatchSkipsNonQueuedJob(t *testing.T) {
 	}
 }
 
+func TestReconciliationGraceAcceptsReportedResultBeforeExpiry(t *testing.T) {
+	store := NewJobStore()
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(job.ID, "agent-reconcile"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+	srv := NewServer(NewNodeRegistry(), store, nil)
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { close(stopCh) })
+
+	if err := srv.StartReconciliationGrace(stopCh, []string{job.ID}, 50*time.Millisecond, RestartRecoveryError); err != nil {
+		t.Fatalf("start reconciliation grace: %v", err)
+	}
+	w := postJobResult(t, srv, job.ID, protocol.JobResultReportRequest{
+		NodeID: "agent-reconcile",
+		Status: string(JobStatusCompleted),
+		Stdout: "recovered\n",
+	})
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected report 200, got %d", w.Result().StatusCode)
+	}
+	time.Sleep(80 * time.Millisecond)
+
+	final, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get final job: %v", err)
+	}
+	if final.Status != JobStatusCompleted || final.Stdout != "recovered\n" {
+		t.Fatalf("expected reported result to win grace, got %+v", final)
+	}
+	if got := srv.Metrics().StartupRecoveredJobs.Load(); got != 0 {
+		t.Fatalf("expected no startup recovery failures, got %d", got)
+	}
+}
+
+func TestReconciliationGraceExpiresCapturedRunningJobs(t *testing.T) {
+	store := NewJobStore()
+	captured, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create captured job: %v", err)
+	}
+	newRunning, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create new running job: %v", err)
+	}
+	if _, err := store.StartAttempt(captured.ID, "agent-old"); err != nil {
+		t.Fatalf("start captured job: %v", err)
+	}
+	if _, err := store.StartAttempt(newRunning.ID, "agent-new"); err != nil {
+		t.Fatalf("start new running job: %v", err)
+	}
+	srv := NewServer(NewNodeRegistry(), store, nil)
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { close(stopCh) })
+
+	if err := srv.StartReconciliationGrace(stopCh, []string{captured.ID}, 10*time.Millisecond, RestartRecoveryError); err != nil {
+		t.Fatalf("start reconciliation grace: %v", err)
+	}
+	time.Sleep(40 * time.Millisecond)
+
+	gotCaptured, _, err := store.Get(captured.ID)
+	if err != nil {
+		t.Fatalf("get captured job: %v", err)
+	}
+	if gotCaptured.Status != JobStatusFailed || gotCaptured.LastError != RestartRecoveryError {
+		t.Fatalf("expected captured job to fail after grace, got %+v", gotCaptured)
+	}
+	gotNew, _, err := store.Get(newRunning.ID)
+	if err != nil {
+		t.Fatalf("get new running job: %v", err)
+	}
+	if gotNew.Status != JobStatusRunning {
+		t.Fatalf("new running job should not be failed by startup grace, got %+v", gotNew)
+	}
+	if got := srv.Metrics().StartupRecoveredJobs.Load(); got != 1 {
+		t.Fatalf("expected one startup recovery failure, got %d", got)
+	}
+}
+
+func TestReconciliationGraceZeroFailsImmediately(t *testing.T) {
+	store := NewJobStore()
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(job.ID, "agent-zero"); err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+	srv := NewServer(NewNodeRegistry(), store, nil)
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	if err := srv.StartReconciliationGrace(stopCh, []string{job.ID}, 0, RestartRecoveryError); err != nil {
+		t.Fatalf("start reconciliation grace: %v", err)
+	}
+	got, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != JobStatusFailed || got.LastError != RestartRecoveryError {
+		t.Fatalf("expected immediate recovery failure, got %+v", got)
+	}
+}
+
 func TestDispatchRetriesOn500ThenFails(t *testing.T) {
 	client, calls := startFakeAgentClient(t, http.StatusInternalServerError, 0, protocol.ExecuteResponse{
 		Status:    "error",
