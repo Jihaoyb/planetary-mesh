@@ -16,8 +16,9 @@ import (
 const streamLimit = 1 << 20
 
 type executor struct {
-	cfg     ExecutorConfig
-	tracker *LoadTracker
+	cfg      ExecutorConfig
+	tracker  *LoadTracker
+	reporter *ResultReporter
 }
 
 // HealthHandler is a basic health check.
@@ -40,7 +41,11 @@ func NewExecuteHandler(cfg ExecutorConfig) http.HandlerFunc {
 }
 
 func NewExecuteHandlerWithLoadTracker(cfg ExecutorConfig, tracker *LoadTracker) http.HandlerFunc {
-	ex := &executor{cfg: cfg, tracker: tracker}
+	return NewExecuteHandlerWithLoadTrackerAndReporter(cfg, tracker, nil)
+}
+
+func NewExecuteHandlerWithLoadTrackerAndReporter(cfg ExecutorConfig, tracker *LoadTracker, reporter *ResultReporter) http.HandlerFunc {
+	ex := &executor{cfg: cfg, tracker: tracker, reporter: reporter}
 	return ex.handleExecute
 }
 
@@ -70,19 +75,23 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Command == "" {
-		e.writeJSON(w, http.StatusBadRequest, protocol.ExecuteResponse{
+		resp := protocol.ExecuteResponse{
 			Status:    "error",
 			LastError: "command is required for type=command",
-		})
+		}
+		e.recordResult(req.JobID, protocol.JobResultStatusFailed, resp)
+		e.writeJSON(w, http.StatusBadRequest, resp)
 		return
 	}
 
 	executable, ok := e.cfg.Allowlist[req.Command]
 	if !ok {
-		e.writeJSON(w, http.StatusBadRequest, protocol.ExecuteResponse{
+		resp := protocol.ExecuteResponse{
 			Status:    "error",
 			LastError: fmt.Sprintf("command %q is not allowlisted", req.Command),
-		})
+		}
+		e.recordResult(req.JobID, protocol.JobResultStatusFailed, resp)
+		e.writeJSON(w, http.StatusBadRequest, resp)
 		return
 	}
 
@@ -112,12 +121,14 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		slog.Info("execute done", "job_id", req.JobID, "command", req.Command)
+		e.recordResult(req.JobID, protocol.JobResultStatusCompleted, resp)
 		e.writeJSON(w, http.StatusOK, resp)
 		return
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		resp.Status = "error"
 		resp.LastError = fmt.Sprintf("command timed out after %s", e.cfg.Timeout)
 		slog.Warn("execute timeout", "job_id", req.JobID, "command", req.Command, "timeout", e.cfg.Timeout)
+		e.recordResult(req.JobID, protocol.JobResultStatusFailed, resp)
 		e.writeJSON(w, http.StatusGatewayTimeout, resp)
 		return
 	default:
@@ -128,6 +139,7 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 			resp.ExitCode = &code
 			resp.LastError = fmt.Sprintf("command exited with code %d", code)
 			slog.Warn("execute failed", "job_id", req.JobID, "command", req.Command, "exit_code", code)
+			e.recordResult(req.JobID, protocol.JobResultStatusFailed, resp)
 			e.writeJSON(w, http.StatusUnprocessableEntity, resp)
 			return
 		}
@@ -149,9 +161,13 @@ func MuxWithConfig(cfg ExecutorConfig) *http.ServeMux {
 }
 
 func MuxWithConfigAndLoadTracker(cfg ExecutorConfig, tracker *LoadTracker) *http.ServeMux {
+	return MuxWithConfigLoadTrackerAndReporter(cfg, tracker, nil)
+}
+
+func MuxWithConfigLoadTrackerAndReporter(cfg ExecutorConfig, tracker *LoadTracker, reporter *ResultReporter) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", HealthHandler)
-	mux.HandleFunc("/execute", NewExecuteHandlerWithLoadTracker(cfg, tracker))
+	mux.HandleFunc("/execute", NewExecuteHandlerWithLoadTrackerAndReporter(cfg, tracker, reporter))
 	return mux
 }
 
@@ -161,6 +177,22 @@ func (e *executor) writeJSON(w http.ResponseWriter, status int, resp protocol.Ex
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Warn("encode /execute response failed", "err", err)
 	}
+}
+
+func (e *executor) recordResult(jobID, status string, resp protocol.ExecuteResponse) {
+	if e.reporter == nil {
+		return
+	}
+	e.reporter.Record(ResultReport{
+		JobID:           jobID,
+		Status:          status,
+		ExitCode:        resp.ExitCode,
+		Stdout:          resp.Stdout,
+		Stderr:          resp.Stderr,
+		StdoutTruncated: resp.StdoutTruncated,
+		StderrTruncated: resp.StderrTruncated,
+		LastError:       resp.LastError,
+	})
 }
 
 type limitedBuffer struct {

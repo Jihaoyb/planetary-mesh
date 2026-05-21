@@ -55,6 +55,35 @@ func TestExecuteHandlerSuccess(t *testing.T) {
 	}
 }
 
+func TestExecuteHandlerRecordsSuccessfulResultReport(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"echo": "echo"},
+		Timeout:   2 * time.Second,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "echo",
+		Args:    []string{"hello"},
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Result().StatusCode)
+	}
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	entry, ok := reporter.entries["job-1"]
+	if !ok {
+		t.Fatalf("expected result report to be cached")
+	}
+	if entry.report.Status != protocol.JobResultStatusCompleted || !strings.Contains(entry.report.Stdout, "hello") {
+		t.Fatalf("unexpected cached report: %+v", entry.report)
+	}
+}
+
 func TestExecuteHandlerRejectsMissingVersion(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/execute", bytes.NewReader([]byte(`{"job_id":"job-1","type":"command","command":"echo"}`)))
 	w := httptest.NewRecorder()
@@ -83,6 +112,34 @@ func TestExecuteHandlerRejectsDisallowedCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteHandlerRecordsAllowlistRejectionReport(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"echo": "echo"},
+		Timeout:   time.Second,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+	}
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	entry, ok := reporter.entries["job-1"]
+	if !ok {
+		t.Fatalf("expected failed result report to be cached")
+	}
+	if entry.report.Status != protocol.JobResultStatusFailed || entry.report.LastError == "" {
+		t.Fatalf("unexpected cached failure report: %+v", entry.report)
+	}
+}
+
 func TestExecuteHandlerNonZeroExit(t *testing.T) {
 	cfg := ExecutorConfig{
 		Allowlist: map[string]string{"false": "false"},
@@ -102,6 +159,34 @@ func TestExecuteHandlerNonZeroExit(t *testing.T) {
 	}
 }
 
+func TestExecuteHandlerRecordsNonZeroExitReport(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"false": "false"},
+		Timeout:   time.Second,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "false",
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", w.Result().StatusCode)
+	}
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	entry, ok := reporter.entries["job-1"]
+	if !ok {
+		t.Fatalf("expected failed result report to be cached")
+	}
+	if entry.report.Status != protocol.JobResultStatusFailed || entry.report.ExitCode == nil || *entry.report.ExitCode != 1 {
+		t.Fatalf("unexpected cached non-zero report: %+v", entry.report)
+	}
+}
+
 func TestExecuteHandlerTimeout(t *testing.T) {
 	cfg := ExecutorConfig{
 		Allowlist: map[string]string{"sleep": "sleep"},
@@ -118,6 +203,57 @@ func TestExecuteHandlerTimeout(t *testing.T) {
 	NewExecuteHandler(cfg)(w, req)
 	if w.Result().StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("expected 504, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestExecuteHandlerRecordsTimeoutReport(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"sleep": "sleep"},
+		Timeout:   10 * time.Millisecond,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+		Args:    []string{"1"},
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("expected 504, got %d", w.Result().StatusCode)
+	}
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	entry, ok := reporter.entries["job-1"]
+	if !ok {
+		t.Fatalf("expected timeout result report to be cached")
+	}
+	if entry.report.Status != protocol.JobResultStatusFailed || !strings.Contains(entry.report.LastError, "timed out") {
+		t.Fatalf("unexpected cached timeout report: %+v", entry.report)
+	}
+}
+
+func TestExecuteHandlerDoesNotReportInternalExecutionError(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"missing": "/definitely/not/a/planetary-mesh-test-command"},
+		Timeout:   time.Second,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "missing",
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Result().StatusCode)
+	}
+	if got := reporter.CachedCount(); got != 0 {
+		t.Fatalf("expected retryable internal error not to be reported, got %d cached reports", got)
 	}
 }
 

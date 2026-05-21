@@ -13,6 +13,9 @@ const (
 
 	MaxNodeCapabilities     = 32
 	MaxNodeCapabilityLength = 64
+
+	JobResultStatusCompleted = "COMPLETED"
+	JobResultStatusFailed    = "FAILED"
 )
 
 func SetVersionHeader(h http.Header) {

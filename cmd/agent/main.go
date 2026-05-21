@@ -60,12 +60,14 @@ func main() {
 		logger.Info("registered with coordinator", "node_id", cfg.NodeID)
 	}
 
+	resultReporter := agent.NewResultReporter(httpClient, cfg.CoordinatorURL, cfg.NodeID)
 	stopCh := make(chan struct{})
 	agent.StartHeartbeatLoopWithClientAndMetadata(httpClient, cfg.CoordinatorURL, cfg.NodeID, cfg.AdvertiseAddr, registrationMetadata, stopCh)
+	resultReporter.Start(stopCh)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           agent.MuxWithConfigAndLoadTracker(cfg.Executor, loadTracker),
+		Handler:           agent.MuxWithConfigLoadTrackerAndReporter(cfg.Executor, loadTracker, resultReporter),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         serverTLSConfig,
 	}
