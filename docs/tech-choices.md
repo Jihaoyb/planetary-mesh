@@ -223,6 +223,46 @@ Future decisions:
 - load-aware scheduling
 - priorities, quotas, and fairness
 
+## Job Lifecycle State Model
+
+Choice: explicit coordinator-owned state transitions for the current job
+lifecycle.
+
+Why:
+
+- private mesh operators need job status to be predictable across memory and
+  Postgres storage
+- tests should protect retry, reassignment, queued expiration, and restart
+  recovery from accidental state drift
+- the current API is useful enough without adding cancellation or new statuses
+
+Current behavior:
+
+- accepted jobs start as `QUEUED`
+- dispatch attempts transition `QUEUED` to `RUNNING`
+- retry and cross-node reassignment attempts keep the job `RUNNING` while
+  incrementing attempts and updating the current node
+- successful execution transitions `RUNNING` to `COMPLETED`
+- terminal execution or dispatch failures transition `RUNNING` to `FAILED`
+- queued expiration can transition `QUEUED` to `FAILED`
+- Postgres startup recovery transitions persisted `RUNNING` jobs to `FAILED`
+- terminal `COMPLETED` and `FAILED` jobs are not overwritten by lifecycle
+  methods
+- `CANCELLED` remains reserved/unsupported; there is no cancellation API today
+
+Current constraints:
+
+- public job JSON fields and status strings are unchanged
+- HTTP/JSON protocol version remains `1`
+- Postgres schema readiness metadata remains version `2`
+- duplicate dispatch protection is process-local to one running coordinator
+
+Future decisions:
+
+- cancellation semantics
+- agent reconciliation or idempotent result reporting after coordinator restart
+- richer progress states, if a future workload model needs them
+
 ## Node Capability and Load Reporting
 
 Choice: agents report optional static capabilities and approximate active

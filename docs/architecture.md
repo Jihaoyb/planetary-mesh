@@ -33,8 +33,8 @@ For product framing and sequencing, see:
 Current runtime components:
 
 - **Coordinator**: single v0 control plane for node registry, health state, job
-  validation, node capability/load metadata, job state, dispatch, retry policy,
-  storage, status, and metrics.
+  validation, node capability/load metadata, job lifecycle transitions,
+  dispatch, retry policy, storage, status, and metrics.
 - **Agent**: daemon on a trusted machine. It registers with the coordinator,
   sends heartbeats with node metadata, and executes allowlisted command jobs
   through `/execute`.
@@ -87,6 +87,7 @@ Coordinator responsibilities:
 - update node health states based on heartbeat age
 - validate job submissions
 - store job metadata and execution result fields
+- enforce explicit job lifecycle transitions
 - select the first healthy node for initial dispatch and reassign to other
   healthy nodes after retryable dispatch failures
 - dispatch to agent `/execute`
@@ -162,6 +163,7 @@ Postgres behavior today:
   `pmctl --json status`, tests, and the Postgres smoke workflow
 - mark persisted `RUNNING` jobs as `FAILED` during coordinator startup with:
   `coordinator restarted before result was recorded`
+- enforce the same job lifecycle transition rules as the in-memory store
 
 This is not a full migration framework.
 
@@ -241,6 +243,35 @@ cross-node retry. Reported capabilities and active execution counts are
 operator-visible only; they do not affect node selection, priority,
 reassignment, or queue fairness.
 
+### Job Lifecycle State Model
+
+Current job statuses are:
+
+- `QUEUED` - accepted by the coordinator and waiting for dispatch
+- `RUNNING` - at least one dispatch attempt has started
+- `COMPLETED` - terminal success
+- `FAILED` - terminal failure
+
+`CANCELLED` is reserved in code for a future cancellation model, but no current
+API or coordinator path emits it.
+
+Allowed coordinator-owned transitions:
+
+| Current state | Trigger | Next state |
+|---|---|---|
+| none | accepted `POST /jobs` | `QUEUED` |
+| `QUEUED` | dispatch attempt starts | `RUNNING` |
+| `RUNNING` | retry or cross-node reassignment attempt starts | `RUNNING` |
+| `RUNNING` | successful agent execution | `COMPLETED` |
+| `RUNNING` | terminal execution/dispatch failure | `FAILED` |
+| `QUEUED` | queued expiration or pre-attempt coordinator failure | `FAILED` |
+| `RUNNING` | Postgres coordinator startup recovery | `FAILED` |
+
+If no healthy node exists, the job remains `QUEUED` with no attempts recorded.
+Duplicate dispatch protection is process-local and skips concurrent dispatches
+for the same job in one running coordinator. Terminal jobs are not overwritten
+by later lifecycle methods.
+
 ### Node Registration and Health
 
 Registration flow:
@@ -316,6 +347,7 @@ Current private-mesh limitations:
 - no file upload/result download workflow
 - no dashboard
 - no generated API contract such as OpenAPI or protobuf
+- no cancellation API or cancellation behavior
 - no production image or packaged release workflow
 - no automated mTLS certificate lifecycle
 - no multi-tenant authorization model
@@ -336,7 +368,6 @@ These are planned or possible directions, not current implementation.
 
 Private mesh hardening:
 
-- explicit job state transition documentation
 - scheduler policy for reported node capabilities/load
 - operator runbooks
 - API inventory and contract decision
