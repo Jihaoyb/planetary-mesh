@@ -66,6 +66,17 @@ type JobResult struct {
 	LastError       string
 }
 
+type ReportedResultOutcome string
+
+const (
+	ReportedResultAccepted          ReportedResultOutcome = "accepted"
+	ReportedResultDuplicateTerminal ReportedResultOutcome = "duplicate_terminal"
+	ReportedResultNotFound          ReportedResultOutcome = "not_found"
+	ReportedResultWrongNode         ReportedResultOutcome = "wrong_node"
+	ReportedResultWrongState        ReportedResultOutcome = "wrong_state"
+	ReportedResultUnsupportedStatus ReportedResultOutcome = "unsupported_status"
+)
+
 // JobStorage is the coordinator's narrow job persistence contract.
 type JobStorage interface {
 	Create(in JobCreateInput) (Job, error)
@@ -75,6 +86,7 @@ type JobStorage interface {
 	StartAttempt(id, nodeID string) (Job, error)
 	Complete(id, nodeID string, result JobResult) (Job, error)
 	Fail(id, nodeID string, result JobResult) (Job, error)
+	AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error)
 	ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error)
 	FailRunningJobs(lastError string) (int64, error)
 }
@@ -199,6 +211,30 @@ func (s *JobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
 }
 
+func (s *JobStore) AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error) {
+	if !isReportedTerminalStatus(status) {
+		return Job{}, ReportedResultUnsupportedStatus, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, ReportedResultNotFound, nil
+	}
+	if j.Status != JobStatusRunning {
+		return *j, classifyReportedResultMiss(*j, nodeID), nil
+	}
+	if j.NodeID != nodeID {
+		return *j, ReportedResultWrongNode, nil
+	}
+
+	now := time.Now().UTC()
+	applyJobResult(j, nodeID, status, result, now)
+	return *j, ReportedResultAccepted, nil
+}
+
 // ExpireQueuedJobs marks queued jobs older than maxAge as failed.
 func (s *JobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
 	if maxAge <= 0 {
@@ -257,6 +293,12 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	}
 
 	now := time.Now().UTC()
+	applyJobResult(j, nodeID, status, result, now)
+
+	return *j, nil
+}
+
+func applyJobResult(j *Job, nodeID string, status JobStatus, result JobResult, now time.Time) {
 	j.Status = status
 	if nodeID != "" {
 		j.NodeID = nodeID
@@ -269,8 +311,6 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	j.StderrTruncated = result.StderrTruncated
 	j.LastError = result.LastError
 	j.UpdatedAt = now
-
-	return *j, nil
 }
 
 func validateJobTransition(id string, from, to JobStatus) error {
@@ -303,5 +343,26 @@ func isCurrentJobStatus(status JobStatus) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func isReportedTerminalStatus(status JobStatus) bool {
+	return status == JobStatusCompleted || status == JobStatusFailed
+}
+
+func classifyReportedResultMiss(job Job, nodeID string) ReportedResultOutcome {
+	switch job.Status {
+	case JobStatusCompleted, JobStatusFailed:
+		if job.NodeID == nodeID {
+			return ReportedResultDuplicateTerminal
+		}
+		return ReportedResultWrongNode
+	case JobStatusRunning:
+		if job.NodeID != nodeID {
+			return ReportedResultWrongNode
+		}
+		return ReportedResultWrongState
+	default:
+		return ReportedResultWrongState
 	}
 }

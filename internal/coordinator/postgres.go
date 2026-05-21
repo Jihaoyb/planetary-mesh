@@ -459,6 +459,57 @@ func (s *PostgresJobStore) Fail(id, nodeID string, result JobResult) (Job, error
 	return s.finish(id, nodeID, JobStatusFailed, result)
 }
 
+func (s *PostgresJobStore) AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error) {
+	if !isReportedTerminalStatus(status) {
+		return Job{}, ReportedResultUnsupportedStatus, nil
+	}
+
+	now := time.Now().UTC()
+	row := s.db.QueryRow(`
+UPDATE jobs
+SET status = $2,
+    completed_at = $4,
+    exit_code = $5,
+    stdout = $6,
+    stderr = $7,
+    stdout_truncated = $8,
+    stderr_truncated = $9,
+    last_error = $10,
+    updated_at = $4
+WHERE id = $1
+  AND status = $11
+  AND node_id = $3
+RETURNING `+jobColumns,
+		id,
+		status,
+		nodeID,
+		now,
+		result.ExitCode,
+		result.Stdout,
+		result.Stderr,
+		result.StdoutTruncated,
+		result.StderrTruncated,
+		result.LastError,
+		JobStatusRunning,
+	)
+	job, err := scanJob(row)
+	if err == nil {
+		return job, ReportedResultAccepted, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Job{}, "", err
+	}
+
+	current, ok, err := s.Get(id)
+	if err != nil {
+		return Job{}, "", err
+	}
+	if !ok {
+		return Job{}, ReportedResultNotFound, nil
+	}
+	return current, classifyReportedResultMiss(current, nodeID), nil
+}
+
 func (s *PostgresJobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
 	if maxAge <= 0 {
 		return 0, nil

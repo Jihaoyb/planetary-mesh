@@ -41,6 +41,17 @@ type ExecuteResponse struct {
 	LastError       string `json:"last_error"`
 }
 
+type JobResultReportRequest struct {
+	NodeID          string `json:"node_id"`
+	Status          string `json:"status"`
+	ExitCode        *int   `json:"exit_code,omitempty"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+	LastError       string `json:"last_error"`
+}
+
 type NodeLoad struct {
 	ActiveExecutions int `json:"active_executions"`
 }

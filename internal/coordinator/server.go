@@ -206,19 +206,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	certificate := security.CertificateMetadata{}
-	if s.security.Enabled() {
-		peer := peerCertificate(r)
-		if peer == nil {
-			http.Error(w, "client certificate is required", http.StatusForbidden)
-			return
-		}
-		if !security.AuthorizeNode(req.ID, peer, s.security.AllowedNodeIdentities, s.security.AllowedNodeFingerprints) {
-			s.logger.Warn("node registration rejected", "node_id", req.ID, "fingerprint", security.Fingerprint(peer))
-			http.Error(w, "node is not allowlisted", http.StatusForbidden)
-			return
-		}
-		certificate = security.FromCertificate(peer)
+	certificate, ok := s.authorizeNodeRequest(w, r, req.ID)
+	if !ok {
+		return
 	}
 
 	node, err := s.registry.Register(NodeRegistration{
@@ -240,6 +230,24 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(node); err != nil {
 		s.logger.Warn("encode register response failed", "err", err)
 	}
+}
+
+func (s *Server) authorizeNodeRequest(w http.ResponseWriter, r *http.Request, nodeID string) (security.CertificateMetadata, bool) {
+	if !s.security.Enabled() {
+		return security.CertificateMetadata{}, true
+	}
+
+	peer := peerCertificate(r)
+	if peer == nil {
+		http.Error(w, "client certificate is required", http.StatusForbidden)
+		return security.CertificateMetadata{}, false
+	}
+	if !security.AuthorizeNode(nodeID, peer, s.security.AllowedNodeIdentities, s.security.AllowedNodeFingerprints) {
+		s.logger.Warn("node request rejected", "node_id", nodeID, "fingerprint", security.Fingerprint(peer))
+		http.Error(w, "node is not allowlisted", http.StatusForbidden)
+		return security.CertificateMetadata{}, false
+	}
+	return security.FromCertificate(peer), true
 }
 
 func peerCertificate(r *http.Request) *x509.Certificate {
@@ -296,8 +304,30 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleJobByID handles GET /jobs/{id}.
+// handleJobByID handles GET /jobs/{id} and POST /jobs/{id}/result.
 func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/jobs/")
+	if path == "" {
+		http.Error(w, "invalid job id", http.StatusBadRequest)
+		return
+	}
+	if strings.HasSuffix(path, "/result") {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !requireProtocolVersion(w, r) {
+			return
+		}
+		id := strings.TrimSuffix(path, "/result")
+		if id == "" || strings.Contains(id, "/") {
+			http.Error(w, "invalid job id", http.StatusBadRequest)
+			return
+		}
+		s.handleJobResult(w, r, id)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -305,16 +335,14 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 	if !requireProtocolVersion(w, r) {
 		return
 	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/jobs/")
-	if id == "" || strings.Contains(id, "/") {
+	if strings.Contains(path, "/") {
 		http.Error(w, "invalid job id", http.StatusBadRequest)
 		return
 	}
 
-	job, ok, err := s.jobs.Get(id)
+	job, ok, err := s.jobs.Get(path)
 	if err != nil {
-		s.logger.Error("get job failed", "job_id", id, "err", err)
+		s.logger.Error("get job failed", "job_id", path, "err", err)
 		http.Error(w, "get job failed", http.StatusInternalServerError)
 		return
 	}
@@ -325,8 +353,70 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(job); err != nil {
-		s.logger.Warn("encode job response failed", "job_id", id, "err", err)
+		s.logger.Warn("encode job response failed", "job_id", path, "err", err)
 	}
+}
+
+func (s *Server) handleJobResult(w http.ResponseWriter, r *http.Request, id string) {
+	var req protocol.JobResultReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.NodeID == "" {
+		http.Error(w, "node_id is required", http.StatusBadRequest)
+		return
+	}
+	status := JobStatus(req.Status)
+	if !isReportedTerminalStatus(status) {
+		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
+		return
+	}
+	if _, ok := s.authorizeNodeRequest(w, r, req.NodeID); !ok {
+		return
+	}
+
+	result := JobResult{
+		ExitCode:        req.ExitCode,
+		Stdout:          req.Stdout,
+		Stderr:          req.Stderr,
+		StdoutTruncated: req.StdoutTruncated,
+		StderrTruncated: req.StderrTruncated,
+		LastError:       req.LastError,
+	}
+	job, outcome, err := s.jobs.AcceptReportedResult(id, req.NodeID, status, result)
+	if err != nil {
+		s.logger.Error("accept reported job result failed", "job_id", id, "node_id", req.NodeID, "err", err)
+		http.Error(w, "accept reported job result failed", http.StatusInternalServerError)
+		return
+	}
+
+	switch outcome {
+	case ReportedResultAccepted:
+		s.recordTerminalJobMetric(status)
+		s.logger.Info("reported job result accepted", "job_id", id, "node_id", req.NodeID, "status", status)
+		writeJobJSON(w, job)
+	case ReportedResultDuplicateTerminal:
+		s.logger.Debug("reported job result ignored for terminal job", "job_id", id, "node_id", req.NodeID, "status", job.Status)
+		writeJobJSON(w, job)
+	case ReportedResultNotFound:
+		http.Error(w, "job not found", http.StatusNotFound)
+	case ReportedResultWrongNode:
+		http.Error(w, "reported result node does not match running job", http.StatusConflict)
+	case ReportedResultWrongState:
+		http.Error(w, "job is not accepting reported results", http.StatusConflict)
+	case ReportedResultUnsupportedStatus:
+		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
+	default:
+		s.logger.Error("unknown reported result outcome", "job_id", id, "node_id", req.NodeID, "outcome", outcome)
+		http.Error(w, "accept reported job result failed", http.StatusInternalServerError)
+	}
+}
+
+func writeJobJSON(w http.ResponseWriter, job Job) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(job)
 }
 
 // handleMetrics serves /metrics in Prometheus text format.
@@ -711,6 +801,15 @@ func (s *Server) failJob(jobID, nodeID string, result JobResult) {
 		s.logger.Error("failed to mark job FAILED", "job_id", jobID, "err", err)
 	}
 	s.metrics.JobsFailed.Add(1)
+}
+
+func (s *Server) recordTerminalJobMetric(status JobStatus) {
+	switch status {
+	case JobStatusCompleted:
+		s.metrics.JobsCompleted.Add(1)
+	case JobStatusFailed:
+		s.metrics.JobsFailed.Add(1)
+	}
 }
 
 // buildAgentBaseURL converts a node's Address into a usable base URL.

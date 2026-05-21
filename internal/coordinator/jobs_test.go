@@ -335,6 +335,144 @@ func TestJobStoreRejectsUnsupportedStatusTransitions(t *testing.T) {
 	}
 }
 
+func TestJobStoreAcceptReportedResult(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(j.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	exitCode := 0
+	completed, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusCompleted, JobResult{
+		ExitCode: &exitCode,
+		Stdout:   "reported\n",
+	})
+	if err != nil {
+		t.Fatalf("accept reported result: %v", err)
+	}
+	if outcome != ReportedResultAccepted {
+		t.Fatalf("expected accepted outcome, got %s", outcome)
+	}
+	if completed.Status != JobStatusCompleted || completed.Stdout != "reported\n" || completed.ExitCode == nil || *completed.ExitCode != 0 {
+		t.Fatalf("unexpected completed reported result: %+v", completed)
+	}
+}
+
+func TestJobStoreAcceptReportedFailure(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(j.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	exitCode := 1
+	failed, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusFailed, JobResult{
+		ExitCode:  &exitCode,
+		Stderr:    "boom\n",
+		LastError: "command exited with code 1",
+	})
+	if err != nil {
+		t.Fatalf("accept reported failure: %v", err)
+	}
+	if outcome != ReportedResultAccepted {
+		t.Fatalf("expected accepted outcome, got %s", outcome)
+	}
+	if failed.Status != JobStatusFailed || failed.Stderr != "boom\n" || failed.LastError == "" {
+		t.Fatalf("unexpected failed reported result: %+v", failed)
+	}
+}
+
+func TestJobStoreReportedResultDoesNotMutateTerminalJob(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(j.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+	completed, err := store.Complete(j.ID, "node-1", JobResult{Stdout: "original\n"})
+	if err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	got, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusFailed, JobResult{LastError: "overwrite"})
+	if err != nil {
+		t.Fatalf("accept duplicate reported result: %v", err)
+	}
+	if outcome != ReportedResultDuplicateTerminal {
+		t.Fatalf("expected duplicate terminal outcome, got %s", outcome)
+	}
+	if got.Status != JobStatusCompleted || got.Stdout != completed.Stdout || got.LastError != "" {
+		t.Fatalf("terminal job was mutated: %+v", got)
+	}
+}
+
+func TestJobStoreRejectsWrongNodeReportedResult(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(j.ID, "node-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	got, outcome, err := store.AcceptReportedResult(j.ID, "node-2", JobStatusCompleted, JobResult{Stdout: "wrong\n"})
+	if err != nil {
+		t.Fatalf("accept wrong-node reported result: %v", err)
+	}
+	if outcome != ReportedResultWrongNode {
+		t.Fatalf("expected wrong-node outcome, got %s", outcome)
+	}
+	if got.Status != JobStatusRunning || got.Stdout != "" || got.NodeID != "node-1" {
+		t.Fatalf("wrong-node report mutated job: %+v", got)
+	}
+}
+
+func TestJobStoreReportedResultOutcomes(t *testing.T) {
+	store := NewJobStore()
+	if _, outcome, err := store.AcceptReportedResult("missing", "node-1", JobStatusCompleted, JobResult{}); err != nil {
+		t.Fatalf("accept missing reported result: %v", err)
+	} else if outcome != ReportedResultNotFound {
+		t.Fatalf("expected not-found outcome, got %s", outcome)
+	}
+
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusRunning, JobResult{}); err != nil {
+		t.Fatalf("accept unsupported reported status: %v", err)
+	} else if outcome != ReportedResultUnsupportedStatus {
+		t.Fatalf("expected unsupported-status outcome, got %s", outcome)
+	}
+	if got, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusCompleted, JobResult{Stdout: "queued\n"}); err != nil {
+		t.Fatalf("accept queued reported result: %v", err)
+	} else if outcome != ReportedResultWrongState {
+		t.Fatalf("expected wrong-state outcome, got %s", outcome)
+	} else if got.Status != JobStatusQueued || got.Stdout != "" {
+		t.Fatalf("queued report mutated job: %+v", got)
+	}
+
+	store.mu.Lock()
+	store.jobs[j.ID].Status = JobStatusCancelled
+	store.mu.Unlock()
+	if got, outcome, err := store.AcceptReportedResult(j.ID, "node-1", JobStatusCompleted, JobResult{Stdout: "cancelled\n"}); err != nil {
+		t.Fatalf("accept unsupported persisted state report: %v", err)
+	} else if outcome != ReportedResultWrongState {
+		t.Fatalf("expected wrong-state outcome for cancelled job, got %s", outcome)
+	} else if got.Status != JobStatusCancelled || got.Stdout != "" {
+		t.Fatalf("unsupported-state report mutated job: %+v", got)
+	}
+}
+
 func TestJobStoreExecutionLifecycle(t *testing.T) {
 	store := NewJobStore()
 	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"data"}})
