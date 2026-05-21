@@ -11,8 +11,8 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 13 explicit
-  job lifecycle state transitions.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 14 agent
+  reconciliation strategy.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -27,6 +27,8 @@ shared compute scenarios.
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
   optional and includes lightweight schema readiness metadata version `2`.
+  Runtime agent reconciliation is not implemented yet; ADR 0013 documents the
+  accepted future result-reporting strategy.
 
 ## What Works Today
 
@@ -68,7 +70,7 @@ shared compute scenarios.
 - Production Docker image or packaged release workflow.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
-- Agent reconciliation after coordinator restart.
+- Runtime agent reconciliation or result reporting after coordinator restart.
 - Automated certificate issuance, enrollment, or rotation.
 - Remote private mesh, trusted shared pool, or overflow marketplace features.
 
@@ -386,3 +388,4 @@ Architecture Decision Records:
 - [ADR 0010: Postgres schema readiness metadata](docs/adr/0010-postgres-schema-readiness.md)
 - [ADR 0011: Node capability and load visibility](docs/adr/0011-node-capability-load-visibility.md)
 - [ADR 0012: Explicit coordinator-owned job lifecycle transitions](docs/adr/0012-job-lifecycle-state-transitions.md)
+- [ADR 0013: Agent reconciliation strategy after coordinator restart](docs/adr/0013-agent-reconciliation-strategy.md)

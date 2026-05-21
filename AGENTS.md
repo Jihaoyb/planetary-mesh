@@ -21,9 +21,9 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 12 node capability/load visibility.
+Current `main` is after Milestone 14 agent reconciliation strategy.
 
-Milestones 1 through 12 are complete:
+Milestones 1 through 14 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -38,11 +38,16 @@ Milestones 1 through 12 are complete:
 - queued-job scheduler/re-dispatch loop
 - cross-node reassignment after retryable dispatch failure
 - simple node capability/load reporting for operators
+- explicit coordinator-owned job lifecycle transitions
+- accepted strategy for future agent reconciliation/result reporting after
+  coordinator restart
 - Postgres schema readiness metadata version `2`
 
-The next phase should focus on documentation accuracy and private mesh
-hardening. Do not jump to marketplace, payment, dashboard, public-node, or
-remote-node product work without explicit planning and an accepted direction.
+Runtime agent reconciliation is not implemented yet. The next phase should
+focus on narrow private mesh hardening such as the accepted reconciliation
+runtime slice, operator clarity, API readiness, and security hardening. Do not
+jump to marketplace, payment, dashboard, public-node, or remote-node product
+work without explicit planning and an accepted direction.
 
 ## Canonical Context
 
@@ -263,7 +268,10 @@ Preserve these rules:
   `coordinator restarted before result was recorded`.
 - Document the known v0 gap: if an agent completed before coordinator crash and
   the result was not persisted, that result is lost.
-- Do not implement agent reconciliation unless it is the explicit task.
+- ADR 0013 records the accepted future reconciliation strategy: explicit
+  agent-to-coordinator result reporting plus a Postgres reconciliation grace
+  window before failing persisted `RUNNING` jobs.
+- Do not implement runtime agent reconciliation unless it is the explicit task.
 - Postgres integration tests must be opt-in or separately gated.
 - Schema readiness metadata version `2` is current. It is not a full migration
   framework.
@@ -308,7 +316,8 @@ Allowed near-term direction is private mesh hardening:
 - cross-node reassignment after dispatch failure
 - scheduler policy for reported node capabilities/load
 - clearer job state transitions
-- agent reconciliation strategy after coordinator restart
+- runtime implementation of the accepted agent reconciliation/result-reporting
+  strategy
 - operator runbooks and API inventory
 - install/release packaging
 - certificate/onboarding helper planning

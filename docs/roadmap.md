@@ -10,7 +10,7 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 13 explicit job lifecycle state transitions
+- Baseline: `main` after Milestone 14 agent reconciliation strategy
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -39,6 +39,8 @@ Implemented capability:
 - optional Postgres persistence for nodes/jobs and node metadata
 - Postgres schema readiness metadata version `2`
 - startup recovery for persisted `RUNNING` jobs
+- accepted ADR for future agent reconciliation/result reporting after
+  coordinator restart
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
 - env-style config files
@@ -51,9 +53,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-13
+## Completed Baseline / Milestones 1-14
 
-The first thirteen milestones established a working private LAN/trusted-network
+The first fourteen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -109,7 +111,8 @@ Completed outcomes:
 Known limitation:
 
 - If an agent completed a job before a crash but the coordinator did not record
-  the result, that result is lost. There is no agent reconciliation today.
+  the result, that result is lost. ADR 0013 records the accepted future
+  reconciliation strategy, but runtime reconciliation is not implemented today.
 
 Status: complete
 
@@ -304,6 +307,32 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 14: Agent Reconciliation Strategy
+
+Goal: decide the agent reconciliation strategy after coordinator restart for
+private mesh reliability and API/operator readiness.
+
+Completed outcomes:
+
+- documented current restart/recovery behavior and the lost-result gap
+- chose a strategy/ADR-only milestone with no runtime behavior changes
+- accepted explicit agent-to-coordinator result reporting as the future
+  reconciliation direction instead of heartbeat-carried reports
+- kept HTTP/JSON v0 and `X-Planetary-Protocol-Version: 1` for the future
+  additive result-reporting path
+- preserved public job JSON fields, job status strings, scheduler behavior,
+  command execution rules, mTLS behavior, node allowlisting, and `pmctl`
+  behavior
+- preserved terminal `COMPLETED` and `FAILED` immutability
+- preserved nodes/jobs-only storage and Postgres schema readiness metadata
+  version `2`
+- defined future compatibility expectations for older agents and older
+  coordinators
+- defined future edge-case policy for duplicate, late, wrong-node, unknown-job,
+  unsupported-state, and concurrent result reports
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -312,7 +341,8 @@ Potential work:
 
 - scheduler policy that can use reported node capabilities/load when explicitly
   planned
-- agent reconciliation strategy after coordinator restart
+- runtime implementation of the accepted agent reconciliation/result-reporting
+  strategy
 - better operator runbooks
 - API inventory and API contract decision
 - improved local install workflow

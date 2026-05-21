@@ -94,6 +94,7 @@ Related ADRs:
 - [ADR 0006](adr/0006-postgres-coordinator-persistence.md)
 - [ADR 0010](adr/0010-postgres-schema-readiness.md)
 - [ADR 0011](adr/0011-node-capability-load-visibility.md)
+- [ADR 0013](adr/0013-agent-reconciliation-strategy.md)
 
 Current constraints:
 
@@ -104,6 +105,8 @@ Current constraints:
 - embedded schema initialization remains current
 - schema readiness metadata version `2` is current
 - node rows store reported capabilities and active execution count
+- Milestone 14 made no schema changes for the accepted future reconciliation
+  strategy
 - schema readiness metadata is not a full migration framework
 
 Future decisions:
@@ -249,6 +252,7 @@ Current behavior:
 - terminal `COMPLETED` and `FAILED` jobs are not overwritten by lifecycle
   methods
 - `CANCELLED` remains reserved/unsupported; there is no cancellation API today
+- runtime agent reconciliation after coordinator restart is not implemented
 
 Current constraints:
 
@@ -260,8 +264,39 @@ Current constraints:
 Future decisions:
 
 - cancellation semantics
-- agent reconciliation or idempotent result reporting after coordinator restart
+- runtime implementation of ADR 0013 result reporting and Postgres
+  reconciliation grace-window behavior
 - richer progress states, if a future workload model needs them
+
+## Agent Reconciliation Strategy
+
+Choice: record the coordinator restart reconciliation strategy before changing
+runtime behavior.
+
+Related ADR:
+
+- [ADR 0013](adr/0013-agent-reconciliation-strategy.md)
+
+Current behavior:
+
+- the coordinator records terminal results only after the synchronous agent
+  `/execute` response returns
+- agents do not persist result history or replay completed results
+- Postgres startup marks persisted `RUNNING` jobs `FAILED` immediately
+- in-memory storage has no restart recovery
+
+Accepted future strategy:
+
+- add explicit agent-to-coordinator result reporting rather than carrying
+  reports in heartbeat payloads
+- keep HTTP/JSON and `X-Planetary-Protocol-Version: 1`
+- keep the coordinator responsible for validating and accepting reported
+  results
+- preserve terminal job immutability
+- keep nodes/jobs-only storage and schema readiness version `2` for the first
+  runtime slice unless implementation proves a schema change is needed
+- use a bounded Postgres reconciliation grace window before failing persisted
+  `RUNNING` jobs
 
 ## Node Capability and Load Reporting
 
