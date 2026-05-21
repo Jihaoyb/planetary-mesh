@@ -180,6 +180,161 @@ func TestJobStoreStartAttemptRejectsNonQueuedJob(t *testing.T) {
 	}
 }
 
+func TestJobStoreRunningAttemptPreservesStartedAtAndUpdatesNode(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	first, err := store.StartAttempt(j.ID, "node-1")
+	if err != nil {
+		t.Fatalf("start first attempt: %v", err)
+	}
+	if first.StartedAt == nil {
+		t.Fatalf("expected started_at on first attempt")
+	}
+	startedAt := *first.StartedAt
+
+	second, err := store.StartAttempt(j.ID, "node-2")
+	if err != nil {
+		t.Fatalf("start second attempt: %v", err)
+	}
+	if second.Status != JobStatusRunning || second.NodeID != "node-2" || second.Attempts != 2 {
+		t.Fatalf("unexpected second attempt state: %+v", second)
+	}
+	if second.StartedAt == nil || !second.StartedAt.Equal(startedAt) {
+		t.Fatalf("expected started_at to remain %s, got %+v", startedAt, second.StartedAt)
+	}
+}
+
+func TestJobStoreCanFailQueuedJob(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	failed, err := store.Fail(j.ID, "", JobResult{LastError: "queued failure"})
+	if err != nil {
+		t.Fatalf("fail queued job: %v", err)
+	}
+	if failed.Status != JobStatusFailed || failed.Attempts != 0 || failed.StartedAt != nil || failed.CompletedAt == nil {
+		t.Fatalf("unexpected failed queued job: %+v", failed)
+	}
+	if failed.NodeID != "" {
+		t.Fatalf("expected queued failure to preserve empty node id, got %q", failed.NodeID)
+	}
+	if failed.LastError != "queued failure" {
+		t.Fatalf("expected queued failure error, got %q", failed.LastError)
+	}
+}
+
+func TestJobStoreRejectsCompleteFromQueued(t *testing.T) {
+	store := NewJobStore()
+	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	if _, err := store.Complete(j.ID, "node-1", JobResult{Stdout: "should not persist"}); err == nil {
+		t.Fatalf("expected completing queued job to fail")
+	} else if !strings.Contains(err.Error(), "cannot transition from QUEUED to COMPLETED") {
+		t.Fatalf("expected transition error, got %v", err)
+	}
+
+	got, _, err := store.Get(j.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != JobStatusQueued || got.Stdout != "" || got.CompletedAt != nil {
+		t.Fatalf("queued job was mutated after invalid completion: %+v", got)
+	}
+}
+
+func TestJobStoreRejectsTerminalMutation(t *testing.T) {
+	store := NewJobStore()
+	completedJob, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create completed job: %v", err)
+	}
+	if _, err := store.StartAttempt(completedJob.ID, "node-1"); err != nil {
+		t.Fatalf("start completed job: %v", err)
+	}
+	exitCode := 0
+	completed, err := store.Complete(completedJob.ID, "node-1", JobResult{ExitCode: &exitCode, Stdout: "ok\n"})
+	if err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	if _, err := store.Fail(completedJob.ID, "node-2", JobResult{LastError: "overwrite"}); err == nil {
+		t.Fatalf("expected failing completed job to be rejected")
+	}
+	if _, err := store.StartAttempt(completedJob.ID, "node-2"); err == nil {
+		t.Fatalf("expected starting completed job to be rejected")
+	}
+	gotCompleted, _, err := store.Get(completedJob.ID)
+	if err != nil {
+		t.Fatalf("get completed job: %v", err)
+	}
+	if gotCompleted.Status != JobStatusCompleted || gotCompleted.NodeID != completed.NodeID || gotCompleted.Stdout != "ok\n" || gotCompleted.LastError != "" {
+		t.Fatalf("completed job was mutated: %+v", gotCompleted)
+	}
+
+	failedJob, err := store.Create(JobCreateInput{Type: "command", Command: "false"})
+	if err != nil {
+		t.Fatalf("create failed job: %v", err)
+	}
+	if _, err := store.StartAttempt(failedJob.ID, "node-1"); err != nil {
+		t.Fatalf("start failed job: %v", err)
+	}
+	failed, err := store.Fail(failedJob.ID, "node-1", JobResult{LastError: "exit status 1"})
+	if err != nil {
+		t.Fatalf("fail job: %v", err)
+	}
+	if _, err := store.Complete(failedJob.ID, "node-2", JobResult{Stdout: "overwrite"}); err == nil {
+		t.Fatalf("expected completing failed job to be rejected")
+	}
+	gotFailed, _, err := store.Get(failedJob.ID)
+	if err != nil {
+		t.Fatalf("get failed job: %v", err)
+	}
+	if gotFailed.Status != JobStatusFailed || gotFailed.NodeID != failed.NodeID || gotFailed.LastError != "exit status 1" || gotFailed.Stdout != "" {
+		t.Fatalf("failed job was mutated: %+v", gotFailed)
+	}
+}
+
+func TestJobStoreRejectsUnsupportedStatusTransitions(t *testing.T) {
+	for _, status := range []JobStatus{JobStatusCancelled, JobStatus("PAUSED")} {
+		t.Run(string(status), func(t *testing.T) {
+			store := NewJobStore()
+			j, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+			if err != nil {
+				t.Fatalf("create job: %v", err)
+			}
+
+			store.mu.Lock()
+			store.jobs[j.ID].Status = status
+			store.mu.Unlock()
+
+			if _, err := store.StartAttempt(j.ID, "node-1"); err == nil {
+				t.Fatalf("expected starting %s job to be rejected", status)
+			}
+			if _, err := store.Fail(j.ID, "node-1", JobResult{LastError: "overwrite"}); err == nil {
+				t.Fatalf("expected failing %s job to be rejected", status)
+			}
+
+			got, _, err := store.Get(j.ID)
+			if err != nil {
+				t.Fatalf("get job: %v", err)
+			}
+			if got.Status != status || got.LastError != "" || got.NodeID != "" {
+				t.Fatalf("unsupported-status job was mutated: %+v", got)
+			}
+		})
+	}
+}
+
 func TestJobStoreExecutionLifecycle(t *testing.T) {
 	store := NewJobStore()
 	j, err := store.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"data"}})

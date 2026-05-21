@@ -138,6 +138,9 @@ func TestDispatchJobNoHealthyNodes(t *testing.T) {
 	if unchanged.Status != JobStatusQueued {
 		t.Fatalf("expected job status QUEUED, got %s", unchanged.Status)
 	}
+	if unchanged.Attempts != 0 || unchanged.NodeID != "" || unchanged.StartedAt != nil || unchanged.CompletedAt != nil {
+		t.Fatalf("expected no healthy nodes to leave job unattempted, got %+v", unchanged)
+	}
 }
 
 func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {

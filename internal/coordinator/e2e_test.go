@@ -235,6 +235,13 @@ func TestDispatchSkipsDuplicateConcurrentJob(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for dispatch to finish")
 	}
+	final, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get final job: %v", err)
+	}
+	if final.Status != JobStatusCompleted || final.Attempts != 1 {
+		t.Fatalf("expected one completed dispatch attempt, got %+v", final)
+	}
 }
 
 func TestDispatchSkipsNonQueuedJob(t *testing.T) {
