@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -254,6 +255,32 @@ func TestExecuteHandlerDoesNotReportInternalExecutionError(t *testing.T) {
 	}
 	if got := reporter.CachedCount(); got != 0 {
 		t.Fatalf("expected retryable internal error not to be reported, got %d cached reports", got)
+	}
+}
+
+func TestExecuteHandlerDoesNotReportCanceledRequest(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"sleep": "sleep"},
+		Timeout:   time.Second,
+	}
+	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: "sleep",
+		Args:    []string{"1"},
+	})
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	NewExecuteHandlerWithLoadTrackerAndReporter(cfg, nil, reporter)(w, req)
+	if w.Result().StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Result().StatusCode)
+	}
+	if got := reporter.CachedCount(); got != 0 {
+		t.Fatalf("expected canceled request not to be reported, got %d cached reports", got)
 	}
 }
 

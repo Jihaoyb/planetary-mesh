@@ -131,6 +131,12 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 		e.recordResult(req.JobID, protocol.JobResultStatusFailed, resp)
 		e.writeJSON(w, http.StatusGatewayTimeout, resp)
 		return
+	case ctx.Err() != nil:
+		resp.Status = "error"
+		resp.LastError = ctx.Err().Error()
+		slog.Warn("execute context canceled", "job_id", req.JobID, "command", req.Command, "err", ctx.Err())
+		e.writeJSON(w, http.StatusInternalServerError, resp)
+		return
 	default:
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
