@@ -95,6 +95,8 @@ Coordinator responsibilities:
 - mark terminal job outcomes as `COMPLETED` or `FAILED`
 - expose `/status` and `/metrics`
 - use in-memory storage by default or Postgres when configured
+- recover persisted `RUNNING` jobs by marking them `FAILED` on Postgres
+  startup; ADR 0013 records the future reconciliation strategy
 
 The coordinator owns validation, scheduling, retry policy, and state
 transitions. These responsibilities should not move into agents or `pmctl`.
@@ -116,6 +118,7 @@ Agent responsibilities:
 
 The current registration payload includes node id, address, optional static
 capabilities, and an approximate active command execution count. Agents do not
+persist execution result history, reconcile after coordinator restart, or
 report capacity, queue depth, GPU state, or task-level progress today.
 
 ### pmctl
@@ -165,7 +168,9 @@ Postgres behavior today:
   `coordinator restarted before result was recorded`
 - enforce the same job lifecycle transition rules as the in-memory store
 
-This is not a full migration framework.
+ADR 0013 documents the accepted future reconciliation strategy. Milestone 14
+does not change storage behavior or schema versioning. This is not a full
+migration framework.
 
 ### Command Execution Model
 
@@ -272,6 +277,23 @@ Duplicate dispatch protection is process-local and skips concurrent dispatches
 for the same job in one running coordinator. Terminal jobs are not overwritten
 by later lifecycle methods.
 
+### Restart Recovery and Reconciliation
+
+Current runtime behavior:
+
+- in-memory coordinator state is lost on restart
+- Postgres startup marks persisted `RUNNING` jobs `FAILED` immediately with
+  `coordinator restarted before result was recorded`
+- agents do not persist or replay completed execution results
+- a result can be lost if an agent completed before a coordinator crash but the
+  coordinator did not persist the synchronous `/execute` response
+
+ADR 0013 defines the future strategy: add explicit agent-to-coordinator result
+reporting, keep protocol version `1`, preserve nodes/jobs-only storage for the
+first runtime slice, and use a bounded Postgres reconciliation grace window
+before failing persisted `RUNNING` jobs. This future strategy is not implemented
+today, and terminal `COMPLETED` or `FAILED` jobs remain immutable.
+
 ### Node Registration and Health
 
 Registration flow:
@@ -341,7 +363,7 @@ Current private-mesh limitations:
   uses a fixed 24-hour queued-job expiration window
 - reported node capabilities/load are visibility fields only; there is no
   load-aware or capability-aware scheduling
-- no agent reconciliation after coordinator restart
+- no runtime agent reconciliation or result reporting after coordinator restart
 - no strong sandbox/container/VM isolation
 - no per-job timeout override
 - no file upload/result download workflow
@@ -373,7 +395,8 @@ Private mesh hardening:
 - API inventory and contract decision
 - better install/release workflow
 - certificate/onboarding helper
-- agent reconciliation strategy after coordinator restart
+- runtime implementation of the accepted agent reconciliation/result-reporting
+  strategy
 
 Productized private mesh:
 
