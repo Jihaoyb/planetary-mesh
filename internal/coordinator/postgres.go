@@ -446,7 +446,7 @@ WHERE id = $1
 RETURNING `+jobColumns, id, JobStatusRunning, nodeID, now, JobStatusQueued, JobStatusRunning)
 	job, err := scanJob(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Job{}, fmt.Errorf("job %q not found or not dispatchable", id)
+		return Job{}, s.transitionError(id, JobStatusRunning)
 	}
 	return job, err
 }
@@ -482,6 +482,25 @@ WHERE status = $4
 
 func (s *PostgresJobStore) finish(id, nodeID string, status JobStatus, result JobResult) (Job, error) {
 	now := time.Now().UTC()
+	sourceFilter, sourceArgs, err := jobTransitionSourceFilter(status)
+	if err != nil {
+		return Job{}, err
+	}
+
+	args := []any{
+		id,
+		status,
+		nodeID,
+		now,
+		result.ExitCode,
+		result.Stdout,
+		result.Stderr,
+		result.StdoutTruncated,
+		result.StderrTruncated,
+		result.LastError,
+	}
+	args = append(args, sourceArgs...)
+
 	row := s.db.QueryRow(`
 UPDATE jobs
 SET status = $2,
@@ -495,23 +514,38 @@ SET status = $2,
     last_error = $10,
     updated_at = $4
 WHERE id = $1
-RETURNING `+jobColumns,
-		id,
-		status,
-		nodeID,
-		now,
-		result.ExitCode,
-		result.Stdout,
-		result.Stderr,
-		result.StdoutTruncated,
-		result.StderrTruncated,
-		result.LastError,
-	)
+  `+sourceFilter+`
+RETURNING `+jobColumns, args...)
 	job, err := scanJob(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Job{}, fmt.Errorf("job %q not found", id)
+		return Job{}, s.transitionError(id, status)
 	}
 	return job, err
+}
+
+func jobTransitionSourceFilter(to JobStatus) (string, []any, error) {
+	switch to {
+	case JobStatusCompleted:
+		return `AND status = $11`, []any{JobStatusRunning}, nil
+	case JobStatusFailed:
+		return `AND status IN ($11, $12)`, []any{JobStatusQueued, JobStatusRunning}, nil
+	default:
+		return "", nil, fmt.Errorf("cannot finish job with unsupported target status %q", to)
+	}
+}
+
+func (s *PostgresJobStore) transitionError(id string, to JobStatus) error {
+	job, ok, err := s.Get(id)
+	if err != nil {
+		return fmt.Errorf("get job %q during transition validation: %w", id, err)
+	}
+	if !ok {
+		return fmt.Errorf("job %q not found", id)
+	}
+	if err := validateJobTransition(id, job.Status, to); err != nil {
+		return err
+	}
+	return fmt.Errorf("job %q transition to %s did not update", id, to)
 }
 
 func (s *PostgresJobStore) FailRunningJobs(lastError string) (int64, error) {
