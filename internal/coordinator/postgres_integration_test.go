@@ -752,6 +752,9 @@ func TestPostgresRestartRecoveryAfterReopenPreservesTerminalJobs(t *testing.T) {
 		t.Fatalf("create completed job: %v", err)
 	}
 	exitCode := 0
+	if _, err := jobs.StartAttempt(completed.ID, "node-pg"); err != nil {
+		t.Fatalf("start completed job: %v", err)
+	}
 	if _, err := jobs.Complete(completed.ID, "node-pg", JobResult{ExitCode: &exitCode, Stdout: "ok\n"}); err != nil {
 		t.Fatalf("complete job: %v", err)
 	}
