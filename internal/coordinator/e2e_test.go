@@ -244,6 +244,69 @@ func TestDispatchSkipsDuplicateConcurrentJob(t *testing.T) {
 	}
 }
 
+func TestReportedResultCanWinConcurrentDispatchRaceWithoutDoubleCounting(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			close(requestStarted)
+			<-releaseRequest
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok", Stdout: "sync\n"}), nil
+		}),
+	}
+
+	reg := NewNodeRegistry()
+	store := NewJobStore()
+	cfg := DispatchConfig{Timeout: time.Second, MaxAttempts: 1, BaseBackoff: time.Millisecond}
+	srv := NewServerWithConfig(reg, store, client, cfg, nil)
+	mux := srv.Mux()
+	registerNode(t, mux, "agent-race", "agent.local:8081")
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		srv.dispatchJob(job.ID)
+		close(done)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for dispatch request")
+	}
+
+	w := postJobResult(t, srv, job.ID, protocol.JobResultReportRequest{
+		NodeID: "agent-race",
+		Status: string(JobStatusCompleted),
+		Stdout: "reported\n",
+	})
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected result report 200, got %d", w.Result().StatusCode)
+	}
+	close(releaseRequest)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for dispatch to finish")
+	}
+
+	final, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get final job: %v", err)
+	}
+	if final.Status != JobStatusCompleted || final.Stdout != "reported\n" {
+		t.Fatalf("expected reported result to win race, got %+v", final)
+	}
+	if got := srv.Metrics().JobsCompleted.Load(); got != 1 {
+		t.Fatalf("expected one completed metric, got %d", got)
+	}
+	if got := srv.Metrics().ResultReportsAccepted.Load(); got != 1 {
+		t.Fatalf("expected one accepted report metric, got %d", got)
+	}
+}
+
 func TestDispatchSkipsNonQueuedJob(t *testing.T) {
 	client, calls := startFakeAgentClient(t, http.StatusOK, 0, protocol.ExecuteResponse{Status: "ok"})
 
@@ -283,6 +346,9 @@ func TestReconciliationGraceAcceptsReportedResultBeforeExpiry(t *testing.T) {
 	if err := srv.StartReconciliationGrace(stopCh, []string{job.ID}, 50*time.Millisecond, RestartRecoveryError); err != nil {
 		t.Fatalf("start reconciliation grace: %v", err)
 	}
+	if got := srv.Metrics().ReconciliationPendingJobs.Load(); got != 1 {
+		t.Fatalf("expected one pending reconciliation job, got %d", got)
+	}
 	w := postJobResult(t, srv, job.ID, protocol.JobResultReportRequest{
 		NodeID: "agent-reconcile",
 		Status: string(JobStatusCompleted),
@@ -302,6 +368,9 @@ func TestReconciliationGraceAcceptsReportedResultBeforeExpiry(t *testing.T) {
 	}
 	if got := srv.Metrics().StartupRecoveredJobs.Load(); got != 0 {
 		t.Fatalf("expected no startup recovery failures, got %d", got)
+	}
+	if got := srv.Metrics().ReconciliationPendingJobs.Load(); got != 0 {
+		t.Fatalf("expected reconciliation pending gauge to clear, got %d", got)
 	}
 }
 
@@ -328,6 +397,9 @@ func TestReconciliationGraceExpiresCapturedRunningJobs(t *testing.T) {
 	if err := srv.StartReconciliationGrace(stopCh, []string{captured.ID}, 10*time.Millisecond, RestartRecoveryError); err != nil {
 		t.Fatalf("start reconciliation grace: %v", err)
 	}
+	if got := srv.Metrics().ReconciliationPendingJobs.Load(); got != 1 {
+		t.Fatalf("expected one pending reconciliation job, got %d", got)
+	}
 	time.Sleep(40 * time.Millisecond)
 
 	gotCaptured, _, err := store.Get(captured.ID)
@@ -346,6 +418,9 @@ func TestReconciliationGraceExpiresCapturedRunningJobs(t *testing.T) {
 	}
 	if got := srv.Metrics().StartupRecoveredJobs.Load(); got != 1 {
 		t.Fatalf("expected one startup recovery failure, got %d", got)
+	}
+	if got := srv.Metrics().ReconciliationPendingJobs.Load(); got != 0 {
+		t.Fatalf("expected reconciliation pending gauge to clear, got %d", got)
 	}
 }
 
@@ -472,6 +547,9 @@ func TestMetricsEndpointExposesCounters(t *testing.T) {
 		nil,
 	)
 	srv.Metrics().StartupRecoveredJobs.Store(2)
+	srv.Metrics().ResultReportsAccepted.Store(3)
+	srv.Metrics().ResultReportsIgnored.Store(4)
+	srv.Metrics().ReconciliationPendingJobs.Store(5)
 	mux := srv.Mux()
 
 	registerNode(t, mux, "agent-metrics", "agent.local:8081")
@@ -488,6 +566,9 @@ func TestMetricsEndpointExposesCounters(t *testing.T) {
 		"planetary_jobs_created_total 1",
 		"planetary_jobs_completed_total 1",
 		"planetary_jobs_recovered_on_startup_total 2",
+		"planetary_job_result_reports_accepted_total 3",
+		"planetary_job_result_reports_ignored_total 4",
+		"planetary_jobs_reconciliation_pending 5",
 		`planetary_nodes{state="HEALTHY"} 1`,
 		"planetary_postgres_schema_ready 1",
 		"planetary_postgres_schema_version 2",

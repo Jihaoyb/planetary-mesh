@@ -137,6 +137,9 @@ func TestHandleJobResultAcceptsCompletedReport(t *testing.T) {
 	if metric := srv.Metrics().JobsCompleted.Load(); metric != 1 {
 		t.Fatalf("expected completed metric 1, got %d", metric)
 	}
+	if metric := srv.Metrics().ResultReportsAccepted.Load(); metric != 1 {
+		t.Fatalf("expected accepted result report metric 1, got %d", metric)
+	}
 }
 
 func TestHandleJobResultDuplicateTerminalReturnsCurrentJob(t *testing.T) {
@@ -171,6 +174,9 @@ func TestHandleJobResultDuplicateTerminalReturnsCurrentJob(t *testing.T) {
 	if metric := srv.Metrics().JobsCompleted.Load(); metric != 0 {
 		t.Fatalf("duplicate report should not increment metrics, got completed=%d", metric)
 	}
+	if metric := srv.Metrics().ResultReportsIgnored.Load(); metric != 1 {
+		t.Fatalf("expected ignored result report metric 1, got %d", metric)
+	}
 }
 
 func TestHandleJobResultRejectsWrongNode(t *testing.T) {
@@ -198,6 +204,40 @@ func TestHandleJobResultRejectsWrongNode(t *testing.T) {
 	}
 	if got.Status != JobStatusRunning || got.NodeID != "node-1" || got.Stdout != "" {
 		t.Fatalf("wrong-node report mutated job: %+v", got)
+	}
+	if metric := srv.Metrics().ResultReportsIgnored.Load(); metric != 1 {
+		t.Fatalf("expected ignored result report metric 1, got %d", metric)
+	}
+}
+
+func TestHandleJobResultRejectsStaleReportAfterReassignment(t *testing.T) {
+	store := NewJobStore()
+	job, err := store.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := store.StartAttempt(job.ID, "node-a"); err != nil {
+		t.Fatalf("start node-a attempt: %v", err)
+	}
+	if _, err := store.StartAttempt(job.ID, "node-b"); err != nil {
+		t.Fatalf("start node-b attempt: %v", err)
+	}
+	srv := NewServer(NewNodeRegistry(), store, nil)
+
+	w := postJobResult(t, srv, job.ID, protocol.JobResultReportRequest{
+		NodeID: "node-a",
+		Status: string(JobStatusCompleted),
+		Stdout: "stale\n",
+	})
+	if w.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected stale report 409, got %d", w.Result().StatusCode)
+	}
+	got, _, err := store.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != JobStatusRunning || got.NodeID != "node-b" || got.Stdout != "" {
+		t.Fatalf("stale report mutated reassigned job: %+v", got)
 	}
 }
 
@@ -238,6 +278,9 @@ func TestHandleJobResultRejectsUnsupportedStatus(t *testing.T) {
 	}
 	if got.Status != JobStatusRunning || got.CompletedAt != nil {
 		t.Fatalf("unsupported status report mutated job: %+v", got)
+	}
+	if metric := srv.Metrics().ResultReportsIgnored.Load(); metric != uint64(4) {
+		t.Fatalf("expected ignored result report metric 4, got %d", metric)
 	}
 }
 

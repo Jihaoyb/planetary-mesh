@@ -105,9 +105,10 @@ func main() {
 			AllowedNodeFingerprints: cfg.AllowedNodeFingerprints,
 		},
 		coordinator.RuntimeConfig{
-			StorageBackend: storageBackend,
-			Schema:         schemaStatus,
-			SecureMode:     cfg.SecureMode,
+			StorageBackend:      storageBackend,
+			Schema:              schemaStatus,
+			SecureMode:          cfg.SecureMode,
+			ReconciliationGrace: cfg.ReconciliationGrace,
 		},
 		logger,
 	)

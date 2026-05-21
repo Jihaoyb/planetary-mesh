@@ -102,6 +102,61 @@ func TestSecureRegisterRejectsUnauthorizedNode(t *testing.T) {
 	}
 }
 
+func TestSecureJobResultReportRequiresAllowlistedCertificate(t *testing.T) {
+	pki := newTestPKI(t)
+	_, agentLeaf := pki.leaf(t, "agent-1", []string{"agent.local"}, nil)
+	_, otherLeaf := pki.leaf(t, "agent-2", []string{"other.local"}, nil)
+
+	jobs := NewJobStore()
+	job, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(job.ID, "agent-1"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+	srv := NewServerWithSecurity(
+		NewNodeRegistry(),
+		jobs,
+		nil,
+		DefaultDispatchConfig(),
+		SecurityConfig{AllowedNodeIdentities: map[string][]string{"agent-1": {"dns:agent.local"}}},
+		nil,
+	)
+
+	unauthorized := newResultReportRequest(t, job.ID, protocol.JobResultReportRequest{
+		NodeID: "agent-1",
+		Status: string(JobStatusCompleted),
+		Stdout: "bad\n",
+	})
+	unauthorized.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{otherLeaf}}
+	wUnauthorized := httptest.NewRecorder()
+	srv.Mux().ServeHTTP(wUnauthorized, unauthorized)
+	if wUnauthorized.Result().StatusCode != http.StatusForbidden {
+		t.Fatalf("expected unauthorized report 403, got %d", wUnauthorized.Result().StatusCode)
+	}
+
+	authorized := newResultReportRequest(t, job.ID, protocol.JobResultReportRequest{
+		NodeID: "agent-1",
+		Status: string(JobStatusCompleted),
+		Stdout: "secure\n",
+	})
+	authorized.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{agentLeaf}}
+	wAuthorized := httptest.NewRecorder()
+	srv.Mux().ServeHTTP(wAuthorized, authorized)
+	if wAuthorized.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected authorized report 200, got %d", wAuthorized.Result().StatusCode)
+	}
+
+	got, _, err := jobs.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != JobStatusCompleted || got.Stdout != "secure\n" {
+		t.Fatalf("unexpected secure reported result: %+v", got)
+	}
+}
+
 func TestSecureRegisterStillChecksProtocolVersionFirst(t *testing.T) {
 	srv := NewServerWithSecurity(
 		NewNodeRegistry(),
@@ -120,6 +175,17 @@ func TestSecureRegisterStillChecksProtocolVersionFirst(t *testing.T) {
 	if w.Result().StatusCode != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", w.Result().StatusCode)
 	}
+}
+
+func newResultReportRequest(t *testing.T, jobID string, payload protocol.JobResultReportRequest) *http.Request {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal result report: %v", err)
+	}
+	req := newVersionedRequest(http.MethodPost, "/jobs/"+jobID+"/result", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 func TestTLSHandshakeRequiresClientCertificate(t *testing.T) {

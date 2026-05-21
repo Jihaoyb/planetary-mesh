@@ -36,9 +36,10 @@ func (c SecurityConfig) Enabled() bool {
 }
 
 type RuntimeConfig struct {
-	StorageBackend string
-	Schema         *protocol.SchemaStatus
-	SecureMode     bool
+	StorageBackend      string
+	Schema              *protocol.SchemaStatus
+	SecureMode          bool
+	ReconciliationGrace time.Duration
 }
 
 const defaultQueuedSchedulerInterval = 5 * time.Second
@@ -68,6 +69,9 @@ type Server struct {
 
 	activeDispatchMu sync.Mutex
 	activeDispatches map[string]struct{}
+
+	reconciliationMu      sync.Mutex
+	reconciliationPending map[string]struct{}
 }
 
 // NewServer constructs a Server with default dispatch config.
@@ -127,7 +131,8 @@ func NewServerWithRuntime(
 		runtime:    runtimeConfig,
 		logger:     logger.With("component", "coordinator"),
 
-		activeDispatches: make(map[string]struct{}),
+		activeDispatches:      make(map[string]struct{}),
+		reconciliationPending: make(map[string]struct{}),
 	}
 }
 
@@ -366,11 +371,13 @@ func (s *Server) handleJobResult(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 	if req.NodeID == "" {
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "node_id is required", http.StatusBadRequest)
 		return
 	}
 	status := JobStatus(req.Status)
 	if !isReportedTerminalStatus(status) {
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
 		return
 	}
@@ -395,19 +402,27 @@ func (s *Server) handleJobResult(w http.ResponseWriter, r *http.Request, id stri
 
 	switch outcome {
 	case ReportedResultAccepted:
+		s.metrics.ResultReportsAccepted.Add(1)
 		s.recordTerminalJobMetric(status)
+		s.resolveReconciliationPending(id)
 		s.logger.Info("reported job result accepted", "job_id", id, "node_id", req.NodeID, "status", status)
 		writeJobJSON(w, job)
 	case ReportedResultDuplicateTerminal:
+		s.metrics.ResultReportsIgnored.Add(1)
+		s.resolveReconciliationPending(id)
 		s.logger.Debug("reported job result ignored for terminal job", "job_id", id, "node_id", req.NodeID, "status", job.Status)
 		writeJobJSON(w, job)
 	case ReportedResultNotFound:
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "job not found", http.StatusNotFound)
 	case ReportedResultWrongNode:
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "reported result node does not match running job", http.StatusConflict)
 	case ReportedResultWrongState:
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "job is not accepting reported results", http.StatusConflict)
 	case ReportedResultUnsupportedStatus:
+		s.metrics.ResultReportsIgnored.Add(1)
 		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
 	default:
 		s.logger.Error("unknown reported result outcome", "job_id", id, "node_id", req.NodeID, "outcome", outcome)
@@ -456,6 +471,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			MaxAttempts: s.dispatch.MaxAttempts,
 			BaseBackoff: s.dispatch.BaseBackoff.String(),
 		},
+	}
+	if s.runtime.StorageBackend == "postgres" {
+		resp.Reconciliation = &protocol.ReconciliationStatus{
+			Grace:              s.runtime.ReconciliationGrace.String(),
+			PendingRunningJobs: s.metrics.ReconciliationPendingJobs.Load(),
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -590,6 +611,7 @@ func (s *Server) dispatchQueuedJobs() {
 }
 
 func (s *Server) StartReconciliationGrace(stopCh <-chan struct{}, jobIDs []string, grace time.Duration, lastError string) error {
+	s.setReconciliationPending(jobIDs)
 	if len(jobIDs) == 0 {
 		return nil
 	}
@@ -599,6 +621,7 @@ func (s *Server) StartReconciliationGrace(stopCh <-chan struct{}, jobIDs []strin
 			return err
 		}
 		s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+		s.clearReconciliationPending(jobIDs)
 		s.logger.Warn("startup running jobs failed without reconciliation grace", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
 		return nil
 	}
@@ -616,12 +639,46 @@ func (s *Server) StartReconciliationGrace(stopCh <-chan struct{}, jobIDs []strin
 				return
 			}
 			s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+			s.clearReconciliationPending(jobIDs)
 			s.logger.Warn("startup reconciliation grace expired", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
 		case <-stopCh:
+			s.clearReconciliationPending(jobIDs)
 			s.logger.Info("startup reconciliation grace stopped before expiry", "startup_running_jobs", len(jobIDs))
 		}
 	}()
 	return nil
+}
+
+func (s *Server) setReconciliationPending(jobIDs []string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	s.reconciliationPending = make(map[string]struct{}, len(jobIDs))
+	for _, id := range jobIDs {
+		s.reconciliationPending[id] = struct{}{}
+	}
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
+}
+
+func (s *Server) resolveReconciliationPending(jobID string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	if _, ok := s.reconciliationPending[jobID]; !ok {
+		return
+	}
+	delete(s.reconciliationPending, jobID)
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
+}
+
+func (s *Server) clearReconciliationPending(jobIDs []string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	for _, id := range jobIDs {
+		delete(s.reconciliationPending, id)
+	}
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
 }
 
 func hasHealthyNode(nodes []Node) bool {
@@ -725,8 +782,10 @@ func (s *Server) dispatchJob(jobID string) {
 			if ok {
 				if _, err := s.jobs.Complete(jobID, target.ID, result); err != nil {
 					logger.Error("failed to mark job COMPLETED", "err", err)
+					return
 				}
 				s.metrics.JobsCompleted.Add(1)
+				s.resolveReconciliationPending(jobID)
 				logger.Info("job completed")
 				return
 			}
@@ -836,8 +895,10 @@ func decodeExecuteResponse(body io.Reader) JobResult {
 func (s *Server) failJob(jobID, nodeID string, result JobResult) {
 	if _, err := s.jobs.Fail(jobID, nodeID, result); err != nil {
 		s.logger.Error("failed to mark job FAILED", "job_id", jobID, "err", err)
+		return
 	}
 	s.metrics.JobsFailed.Add(1)
+	s.resolveReconciliationPending(jobID)
 }
 
 func (s *Server) recordTerminalJobMetric(status JobStatus) {

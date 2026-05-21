@@ -11,12 +11,15 @@ import (
 // Metrics holds simple counters for the coordinator.
 // All counters are safe for concurrent use via sync/atomic.
 type Metrics struct {
-	JobsCreated          atomic.Uint64
-	JobsCompleted        atomic.Uint64
-	JobsFailed           atomic.Uint64
-	StartupRecoveredJobs atomic.Uint64
-	DispatchAttempts     atomic.Uint64
-	DispatchErrors       atomic.Uint64
+	JobsCreated               atomic.Uint64
+	JobsCompleted             atomic.Uint64
+	JobsFailed                atomic.Uint64
+	StartupRecoveredJobs      atomic.Uint64
+	DispatchAttempts          atomic.Uint64
+	DispatchErrors            atomic.Uint64
+	ResultReportsAccepted     atomic.Uint64
+	ResultReportsIgnored      atomic.Uint64
+	ReconciliationPendingJobs atomic.Uint64
 }
 
 // NewMetrics constructs a zeroed Metrics.
@@ -39,7 +42,7 @@ func (m *Metrics) WriteProm(w io.Writer, registry NodeStore, schema *protocol.Sc
 	fmt.Fprintf(w, "# TYPE planetary_jobs_failed_total counter\n")
 	fmt.Fprintf(w, "planetary_jobs_failed_total %d\n", m.JobsFailed.Load())
 
-	fmt.Fprintf(w, "# HELP planetary_jobs_recovered_on_startup_total Total persisted RUNNING jobs marked FAILED during coordinator startup recovery.\n")
+	fmt.Fprintf(w, "# HELP planetary_jobs_recovered_on_startup_total Total startup RUNNING jobs marked FAILED after reconciliation grace.\n")
 	fmt.Fprintf(w, "# TYPE planetary_jobs_recovered_on_startup_total counter\n")
 	fmt.Fprintf(w, "planetary_jobs_recovered_on_startup_total %d\n", m.StartupRecoveredJobs.Load())
 
@@ -50,6 +53,18 @@ func (m *Metrics) WriteProm(w io.Writer, registry NodeStore, schema *protocol.Sc
 	fmt.Fprintf(w, "# HELP planetary_dispatch_errors_total Total dispatch attempts that returned an error.\n")
 	fmt.Fprintf(w, "# TYPE planetary_dispatch_errors_total counter\n")
 	fmt.Fprintf(w, "planetary_dispatch_errors_total %d\n", m.DispatchErrors.Load())
+
+	fmt.Fprintf(w, "# HELP planetary_job_result_reports_accepted_total Total agent result reports accepted as terminal job transitions.\n")
+	fmt.Fprintf(w, "# TYPE planetary_job_result_reports_accepted_total counter\n")
+	fmt.Fprintf(w, "planetary_job_result_reports_accepted_total %d\n", m.ResultReportsAccepted.Load())
+
+	fmt.Fprintf(w, "# HELP planetary_job_result_reports_ignored_total Total agent result reports ignored without mutating job state.\n")
+	fmt.Fprintf(w, "# TYPE planetary_job_result_reports_ignored_total counter\n")
+	fmt.Fprintf(w, "planetary_job_result_reports_ignored_total %d\n", m.ResultReportsIgnored.Load())
+
+	fmt.Fprintf(w, "# HELP planetary_jobs_reconciliation_pending Startup RUNNING jobs still awaiting reconciliation.\n")
+	fmt.Fprintf(w, "# TYPE planetary_jobs_reconciliation_pending gauge\n")
+	fmt.Fprintf(w, "planetary_jobs_reconciliation_pending %d\n", m.ReconciliationPendingJobs.Load())
 
 	if registry != nil {
 		counts, _ := registry.CountByState()

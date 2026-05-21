@@ -12,8 +12,8 @@ import (
 
 func writeStatus(w io.Writer, s protocol.CoordinatorStatusResponse) error {
 	tw := newTabWriter(w)
-	fmt.Fprintln(tw, "STATUS\tPROTOCOL\tSTORAGE\tSECURE\tNODE_ALLOWLIST\tDISPATCH")
-	fmt.Fprintf(tw, "%s\t%s\t%s\t%t\t%t\tattempts=%d timeout=%s backoff=%s\n",
+	fmt.Fprintln(tw, "STATUS\tPROTOCOL\tSTORAGE\tSECURE\tNODE_ALLOWLIST\tDISPATCH\tRECONCILIATION")
+	fmt.Fprintf(tw, "%s\t%s\t%s\t%t\t%t\tattempts=%d timeout=%s backoff=%s\t%s\n",
 		s.Status,
 		s.ProtocolVersion,
 		s.StorageBackend,
@@ -22,6 +22,7 @@ func writeStatus(w io.Writer, s protocol.CoordinatorStatusResponse) error {
 		s.Dispatch.MaxAttempts,
 		s.Dispatch.Timeout,
 		s.Dispatch.BaseBackoff,
+		formatReconciliation(s.Reconciliation),
 	)
 	return tw.Flush()
 }
@@ -127,6 +128,13 @@ func shortFingerprint(fingerprint string) string {
 		return fingerprint
 	}
 	return fingerprint[:12]
+}
+
+func formatReconciliation(reconciliation *protocol.ReconciliationStatus) string {
+	if reconciliation == nil {
+		return "-"
+	}
+	return fmt.Sprintf("grace=%s pending=%d", reconciliation.Grace, reconciliation.PendingRunningJobs)
 }
 
 func trimTrailingNewline(s string) string {
