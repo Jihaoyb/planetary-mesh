@@ -15,10 +15,12 @@ import (
 func TestResultReporterSendsAndDropsAcceptedReport(t *testing.T) {
 	var gotPath string
 	var gotHeader string
+	var gotDeadline bool
 	var gotPayload protocol.JobResultReportRequest
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		gotPath = r.URL.Path
 		gotHeader = r.Header.Get(protocol.HeaderName)
+		_, gotDeadline = r.Context().Deadline()
 		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
@@ -40,6 +42,9 @@ func TestResultReporterSendsAndDropsAcceptedReport(t *testing.T) {
 	}
 	if gotHeader != protocol.Version {
 		t.Fatalf("expected protocol header %q, got %q", protocol.Version, gotHeader)
+	}
+	if !gotDeadline {
+		t.Fatalf("expected result report request to have a deadline")
 	}
 	if gotPayload.NodeID != "node-1" || gotPayload.Status != protocol.JobResultStatusCompleted || gotPayload.Stdout != "hello\n" {
 		t.Fatalf("unexpected payload: %+v", gotPayload)

@@ -20,6 +20,7 @@ const (
 	DefaultResultReportCacheEntries = 128
 	DefaultResultReportTTL          = 5 * time.Minute
 	defaultResultReportInterval     = 2 * time.Second
+	defaultResultReportTimeout      = 5 * time.Second
 )
 
 type ResultReport struct {
@@ -34,11 +35,12 @@ type ResultReport struct {
 }
 
 type ResultReporter struct {
-	client       *http.Client
-	coordBaseURL string
-	nodeID       string
-	maxEntries   int
-	ttl          time.Duration
+	client         *http.Client
+	coordBaseURL   string
+	nodeID         string
+	maxEntries     int
+	ttl            time.Duration
+	requestTimeout time.Duration
 
 	mu      sync.Mutex
 	entries map[string]cachedResultReport
@@ -64,12 +66,13 @@ func NewResultReporterWithConfig(client *http.Client, coordBaseURL, nodeID strin
 		ttl = DefaultResultReportTTL
 	}
 	return &ResultReporter{
-		client:       client,
-		coordBaseURL: strings.TrimRight(strings.TrimSpace(coordBaseURL), "/"),
-		nodeID:       nodeID,
-		maxEntries:   maxEntries,
-		ttl:          ttl,
-		entries:      make(map[string]cachedResultReport),
+		client:         client,
+		coordBaseURL:   strings.TrimRight(strings.TrimSpace(coordBaseURL), "/"),
+		nodeID:         nodeID,
+		maxEntries:     maxEntries,
+		ttl:            ttl,
+		requestTimeout: defaultResultReportTimeout,
+		entries:        make(map[string]cachedResultReport),
 	}
 }
 
@@ -180,6 +183,11 @@ func (r *ResultReporter) evictOldestLocked() {
 func (r *ResultReporter) send(ctx context.Context, report ResultReport) (bool, error) {
 	if r.coordBaseURL == "" {
 		return false, fmt.Errorf("coordinator URL is empty")
+	}
+	if r.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.requestTimeout)
+		defer cancel()
 	}
 	payload := protocol.JobResultReportRequest{
 		NodeID:          r.nodeID,
