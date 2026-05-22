@@ -6,12 +6,12 @@
 ## Context
 
 Milestone 13 made coordinator-owned job lifecycle transitions explicit. That
-clarified the current restart gap: with Postgres enabled, coordinator startup
-marks persisted `RUNNING` jobs `FAILED` with
+clarified the restart gap that existed at the time: with Postgres enabled,
+coordinator startup marked persisted `RUNNING` jobs `FAILED` with
 `coordinator restarted before result was recorded`. Agents do not persist
 execution history or report completed results after coordinator restart.
 
-Current behavior remains intentionally simple:
+Behavior before Milestone 15 remained intentionally simple:
 
 - in-memory coordinator state is lost on restart
 - Postgres persists nodes and jobs only
@@ -33,10 +33,10 @@ Milestone 14 records the reconciliation strategy only. It does not change
 runtime behavior, public job JSON, status strings, schema, scheduling, command
 execution, mTLS, or `pmctl`.
 
-The future runtime strategy is explicit agent-to-coordinator result reporting,
+The chosen runtime strategy is explicit agent-to-coordinator result reporting,
 not heartbeat-carried reconciliation.
 
-Details for the future runtime slice:
+Details for the runtime slice:
 
 - Add a coordinator endpoint for agents to report completed command results,
   using HTTP/JSON and `X-Planetary-Protocol-Version: 1`.
@@ -102,6 +102,43 @@ Result acceptance policy:
   failures, no-healthy-node queue retention, queued expiration, and process-local
   duplicate dispatch protection are unchanged.
 
+## Milestone 15 Implementation Notes
+
+Milestone 15 implements the first runtime slice of this ADR:
+
+- Coordinator endpoint: `POST /jobs/{id}/result`.
+- Request shape matches the preferred body above and uses the existing protocol
+  version header.
+- Public job JSON fields, job status strings, and `ExecuteRequest` /
+  `ExecuteResponse` shapes are unchanged.
+- Accepted reports return `200 OK` with the current public job JSON.
+- Same-node duplicate or late reports for already-terminal jobs also return
+  `200 OK` with the current job JSON so agents can drop cached reports.
+- Unknown jobs, wrong-node reports, unsupported reported statuses, and
+  unsupported current states do not mutate storage and use the existing
+  `http.Error` response style.
+- In secure mode, result reports pass through the same client-certificate and
+  node allowlist checks used for registration.
+- The store-level reported-result acceptance operation is atomic and returns an
+  explicit outcome, so concurrent dispatch/result-report races cannot overwrite
+  terminal jobs or accept stale wrong-node reports.
+- Postgres startup captures persisted `RUNNING` job ids and starts serving HTTP
+  during reconciliation grace instead of sleeping before `ListenAndServe`.
+- Default grace is `30s`; `COORDINATOR_RECONCILIATION_GRACE=0s` preserves
+  immediate startup failure behavior.
+- When grace expires, only remaining captured startup `RUNNING` job ids are
+  marked `FAILED` with
+  `coordinator restarted before result was recorded`.
+- Agents keep a bounded in-memory cache of terminal command results only:
+  maximum 128 entries and 5 minute TTL.
+- Agents drop cached reports after `2xx`, older-coordinator compatibility
+  responses such as `404` or `405`, and permanent non-retryable `4xx`
+  responses; they retry network errors and `5xx` until cache expiry.
+- Agent restart still loses cached result history, and command execution remains
+  tied to the `/execute` request context.
+- Postgres schema readiness metadata remains version `2`; no task, attempt, or
+  result-history table was added.
+
 ## Alternatives Considered
 
 - **Keep current restart recovery forever**
@@ -133,20 +170,18 @@ Result acceptance policy:
 
 - Positive:
   - The restart recovery design is explicit before runtime changes begin.
-  - Current behavior remains stable for Milestone 14.
+  - Current behavior remained stable for Milestone 14.
   - The future implementation path is compatible with HTTP/JSON v0 and older
     agents.
   - Terminal job immutability remains part of the public lifecycle contract.
 - Negative:
-  - Milestone 14 does not fix the lost-result gap by itself.
-  - The first runtime slice will still be best-effort if agent result history is
+  - Milestone 14 did not fix the lost-result gap by itself.
+  - The first runtime slice is still best-effort because agent result history is
     in-memory only.
   - Commands already tied to a dropped `/execute` request context may still be
     canceled before a result exists to report.
 - Open questions:
-  - The exact reconciliation grace duration and whether it should be
-    configurable.
   - Whether future durable agent result history is worth the added local storage
     and cleanup policy.
-  - Whether metrics should distinguish startup recovery failures from
-    reconciliation-accepted terminal reports.
+  - Whether future metrics should distinguish more detailed classes of ignored
+    result reports.

@@ -24,6 +24,7 @@ services:
     environment:
       COORDINATOR_ADDR: ":8080"
       COORDINATOR_DATABASE_URL: "postgres://planetary:planetary@postgres:5432/planetary_mesh?sslmode=disable"
+      COORDINATOR_RECONCILIATION_GRACE: "3s"
     ports:
       - "${COORDINATOR_HOST_PORT:-8080}:8080"
     depends_on:

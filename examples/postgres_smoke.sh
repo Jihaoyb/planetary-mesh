@@ -94,12 +94,14 @@ import sys
 
 status = json.load(sys.stdin)
 schema = status.get("schema") or {}
+reconciliation = status.get("reconciliation") or {}
 ok = (
     status.get("status") == "ok"
     and status.get("storage_backend") == "postgres"
     and schema.get("ready") is True
     and schema.get("version") == 2
     and schema.get("expected_version") == 2
+    and reconciliation.get("grace") == "3s"
 )
 sys.exit(0 if ok else 1)
 ' <<<"${status_json}"; then
@@ -154,6 +156,20 @@ wait_for_job_status() {
   return 1
 }
 
+require_job_status_now() {
+  local job_id="$1"
+  local expected="$2"
+  local detail status
+
+  detail="$(pmctl --json jobs inspect "${job_id}")"
+  status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' <<<"${detail}")"
+  if [[ "${status}" != "${expected}" ]]; then
+    echo "Expected job ${job_id} to be ${expected}, got ${status}" >&2
+    echo "${detail}" >&2
+    return 1
+  fi
+}
+
 require_metrics() {
   local metrics
   metrics="$(curl -sf -H 'X-Planetary-Protocol-Version: 1' "${COORD_URL}/metrics")"
@@ -161,6 +177,9 @@ require_metrics() {
   grep -q 'planetary_jobs_created_total' <<<"${metrics}"
   grep -q 'planetary_jobs_completed_total' <<<"${metrics}"
   grep -q 'planetary_jobs_recovered_on_startup_total 1' <<<"${metrics}"
+  grep -q 'planetary_job_result_reports_accepted_total' <<<"${metrics}"
+  grep -q 'planetary_job_result_reports_ignored_total' <<<"${metrics}"
+  grep -q 'planetary_jobs_reconciliation_pending 0' <<<"${metrics}"
   grep -q 'planetary_nodes{state="HEALTHY"}' <<<"${metrics}"
   grep -q 'planetary_postgres_schema_ready 1' <<<"${metrics}"
   grep -q 'planetary_postgres_schema_version 2' <<<"${metrics}"
@@ -220,6 +239,7 @@ echo "Restarting coordinator"
 "${COMPOSE[@]}" restart coordinator
 wait_for_url "coordinator" "${COORD_URL}/healthz"
 wait_for_postgres_status
+require_job_status_now "${SLEEP_ID}" "RUNNING"
 
 RECOVERED_JSON="$(wait_for_job_status "${SLEEP_ID}" "FAILED")"
 RECOVERED_ERROR="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["last_error"])' <<<"${RECOVERED_JSON}")"

@@ -28,8 +28,8 @@ Near-term MVP work should harden the private/local mesh:
 - cross-node reassignment after retryable dispatch failure
 - explicit, documented, and test-covered job lifecycle transitions
 - better node health, capability, and load visibility
-- accepted agent reconciliation strategy after coordinator restart, followed by
-  a narrow runtime result-reporting slice
+- narrow runtime result reporting after coordinator restart, based on the
+  accepted agent reconciliation strategy
 - stronger execution-risk docs and runbooks
 - improved install/onboarding workflow
 - optional demo pipeline for private batch/AI-style work
@@ -56,8 +56,8 @@ Practical MVP success means:
 - a user can inspect job result, stdout, stderr, and errors
 - job state transitions are documented and consistent across in-memory and
   Postgres-backed coordinator storage
-- restart recovery limitations and the accepted reconciliation strategy are
-  documented without implying runtime reconciliation exists today
+- restart recovery behavior, best-effort result reporting, and remaining
+  limitations are documented without implying full execution recovery exists
 - a user can see node state, configured capabilities, and active execution count
 - a user can choose in-memory or Postgres coordinator storage
 - default build/test checks pass without external services

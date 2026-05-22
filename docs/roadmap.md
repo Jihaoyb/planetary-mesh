@@ -10,7 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 14 agent reconciliation strategy
+- Baseline: `main` after Milestone 15 runtime agent reconciliation/result
+  reporting
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -36,11 +37,11 @@ Implemented capability:
 - no shell execution
 - bounded stdout/stderr capture with truncation flags
 - retry handling for retryable dispatch failures
+- additive agent terminal result reporting through `POST /jobs/{id}/result`
 - optional Postgres persistence for nodes/jobs and node metadata
 - Postgres schema readiness metadata version `2`
-- startup recovery for persisted `RUNNING` jobs
-- accepted ADR for future agent reconciliation/result reporting after
-  coordinator restart
+- bounded Postgres reconciliation grace for persisted startup `RUNNING` jobs
+- best-effort agent result reporting from bounded in-memory cache
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
 - env-style config files
@@ -53,9 +54,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-14
+## Completed Baseline / Milestones 1-15
 
-The first fourteen milestones established a working private LAN/trusted-network
+The first fifteen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -110,9 +111,9 @@ Completed outcomes:
 
 Known limitation:
 
-- If an agent completed a job before a crash but the coordinator did not record
-  the result, that result is lost. ADR 0013 records the accepted future
-  reconciliation strategy, but runtime reconciliation is not implemented today.
+- This milestone intentionally used immediate startup failure for persisted
+  `RUNNING` jobs. Milestone 15 later narrowed that lost-result gap with
+  best-effort result reporting and bounded Postgres reconciliation grace.
 
 Status: complete
 
@@ -333,6 +334,32 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 15: Runtime Agent Reconciliation and Result Reporting
+
+Goal: implement the first narrow runtime slice of ADR 0013 for private mesh
+restart reliability and operator/API readiness.
+
+Completed outcomes:
+
+- additive coordinator `POST /jobs/{id}/result` endpoint for agent terminal
+  result reports
+- terminal report acceptance only for existing `RUNNING` jobs whose current
+  `node_id` matches the reporting node
+- duplicate, late, wrong-node, unknown-job, unsupported-status, and
+  unsupported-state reports do not mutate terminal or non-matching jobs
+- mTLS/node allowlist enforcement applies to result reports in secure mode
+- agents keep a bounded in-memory terminal result cache and report best-effort
+  while synchronous `/execute` remains primary
+- Postgres startup captures persisted `RUNNING` IDs, serves during a bounded
+  reconciliation grace window, and fails only remaining captured IDs after grace
+- in-memory restart still loses state; agent restart still loses cached results
+- public job JSON fields, status strings, protocol version, scheduler behavior,
+  nodes/jobs-only storage, and Postgres schema version `2` are unchanged
+- `/status`, `/metrics`, `pmctl status`, tests, and Postgres smoke workflow now
+  expose or verify reconciliation behavior
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -341,8 +368,8 @@ Potential work:
 
 - scheduler policy that can use reported node capabilities/load when explicitly
   planned
-- runtime implementation of the accepted agent reconciliation/result-reporting
-  strategy
+- follow-up reconciliation hardening only where the current best-effort slice
+  proves insufficient
 - better operator runbooks
 - API inventory and API contract decision
 - improved local install workflow

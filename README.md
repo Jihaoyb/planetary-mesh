@@ -11,30 +11,33 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 14 agent
-  reconciliation strategy.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 15 runtime
+  agent reconciliation/result reporting.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
-  exposes metrics and status, stores reported node capabilities/load, and can
-  persist nodes and jobs in Postgres.
+  accepts additive terminal result reports from agents, exposes metrics and
+  status, stores reported node capabilities/load, and can persist nodes and jobs
+  in Postgres.
 - **Agent**: registers with the coordinator, sends heartbeats with optional
-  static capabilities and current active execution count, and executes
-  allowlisted command jobs without invoking a shell.
+  static capabilities and current active execution count, executes allowlisted
+  command jobs without invoking a shell, and best-effort reports terminal command
+  results from a bounded in-memory cache.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
   inspection, and command job submission.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
   optional and includes lightweight schema readiness metadata version `2`.
-  Runtime agent reconciliation is not implemented yet; ADR 0013 documents the
-  accepted future result-reporting strategy.
+  Postgres startup leaves persisted `RUNNING` jobs in a bounded reconciliation
+  grace window before failing unreconciled jobs.
 
 ## What Works Today
 
 - HTTP/JSON control plane with `X-Planetary-Protocol-Version: 1`.
 - Coordinator `GET /healthz`, `GET /status`, `POST /register`, `GET /nodes`,
-  `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, and `GET /metrics`.
+  `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/result`, and
+  `GET /metrics`.
 - Agent `GET /healthz` and `POST /execute`.
 - Node registration and heartbeat through repeated `POST /register` calls.
 - Node health states: `HEALTHY`, `SUSPECT`, and `OFFLINE`.
@@ -56,7 +59,8 @@ shared compute scenarios.
 - Queued jobs expire as `FAILED` after 24 hours if no healthy node becomes
   available.
 - Optional Postgres persistence for nodes/jobs, node capability/load metadata,
-  startup recovery for persisted `RUNNING` jobs, and schema readiness reporting.
+  bounded startup reconciliation grace for persisted `RUNNING` jobs, and schema
+  readiness reporting.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -70,7 +74,8 @@ shared compute scenarios.
 - Production Docker image or packaged release workflow.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
-- Runtime agent reconciliation or result reporting after coordinator restart.
+- Durable agent result history after agent restart.
+- Full in-progress execution recovery after coordinator restart.
 - Automated certificate issuance, enrollment, or rotation.
 - Remote private mesh, trusted shared pool, or overflow marketplace features.
 
@@ -187,9 +192,10 @@ For durable-state verification with Docker Compose:
 ./examples/postgres_smoke.sh
 ```
 
-That workflow starts coordinator + Postgres + agents, verifies status and schema
-readiness, checks restart recovery for persisted `RUNNING` jobs, checks
-`/metrics`, and submits another command after restart.
+That workflow starts coordinator + Postgres + agents, verifies status, schema
+readiness, and reconciliation metadata, checks deferred restart recovery for
+persisted `RUNNING` jobs, checks `/metrics`, and submits another command after
+restart.
 
 ## Run Manually
 
@@ -249,6 +255,20 @@ readiness metadata. `schema_version` value `2` represents the current nodes/jobs
 schema, node capability/load columns, and readiness marker. The coordinator
 exposes schema readiness through startup logs, `/status`, `/metrics`,
 `pmctl --json status`, tests, and the Postgres smoke workflow.
+
+When Postgres is enabled, persisted `RUNNING` jobs found at coordinator startup
+enter a bounded reconciliation grace window. The default is `30s` and can be set
+with:
+
+```bash
+COORDINATOR_RECONCILIATION_GRACE=30s
+```
+
+During the grace window, matching terminal reports from the assigned agent can
+complete or fail the job. If no report arrives, the coordinator marks the
+captured startup-running job `FAILED` with
+`coordinator restarted before result was recorded`. In-memory coordinator
+restart still loses state, and agent result history is in-memory only.
 
 This is not a full migration framework. A database marked with a newer schema
 version than the running coordinator expects is rejected at startup.

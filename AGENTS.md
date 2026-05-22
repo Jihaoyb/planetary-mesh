@@ -21,9 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 14 agent reconciliation strategy.
+Current `main` is after Milestone 15 runtime agent reconciliation/result
+reporting.
 
-Milestones 1 through 14 are complete:
+Milestones 1 through 15 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -41,13 +42,17 @@ Milestones 1 through 14 are complete:
 - explicit coordinator-owned job lifecycle transitions
 - accepted strategy for future agent reconciliation/result reporting after
   coordinator restart
+- runtime implementation of additive agent terminal result reporting and
+  bounded Postgres reconciliation grace after coordinator restart
 - Postgres schema readiness metadata version `2`
 
-Runtime agent reconciliation is not implemented yet. The next phase should
-focus on narrow private mesh hardening such as the accepted reconciliation
-runtime slice, operator clarity, API readiness, and security hardening. Do not
-jump to marketplace, payment, dashboard, public-node, or remote-node product
-work without explicit planning and an accepted direction.
+Runtime agent reconciliation is implemented as a narrow best-effort slice:
+agents keep only bounded in-memory terminal result history, and Postgres startup
+uses a bounded grace window before failing unreconciled startup-running jobs.
+The next phase should focus on narrow private mesh hardening such as operator
+clarity, API readiness, security hardening, and packaging. Do not jump to
+marketplace, payment, dashboard, public-node, or remote-node product work
+without explicit planning and an accepted direction.
 
 ## Canonical Context
 
@@ -200,6 +205,7 @@ Current coordinator endpoints:
 - `POST /jobs`
 - `GET /jobs`
 - `GET /jobs/{id}`
+- `POST /jobs/{id}/result`
 - `GET /metrics`
 
 Current agent endpoints:
@@ -264,14 +270,15 @@ Preserve these rules:
 - Postgres is the only durable persistence target in the current roadmap. Do
   not add SQLite or another persistence backend without an ADR.
 - Postgres is enabled only when `COORDINATOR_DATABASE_URL` is configured.
-- On coordinator startup, persisted `RUNNING` jobs are marked `FAILED` with:
-  `coordinator restarted before result was recorded`.
-- Document the known v0 gap: if an agent completed before coordinator crash and
-  the result was not persisted, that result is lost.
-- ADR 0013 records the accepted future reconciliation strategy: explicit
+- On Postgres-backed coordinator startup, persisted `RUNNING` jobs are captured
+  for a bounded reconciliation grace window. Matching agent reports can complete
+  or fail those jobs during grace; unreconciled captured jobs are marked
+  `FAILED` with: `coordinator restarted before result was recorded`.
+- In-memory coordinator restart still loses state. Agents keep only bounded
+  in-memory terminal result history, so agent restart can still lose a result.
+- ADR 0013 records the accepted reconciliation strategy: explicit
   agent-to-coordinator result reporting plus a Postgres reconciliation grace
   window before failing persisted `RUNNING` jobs.
-- Do not implement runtime agent reconciliation unless it is the explicit task.
 - Postgres integration tests must be opt-in or separately gated.
 - Schema readiness metadata version `2` is current. It is not a full migration
   framework.
@@ -316,8 +323,8 @@ Allowed near-term direction is private mesh hardening:
 - cross-node reassignment after dispatch failure
 - scheduler policy for reported node capabilities/load
 - clearer job state transitions
-- runtime implementation of the accepted agent reconciliation/result-reporting
-  strategy
+- follow-up reconciliation hardening if the current best-effort slice proves
+  insufficient
 - operator runbooks and API inventory
 - install/release packaging
 - certificate/onboarding helper planning
