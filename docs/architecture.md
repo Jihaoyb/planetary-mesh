@@ -10,6 +10,7 @@ For product framing and sequencing, see:
 - [product-positioning.md](product-positioning.md)
 - [roadmap.md](roadmap.md)
 - [current-limitations.md](current-limitations.md)
+- [api-http-json-v0.md](api-http-json-v0.md)
 - [tech-choices.md](tech-choices.md)
 - [adr/](adr/)
 
@@ -47,7 +48,10 @@ There is no dashboard today.
 ### Transport and Versioning
 
 The v0 control plane uses HTTP/JSON with the Go standard library. ADR 0003
-records this decision.
+records this decision. The current manual API inventory and compatibility
+policy are in [api-http-json-v0.md](api-http-json-v0.md), with ADR 0014
+recording the decision to maintain that inventory before generated
+OpenAPI/protobuf.
 
 Versioned control-plane requests use:
 
@@ -388,7 +392,8 @@ Current private-mesh limitations:
 - no per-job timeout override
 - no file upload/result download workflow
 - no dashboard
-- no generated API contract such as OpenAPI or protobuf
+- no generated API contract such as OpenAPI or protobuf; the current v0 API
+  reference is a manual inventory
 - no cancellation API or cancellation behavior
 - no production image or packaged release workflow
 - no automated mTLS certificate lifecycle
@@ -412,7 +417,8 @@ Private mesh hardening:
 
 - scheduler policy for reported node capabilities/load
 - operator runbooks
-- API inventory and contract decision
+- future generated API contract decision if the manual inventory proves
+  insufficient
 - better install/release workflow
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need

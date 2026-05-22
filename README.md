@@ -11,8 +11,8 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 15 runtime
-  agent reconciliation/result reporting.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 16 HTTP/JSON
+  v0 API inventory and compatibility policy.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -35,6 +35,7 @@ shared compute scenarios.
 ## What Works Today
 
 - HTTP/JSON control plane with `X-Planetary-Protocol-Version: 1`.
+- Manual HTTP/JSON v0 API inventory and compatibility policy.
 - Coordinator `GET /healthz`, `GET /status`, `POST /register`, `GET /nodes`,
   `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/result`, and
   `GET /metrics`.
@@ -386,6 +387,7 @@ Current sources of truth:
 - [Product Positioning](docs/product-positioning.md)
 - [Roadmap](docs/roadmap.md)
 - [Architecture](docs/architecture.md)
+- [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)
 - [Tech Choices](docs/tech-choices.md)
@@ -409,3 +411,4 @@ Architecture Decision Records:
 - [ADR 0011: Node capability and load visibility](docs/adr/0011-node-capability-load-visibility.md)
 - [ADR 0012: Explicit coordinator-owned job lifecycle transitions](docs/adr/0012-job-lifecycle-state-transitions.md)
 - [ADR 0013: Agent reconciliation strategy after coordinator restart](docs/adr/0013-agent-reconciliation-strategy.md)
+- [ADR 0014: HTTP/JSON v0 API inventory and compatibility policy](docs/adr/0014-http-json-v0-api-inventory-and-compatibility.md)

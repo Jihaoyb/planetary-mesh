@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 15 runtime agent reconciliation/result
-  reporting
+- Baseline: `main` after Milestone 16 HTTP/JSON v0 API inventory and
+  compatibility policy
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -44,6 +44,9 @@ Implemented capability:
 - best-effort agent result reporting from bounded in-memory cache
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
+- manual HTTP/JSON v0 API inventory and compatibility policy
+- DB-free API drift tests for route, protocol, JSON-field, and metrics
+  expectations
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
@@ -54,9 +57,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-15
+## Completed Baseline / Milestones 1-16
 
-The first fifteen milestones established a working private LAN/trusted-network
+The first sixteen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -360,6 +363,32 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 16: HTTP/JSON v0 API Inventory and Compatibility Contract
+
+Goal: create an authoritative, reviewable HTTP/JSON v0 API inventory and
+compatibility policy for the current coordinator, agent, protocol, metrics, and
+operator-facing client surfaces.
+
+Completed outcomes:
+
+- manual API inventory at `docs/api-http-json-v0.md`
+- ADR 0014 records the decision to maintain a manual v0 API inventory before
+  generated OpenAPI/protobuf
+- documented coordinator operator/client-facing endpoints, coordinator
+  agent-facing endpoints, agent endpoints, public JSON fields, metrics, status
+  codes, and mTLS/node identity expectations
+- documented compatibility policy for protocol version `1`, unversioned health
+  endpoints, additive JSON fields, breaking-field changes, status/lifecycle
+  changes, endpoint additions, text error responses, metrics, and `pmctl`
+  boundaries
+- added focused default DB-free tests for route/protocol expectations,
+  public JSON field names, and metric names/types
+- runtime endpoint behavior, public JSON fields, status strings, protocol
+  version, scheduler behavior, mTLS behavior, nodes/jobs-only storage, and
+  Postgres schema version `2` are unchanged
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -371,7 +400,7 @@ Potential work:
 - follow-up reconciliation hardening only where the current best-effort slice
   proves insufficient
 - better operator runbooks
-- API inventory and API contract decision
+- future generated API contract decision after the manual inventory stabilizes
 - improved local install workflow
 - certificate/onboarding helper planning
 - stronger docs around execution risks

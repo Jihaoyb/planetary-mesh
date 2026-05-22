@@ -58,17 +58,21 @@ Why:
 Related ADR:
 
 - [ADR 0003](adr/0003-http-json-control-plane-for-v0.md)
+- [ADR 0014](adr/0014-http-json-v0-api-inventory-and-compatibility.md)
 
 Current protocol rules:
 
 - versioned requests use `X-Planetary-Protocol-Version: 1`
 - coordinator `/healthz` and agent `/healthz` are simple health checks
 - other coordinator endpoints and agent `/execute` require the protocol header
+- [api-http-json-v0.md](api-http-json-v0.md) is the authoritative manual v0 API
+  inventory and compatibility policy
 
 Future decisions:
 
 - OpenAPI, protobuf, gRPC, streaming logs, WebSockets, or SSE are not current
-  commitments. Add them only after an ADR or roadmap update.
+  commitments. Add them only after an ADR or roadmap update, using the manual
+  API inventory as the baseline.
 
 ## Storage
 
