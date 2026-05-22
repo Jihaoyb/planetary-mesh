@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 15 runtime agent reconciliation/result
-reporting.
+Current `main` is after Milestone 16 HTTP/JSON v0 API inventory and
+compatibility policy.
 
-Milestones 1 through 15 are complete:
+Milestones 1 through 16 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -45,12 +45,15 @@ Milestones 1 through 15 are complete:
 - runtime implementation of additive agent terminal result reporting and
   bounded Postgres reconciliation grace after coordinator restart
 - Postgres schema readiness metadata version `2`
+- manual HTTP/JSON v0 API inventory and compatibility policy with focused
+  DB-free API drift tests
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 The next phase should focus on narrow private mesh hardening such as operator
-clarity, API readiness, security hardening, and packaging. Do not jump to
+runbooks, security hardening, packaging, and explicitly planned scheduler/API
+follow-up work. Do not jump to
 marketplace, payment, dashboard, public-node, or remote-node product work
 without explicit planning and an accepted direction.
 
@@ -64,6 +67,8 @@ changes:
 - `docs/current-limitations.md` - current limitations and risk register
 - `docs/roadmap.md` - canonical roadmap and sequencing
 - `docs/architecture.md` - component model and system boundaries
+- `docs/api-http-json-v0.md` - authoritative manual HTTP/JSON v0 API inventory
+  and compatibility policy
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
   execution choices
 - `docs/adr/` - accepted Architecture Decision Records

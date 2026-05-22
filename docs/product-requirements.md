@@ -33,7 +33,7 @@ Near-term MVP work should harden the private/local mesh:
 - stronger execution-risk docs and runbooks
 - improved install/onboarding workflow
 - optional demo pipeline for private batch/AI-style work
-- API inventory and contract decision
+- manual HTTP/JSON v0 API inventory and compatibility policy
 
 The current implemented workload remains allowlisted command execution.
 
@@ -60,6 +60,8 @@ Practical MVP success means:
   limitations are documented without implying full execution recovery exists
 - a user can see node state, configured capabilities, and active execution count
 - a user can choose in-memory or Postgres coordinator storage
+- contributors have a current manual HTTP/JSON v0 API inventory and
+  compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
 - Postgres durability checks are opt-in and documented
 - docs accurately describe current behavior
