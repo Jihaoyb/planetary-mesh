@@ -34,7 +34,7 @@ func main() {
 	var postgresStore *coordinator.PostgresStore
 	storageBackend := "in_memory"
 	var schemaStatus *protocol.SchemaStatus
-	var recoveredRunningJobs int64
+	var startupRunningJobIDs []string
 
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -57,15 +57,16 @@ func main() {
 		storageBackend = "postgres"
 		status := store.SchemaStatus()
 		schemaStatus = &status
-		recovered, err := jobs.FailRunningJobs(coordinator.RestartRecoveryError)
+		runningIDs, err := jobs.ListRunningIDs()
 		if err != nil {
-			logger.Error("recover running jobs failed", "err", err)
+			logger.Error("list startup running jobs failed", "err", err)
 			os.Exit(1)
 		}
-		recoveredRunningJobs = recovered
+		startupRunningJobIDs = runningIDs
 		logger.Info(
 			"postgres storage initialized",
-			"recovered_running_jobs", recovered,
+			"startup_running_jobs", len(startupRunningJobIDs),
+			"reconciliation_grace", cfg.ReconciliationGrace.String(),
 			"schema_ready", status.Ready,
 			"schema_version", status.Version,
 			"schema_expected_version", status.ExpectedVersion,
@@ -104,15 +105,21 @@ func main() {
 			AllowedNodeFingerprints: cfg.AllowedNodeFingerprints,
 		},
 		coordinator.RuntimeConfig{
-			StorageBackend: storageBackend,
-			Schema:         schemaStatus,
-			SecureMode:     cfg.SecureMode,
+			StorageBackend:      storageBackend,
+			Schema:              schemaStatus,
+			SecureMode:          cfg.SecureMode,
+			ReconciliationGrace: cfg.ReconciliationGrace,
 		},
 		logger,
 	)
-	srv.Metrics().StartupRecoveredJobs.Store(uint64(recoveredRunningJobs))
 
 	stopCh := make(chan struct{})
+	if storageBackend == "postgres" {
+		if err := srv.StartReconciliationGrace(stopCh, startupRunningJobIDs, cfg.ReconciliationGrace, coordinator.RestartRecoveryError); err != nil {
+			logger.Error("start reconciliation grace failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	coordinator.StartHealthChecker(registry, stopCh)
 	srv.StartQueuedJobScheduler(stopCh)
 

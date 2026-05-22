@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"planetary-mesh/internal/protocol"
 )
@@ -52,9 +53,10 @@ func TestHandleStatus(t *testing.T) {
 		nil,
 		DispatchConfig{Timeout: 2, MaxAttempts: 2, BaseBackoff: 1},
 		SecurityConfig{AllowedNodeIdentities: map[string][]string{"agent-1": {"dns:agent.local"}}},
-		RuntimeConfig{StorageBackend: "postgres", Schema: &schema, SecureMode: true},
+		RuntimeConfig{StorageBackend: "postgres", Schema: &schema, SecureMode: true, ReconciliationGrace: 30 * time.Second},
 		nil,
 	)
+	srv.Metrics().ReconciliationPendingJobs.Store(2)
 
 	req := newVersionedRequest(http.MethodGet, "/status", nil)
 	w := httptest.NewRecorder()
@@ -79,6 +81,9 @@ func TestHandleStatus(t *testing.T) {
 	if got.Dispatch.MaxAttempts != 2 {
 		t.Fatalf("unexpected dispatch metadata: %+v", got.Dispatch)
 	}
+	if got.Reconciliation == nil || got.Reconciliation.Grace != "30s" || got.Reconciliation.PendingRunningJobs != 2 {
+		t.Fatalf("unexpected reconciliation metadata: %+v", got.Reconciliation)
+	}
 }
 
 func TestHandleStatusOmitsSchemaForInMemory(t *testing.T) {
@@ -97,6 +102,9 @@ func TestHandleStatusOmitsSchemaForInMemory(t *testing.T) {
 	}
 	if got.Schema != nil {
 		t.Fatalf("expected schema metadata to be omitted for in-memory storage, got %+v", got.Schema)
+	}
+	if got.Reconciliation != nil {
+		t.Fatalf("expected reconciliation metadata to be omitted for in-memory storage, got %+v", got.Reconciliation)
 	}
 }
 

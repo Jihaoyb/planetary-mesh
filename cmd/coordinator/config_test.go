@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadCoordinatorConfigDefaults(t *testing.T) {
@@ -17,6 +18,9 @@ func TestLoadCoordinatorConfigDefaults(t *testing.T) {
 	if cfg.DatabaseURL != "" {
 		t.Fatalf("expected empty database URL, got %q", cfg.DatabaseURL)
 	}
+	if cfg.ReconciliationGrace != 30*time.Second {
+		t.Fatalf("expected default reconciliation grace 30s, got %s", cfg.ReconciliationGrace)
+	}
 	if cfg.SecureMode {
 		t.Fatalf("expected plain mode by default")
 	}
@@ -27,8 +31,10 @@ func TestLoadCoordinatorConfigFromFileAndEnvOverride(t *testing.T) {
 	path := writeTempConfig(t, `
 COORDINATOR_ADDR=:9090
 COORDINATOR_DATABASE_URL=postgres://from-file
+COORDINATOR_RECONCILIATION_GRACE=45s
 `)
 	t.Setenv("COORDINATOR_ADDR", ":9999")
+	t.Setenv("COORDINATOR_RECONCILIATION_GRACE", "5s")
 
 	cfg := loadCoordinatorConfigClean(t, []string{"--config", path})
 	if cfg.ConfigFile != path {
@@ -39,6 +45,9 @@ COORDINATOR_DATABASE_URL=postgres://from-file
 	}
 	if cfg.DatabaseURL != "postgres://from-file" {
 		t.Fatalf("expected file database URL, got %q", cfg.DatabaseURL)
+	}
+	if cfg.ReconciliationGrace != 5*time.Second {
+		t.Fatalf("expected env reconciliation grace override, got %s", cfg.ReconciliationGrace)
 	}
 }
 
@@ -103,6 +112,20 @@ func TestLoadCoordinatorConfigRejectsPartialTLS(t *testing.T) {
 	}
 }
 
+func TestLoadCoordinatorConfigRejectsInvalidReconciliationGrace(t *testing.T) {
+	clearCoordinatorEnv(t)
+	invalidPath := writeTempConfig(t, `COORDINATOR_RECONCILIATION_GRACE=not-a-duration`)
+	if err := loadCoordinatorConfigError(t, []string{"--config", invalidPath}); err == nil || !strings.Contains(err.Error(), "invalid COORDINATOR_RECONCILIATION_GRACE") {
+		t.Fatalf("expected invalid reconciliation grace error, got %v", err)
+	}
+
+	clearCoordinatorEnv(t)
+	negativePath := writeTempConfig(t, `COORDINATOR_RECONCILIATION_GRACE=-1s`)
+	if err := loadCoordinatorConfigError(t, []string{"--config", negativePath}); err == nil || !strings.Contains(err.Error(), "cannot be negative") {
+		t.Fatalf("expected negative reconciliation grace error, got %v", err)
+	}
+}
+
 func TestLoadCoordinatorConfigRejectsMissingExplicitFile(t *testing.T) {
 	clearCoordinatorEnv(t)
 	err := loadCoordinatorConfigError(t, []string{"--config", filepath.Join(t.TempDir(), "missing.env")})
@@ -132,6 +155,7 @@ func clearCoordinatorEnv(t *testing.T) {
 		"COORDINATOR_CONFIG_FILE",
 		"COORDINATOR_ADDR",
 		"COORDINATOR_DATABASE_URL",
+		"COORDINATOR_RECONCILIATION_GRACE",
 		"COORDINATOR_TLS_CA_FILE",
 		"COORDINATOR_TLS_CERT_FILE",
 		"COORDINATOR_TLS_KEY_FILE",

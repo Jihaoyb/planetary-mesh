@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"planetary-mesh/internal/configfile"
+	"planetary-mesh/internal/coordinator"
 	"planetary-mesh/internal/security"
 )
 
@@ -19,6 +21,7 @@ type coordinatorConfig struct {
 	ConfigFile              string
 	Addr                    string
 	DatabaseURL             string
+	ReconciliationGrace     time.Duration
 	TLSFiles                security.TLSFiles
 	AllowedNodeIdentities   map[string][]string
 	AllowedNodeFingerprints map[string][]string
@@ -78,10 +81,20 @@ func loadCoordinatorConfig(args []string) (coordinatorConfig, error) {
 		return coordinatorConfig{}, fmt.Errorf("node allowlists require coordinator TLS config")
 	}
 
+	reconciliationGraceRaw := source.get("COORDINATOR_RECONCILIATION_GRACE", coordinator.DefaultReconciliationGrace.String())
+	reconciliationGrace, err := time.ParseDuration(reconciliationGraceRaw)
+	if err != nil {
+		return coordinatorConfig{}, fmt.Errorf("invalid COORDINATOR_RECONCILIATION_GRACE %q: %w", reconciliationGraceRaw, err)
+	}
+	if reconciliationGrace < 0 {
+		return coordinatorConfig{}, fmt.Errorf("COORDINATOR_RECONCILIATION_GRACE cannot be negative")
+	}
+
 	return coordinatorConfig{
 		ConfigFile:              path,
 		Addr:                    source.get("COORDINATOR_ADDR", ":8080"),
 		DatabaseURL:             source.get("COORDINATOR_DATABASE_URL", ""),
+		ReconciliationGrace:     reconciliationGrace,
 		TLSFiles:                tlsFiles,
 		AllowedNodeIdentities:   allowedIdentities,
 		AllowedNodeFingerprints: allowedFingerprints,

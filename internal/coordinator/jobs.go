@@ -66,17 +66,31 @@ type JobResult struct {
 	LastError       string
 }
 
+type ReportedResultOutcome string
+
+const (
+	ReportedResultAccepted          ReportedResultOutcome = "accepted"
+	ReportedResultDuplicateTerminal ReportedResultOutcome = "duplicate_terminal"
+	ReportedResultNotFound          ReportedResultOutcome = "not_found"
+	ReportedResultWrongNode         ReportedResultOutcome = "wrong_node"
+	ReportedResultWrongState        ReportedResultOutcome = "wrong_state"
+	ReportedResultUnsupportedStatus ReportedResultOutcome = "unsupported_status"
+)
+
 // JobStorage is the coordinator's narrow job persistence contract.
 type JobStorage interface {
 	Create(in JobCreateInput) (Job, error)
 	List() ([]Job, error)
 	ListQueuedIDs() ([]string, error)
+	ListRunningIDs() ([]string, error)
 	Get(id string) (Job, bool, error)
 	StartAttempt(id, nodeID string) (Job, error)
 	Complete(id, nodeID string, result JobResult) (Job, error)
 	Fail(id, nodeID string, result JobResult) (Job, error)
+	AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error)
 	ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error)
 	FailRunningJobs(lastError string) (int64, error)
+	FailRunningJobIDs(ids []string, lastError string) (int64, error)
 }
 
 // JobStore is an in-memory, concurrency-safe job registry.
@@ -155,6 +169,30 @@ func (s *JobStore) ListQueuedIDs() ([]string, error) {
 	return ids, nil
 }
 
+func (s *JobStore) ListRunningIDs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	running := make([]Job, 0)
+	for _, j := range s.jobs {
+		if j.Status == JobStatusRunning {
+			running = append(running, *j)
+		}
+	}
+	sort.Slice(running, func(i, j int) bool {
+		if running[i].CreatedAt.Equal(running[j].CreatedAt) {
+			return running[i].ID < running[j].ID
+		}
+		return running[i].CreatedAt.Before(running[j].CreatedAt)
+	})
+
+	ids := make([]string, 0, len(running))
+	for _, j := range running {
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
 // Get returns a single job by ID. The boolean is false if not found.
 func (s *JobStore) Get(id string) (Job, bool, error) {
 	s.mu.Lock()
@@ -199,6 +237,30 @@ func (s *JobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
 }
 
+func (s *JobStore) AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error) {
+	if !isReportedTerminalStatus(status) {
+		return Job{}, ReportedResultUnsupportedStatus, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[id]
+	if !ok {
+		return Job{}, ReportedResultNotFound, nil
+	}
+	if j.Status != JobStatusRunning {
+		return *j, classifyReportedResultMiss(*j, nodeID), nil
+	}
+	if j.NodeID != nodeID {
+		return *j, ReportedResultWrongNode, nil
+	}
+
+	now := time.Now().UTC()
+	applyJobResult(j, nodeID, status, result, now)
+	return *j, ReportedResultAccepted, nil
+}
+
 // ExpireQueuedJobs marks queued jobs older than maxAge as failed.
 func (s *JobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
 	if maxAge <= 0 {
@@ -226,12 +288,32 @@ func (s *JobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastErr
 
 // FailRunningJobs marks jobs left RUNNING across a coordinator restart as failed.
 func (s *JobStore) FailRunningJobs(lastError string) (int64, error) {
+	ids, err := s.ListRunningIDs()
+	if err != nil {
+		return 0, err
+	}
+	return s.FailRunningJobIDs(ids, lastError)
+}
+
+func (s *JobStore) FailRunningJobIDs(ids []string, lastError string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	targets := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		targets[id] = struct{}{}
+	}
+
 	now := time.Now().UTC()
 	var count int64
-	for _, j := range s.jobs {
+	for id, j := range s.jobs {
+		if _, ok := targets[id]; !ok {
+			continue
+		}
 		if j.Status != JobStatusRunning {
 			continue
 		}
@@ -257,6 +339,12 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	}
 
 	now := time.Now().UTC()
+	applyJobResult(j, nodeID, status, result, now)
+
+	return *j, nil
+}
+
+func applyJobResult(j *Job, nodeID string, status JobStatus, result JobResult, now time.Time) {
 	j.Status = status
 	if nodeID != "" {
 		j.NodeID = nodeID
@@ -269,8 +357,6 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	j.StderrTruncated = result.StderrTruncated
 	j.LastError = result.LastError
 	j.UpdatedAt = now
-
-	return *j, nil
 }
 
 func validateJobTransition(id string, from, to JobStatus) error {
@@ -303,5 +389,26 @@ func isCurrentJobStatus(status JobStatus) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func isReportedTerminalStatus(status JobStatus) bool {
+	return status == JobStatusCompleted || status == JobStatusFailed
+}
+
+func classifyReportedResultMiss(job Job, nodeID string) ReportedResultOutcome {
+	switch job.Status {
+	case JobStatusCompleted, JobStatusFailed:
+		if job.NodeID == nodeID {
+			return ReportedResultDuplicateTerminal
+		}
+		return ReportedResultWrongNode
+	case JobStatusRunning:
+		if job.NodeID != nodeID {
+			return ReportedResultWrongNode
+		}
+		return ReportedResultWrongState
+	default:
+		return ReportedResultWrongState
 	}
 }

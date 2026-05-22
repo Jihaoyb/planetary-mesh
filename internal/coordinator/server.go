@@ -36,13 +36,16 @@ func (c SecurityConfig) Enabled() bool {
 }
 
 type RuntimeConfig struct {
-	StorageBackend string
-	Schema         *protocol.SchemaStatus
-	SecureMode     bool
+	StorageBackend      string
+	Schema              *protocol.SchemaStatus
+	SecureMode          bool
+	ReconciliationGrace time.Duration
 }
 
 const defaultQueuedSchedulerInterval = 5 * time.Second
 const defaultQueuedJobMaxAge = 24 * time.Hour
+
+const DefaultReconciliationGrace = 30 * time.Second
 
 // DefaultDispatchConfig returns sensible defaults for v0.
 func DefaultDispatchConfig() DispatchConfig {
@@ -66,6 +69,9 @@ type Server struct {
 
 	activeDispatchMu sync.Mutex
 	activeDispatches map[string]struct{}
+
+	reconciliationMu      sync.Mutex
+	reconciliationPending map[string]struct{}
 }
 
 // NewServer constructs a Server with default dispatch config.
@@ -125,7 +131,8 @@ func NewServerWithRuntime(
 		runtime:    runtimeConfig,
 		logger:     logger.With("component", "coordinator"),
 
-		activeDispatches: make(map[string]struct{}),
+		activeDispatches:      make(map[string]struct{}),
+		reconciliationPending: make(map[string]struct{}),
 	}
 }
 
@@ -206,19 +213,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	certificate := security.CertificateMetadata{}
-	if s.security.Enabled() {
-		peer := peerCertificate(r)
-		if peer == nil {
-			http.Error(w, "client certificate is required", http.StatusForbidden)
-			return
-		}
-		if !security.AuthorizeNode(req.ID, peer, s.security.AllowedNodeIdentities, s.security.AllowedNodeFingerprints) {
-			s.logger.Warn("node registration rejected", "node_id", req.ID, "fingerprint", security.Fingerprint(peer))
-			http.Error(w, "node is not allowlisted", http.StatusForbidden)
-			return
-		}
-		certificate = security.FromCertificate(peer)
+	certificate, ok := s.authorizeNodeRequest(w, r, req.ID)
+	if !ok {
+		return
 	}
 
 	node, err := s.registry.Register(NodeRegistration{
@@ -240,6 +237,24 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(node); err != nil {
 		s.logger.Warn("encode register response failed", "err", err)
 	}
+}
+
+func (s *Server) authorizeNodeRequest(w http.ResponseWriter, r *http.Request, nodeID string) (security.CertificateMetadata, bool) {
+	if !s.security.Enabled() {
+		return security.CertificateMetadata{}, true
+	}
+
+	peer := peerCertificate(r)
+	if peer == nil {
+		http.Error(w, "client certificate is required", http.StatusForbidden)
+		return security.CertificateMetadata{}, false
+	}
+	if !security.AuthorizeNode(nodeID, peer, s.security.AllowedNodeIdentities, s.security.AllowedNodeFingerprints) {
+		s.logger.Warn("node request rejected", "node_id", nodeID, "fingerprint", security.Fingerprint(peer))
+		http.Error(w, "node is not allowlisted", http.StatusForbidden)
+		return security.CertificateMetadata{}, false
+	}
+	return security.FromCertificate(peer), true
 }
 
 func peerCertificate(r *http.Request) *x509.Certificate {
@@ -296,8 +311,30 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleJobByID handles GET /jobs/{id}.
+// handleJobByID handles GET /jobs/{id} and POST /jobs/{id}/result.
 func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/jobs/")
+	if path == "" {
+		http.Error(w, "invalid job id", http.StatusBadRequest)
+		return
+	}
+	if strings.HasSuffix(path, "/result") {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !requireProtocolVersion(w, r) {
+			return
+		}
+		id := strings.TrimSuffix(path, "/result")
+		if id == "" || strings.Contains(id, "/") {
+			http.Error(w, "invalid job id", http.StatusBadRequest)
+			return
+		}
+		s.handleJobResult(w, r, id)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -305,16 +342,14 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 	if !requireProtocolVersion(w, r) {
 		return
 	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/jobs/")
-	if id == "" || strings.Contains(id, "/") {
+	if strings.Contains(path, "/") {
 		http.Error(w, "invalid job id", http.StatusBadRequest)
 		return
 	}
 
-	job, ok, err := s.jobs.Get(id)
+	job, ok, err := s.jobs.Get(path)
 	if err != nil {
-		s.logger.Error("get job failed", "job_id", id, "err", err)
+		s.logger.Error("get job failed", "job_id", path, "err", err)
 		http.Error(w, "get job failed", http.StatusInternalServerError)
 		return
 	}
@@ -325,8 +360,80 @@ func (s *Server) handleJobByID(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(job); err != nil {
-		s.logger.Warn("encode job response failed", "job_id", id, "err", err)
+		s.logger.Warn("encode job response failed", "job_id", path, "err", err)
 	}
+}
+
+func (s *Server) handleJobResult(w http.ResponseWriter, r *http.Request, id string) {
+	var req protocol.JobResultReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.NodeID == "" {
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "node_id is required", http.StatusBadRequest)
+		return
+	}
+	status := JobStatus(req.Status)
+	if !isReportedTerminalStatus(status) {
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
+		return
+	}
+	if _, ok := s.authorizeNodeRequest(w, r, req.NodeID); !ok {
+		return
+	}
+
+	result := JobResult{
+		ExitCode:        req.ExitCode,
+		Stdout:          req.Stdout,
+		Stderr:          req.Stderr,
+		StdoutTruncated: req.StdoutTruncated,
+		StderrTruncated: req.StderrTruncated,
+		LastError:       req.LastError,
+	}
+	job, outcome, err := s.jobs.AcceptReportedResult(id, req.NodeID, status, result)
+	if err != nil {
+		s.logger.Error("accept reported job result failed", "job_id", id, "node_id", req.NodeID, "err", err)
+		http.Error(w, "accept reported job result failed", http.StatusInternalServerError)
+		return
+	}
+
+	switch outcome {
+	case ReportedResultAccepted:
+		s.metrics.ResultReportsAccepted.Add(1)
+		s.recordTerminalJobMetric(status)
+		s.resolveReconciliationPending(id)
+		s.logger.Info("reported job result accepted", "job_id", id, "node_id", req.NodeID, "status", status)
+		writeJobJSON(w, job)
+	case ReportedResultDuplicateTerminal:
+		s.metrics.ResultReportsIgnored.Add(1)
+		s.resolveReconciliationPending(id)
+		s.logger.Debug("reported job result ignored for terminal job", "job_id", id, "node_id", req.NodeID, "status", job.Status)
+		writeJobJSON(w, job)
+	case ReportedResultNotFound:
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "job not found", http.StatusNotFound)
+	case ReportedResultWrongNode:
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "reported result node does not match running job", http.StatusConflict)
+	case ReportedResultWrongState:
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "job is not accepting reported results", http.StatusConflict)
+	case ReportedResultUnsupportedStatus:
+		s.metrics.ResultReportsIgnored.Add(1)
+		http.Error(w, "status must be COMPLETED or FAILED", http.StatusBadRequest)
+	default:
+		s.logger.Error("unknown reported result outcome", "job_id", id, "node_id", req.NodeID, "outcome", outcome)
+		http.Error(w, "accept reported job result failed", http.StatusInternalServerError)
+	}
+}
+
+func writeJobJSON(w http.ResponseWriter, job Job) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(job)
 }
 
 // handleMetrics serves /metrics in Prometheus text format.
@@ -364,6 +471,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			MaxAttempts: s.dispatch.MaxAttempts,
 			BaseBackoff: s.dispatch.BaseBackoff.String(),
 		},
+	}
+	if s.runtime.StorageBackend == "postgres" {
+		resp.Reconciliation = &protocol.ReconciliationStatus{
+			Grace:              s.runtime.ReconciliationGrace.String(),
+			PendingRunningJobs: s.metrics.ReconciliationPendingJobs.Load(),
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -497,6 +610,77 @@ func (s *Server) dispatchQueuedJobs() {
 	}
 }
 
+func (s *Server) StartReconciliationGrace(stopCh <-chan struct{}, jobIDs []string, grace time.Duration, lastError string) error {
+	s.setReconciliationPending(jobIDs)
+	if len(jobIDs) == 0 {
+		return nil
+	}
+	if grace <= 0 {
+		failed, err := s.jobs.FailRunningJobIDs(jobIDs, lastError)
+		if err != nil {
+			return err
+		}
+		s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+		s.clearReconciliationPending(jobIDs)
+		s.logger.Warn("startup running jobs failed without reconciliation grace", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
+		return nil
+	}
+
+	s.logger.Info("startup reconciliation grace started", "startup_running_jobs", len(jobIDs), "grace", grace.String())
+	timer := time.NewTimer(grace)
+	go func() {
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			failed, err := s.jobs.FailRunningJobIDs(jobIDs, lastError)
+			if err != nil {
+				s.logger.Error("startup reconciliation grace recovery failed", "err", err)
+				return
+			}
+			s.metrics.StartupRecoveredJobs.Add(uint64(failed))
+			s.clearReconciliationPending(jobIDs)
+			s.logger.Warn("startup reconciliation grace expired", "failed_jobs", failed, "startup_running_jobs", len(jobIDs))
+		case <-stopCh:
+			s.clearReconciliationPending(jobIDs)
+			s.logger.Info("startup reconciliation grace stopped before expiry", "startup_running_jobs", len(jobIDs))
+		}
+	}()
+	return nil
+}
+
+func (s *Server) setReconciliationPending(jobIDs []string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	s.reconciliationPending = make(map[string]struct{}, len(jobIDs))
+	for _, id := range jobIDs {
+		s.reconciliationPending[id] = struct{}{}
+	}
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
+}
+
+func (s *Server) resolveReconciliationPending(jobID string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	if _, ok := s.reconciliationPending[jobID]; !ok {
+		return
+	}
+	delete(s.reconciliationPending, jobID)
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
+}
+
+func (s *Server) clearReconciliationPending(jobIDs []string) {
+	s.reconciliationMu.Lock()
+	defer s.reconciliationMu.Unlock()
+
+	for _, id := range jobIDs {
+		delete(s.reconciliationPending, id)
+	}
+	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
+}
+
 func hasHealthyNode(nodes []Node) bool {
 	for _, node := range nodes {
 		if node.State == NodeStateHealthy {
@@ -598,8 +782,10 @@ func (s *Server) dispatchJob(jobID string) {
 			if ok {
 				if _, err := s.jobs.Complete(jobID, target.ID, result); err != nil {
 					logger.Error("failed to mark job COMPLETED", "err", err)
+					return
 				}
 				s.metrics.JobsCompleted.Add(1)
+				s.resolveReconciliationPending(jobID)
 				logger.Info("job completed")
 				return
 			}
@@ -709,8 +895,19 @@ func decodeExecuteResponse(body io.Reader) JobResult {
 func (s *Server) failJob(jobID, nodeID string, result JobResult) {
 	if _, err := s.jobs.Fail(jobID, nodeID, result); err != nil {
 		s.logger.Error("failed to mark job FAILED", "job_id", jobID, "err", err)
+		return
 	}
 	s.metrics.JobsFailed.Add(1)
+	s.resolveReconciliationPending(jobID)
+}
+
+func (s *Server) recordTerminalJobMetric(status JobStatus) {
+	switch status {
+	case JobStatusCompleted:
+		s.metrics.JobsCompleted.Add(1)
+	case JobStatusFailed:
+		s.metrics.JobsFailed.Add(1)
+	}
 }
 
 // buildAgentBaseURL converts a node's Address into a usable base URL.

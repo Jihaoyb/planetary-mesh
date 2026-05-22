@@ -13,6 +13,9 @@ const (
 
 	MaxNodeCapabilities     = 32
 	MaxNodeCapabilityLength = 64
+
+	JobResultStatusCompleted = "COMPLETED"
+	JobResultStatusFailed    = "FAILED"
 )
 
 func SetVersionHeader(h http.Header) {
@@ -32,6 +35,17 @@ type ExecuteRequest struct {
 }
 
 type ExecuteResponse struct {
+	Status          string `json:"status"`
+	ExitCode        *int   `json:"exit_code,omitempty"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+	LastError       string `json:"last_error"`
+}
+
+type JobResultReportRequest struct {
+	NodeID          string `json:"node_id"`
 	Status          string `json:"status"`
 	ExitCode        *int   `json:"exit_code,omitempty"`
 	Stdout          string `json:"stdout"`
@@ -98,13 +112,14 @@ func isValidNodeCapability(label string) bool {
 }
 
 type CoordinatorStatusResponse struct {
-	Status               string         `json:"status"`
-	ProtocolVersion      string         `json:"protocol_version"`
-	StorageBackend       string         `json:"storage_backend"`
-	Schema               *SchemaStatus  `json:"schema,omitempty"`
-	SecureMode           bool           `json:"secure_mode"`
-	NodeAllowlistEnabled bool           `json:"node_allowlist_enabled"`
-	Dispatch             DispatchStatus `json:"dispatch"`
+	Status               string                `json:"status"`
+	ProtocolVersion      string                `json:"protocol_version"`
+	StorageBackend       string                `json:"storage_backend"`
+	Schema               *SchemaStatus         `json:"schema,omitempty"`
+	SecureMode           bool                  `json:"secure_mode"`
+	NodeAllowlistEnabled bool                  `json:"node_allowlist_enabled"`
+	Dispatch             DispatchStatus        `json:"dispatch"`
+	Reconciliation       *ReconciliationStatus `json:"reconciliation,omitempty"`
 }
 
 type SchemaStatus struct {
@@ -117,4 +132,9 @@ type DispatchStatus struct {
 	Timeout     string `json:"timeout"`
 	MaxAttempts int    `json:"max_attempts"`
 	BaseBackoff string `json:"base_backoff"`
+}
+
+type ReconciliationStatus struct {
+	Grace              string `json:"grace"`
+	PendingRunningJobs uint64 `json:"pending_running_jobs"`
 }

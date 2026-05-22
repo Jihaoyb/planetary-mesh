@@ -420,6 +420,24 @@ func (s *PostgresJobStore) ListQueuedIDs() ([]string, error) {
 	return ids, rows.Err()
 }
 
+func (s *PostgresJobStore) ListRunningIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM jobs WHERE status = $1 ORDER BY created_at, id`, JobStatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *PostgresJobStore) Get(id string) (Job, bool, error) {
 	row := s.db.QueryRow(jobSelectSQL+` WHERE id = $1`, id)
 	job, err := scanJob(row)
@@ -457,6 +475,57 @@ func (s *PostgresJobStore) Complete(id, nodeID string, result JobResult) (Job, e
 
 func (s *PostgresJobStore) Fail(id, nodeID string, result JobResult) (Job, error) {
 	return s.finish(id, nodeID, JobStatusFailed, result)
+}
+
+func (s *PostgresJobStore) AcceptReportedResult(id, nodeID string, status JobStatus, result JobResult) (Job, ReportedResultOutcome, error) {
+	if !isReportedTerminalStatus(status) {
+		return Job{}, ReportedResultUnsupportedStatus, nil
+	}
+
+	now := time.Now().UTC()
+	row := s.db.QueryRow(`
+UPDATE jobs
+SET status = $2,
+    completed_at = $4,
+    exit_code = $5,
+    stdout = $6,
+    stderr = $7,
+    stdout_truncated = $8,
+    stderr_truncated = $9,
+    last_error = $10,
+    updated_at = $4
+WHERE id = $1
+  AND status = $11
+  AND node_id = $3
+RETURNING `+jobColumns,
+		id,
+		status,
+		nodeID,
+		now,
+		result.ExitCode,
+		result.Stdout,
+		result.Stderr,
+		result.StdoutTruncated,
+		result.StderrTruncated,
+		result.LastError,
+		JobStatusRunning,
+	)
+	job, err := scanJob(row)
+	if err == nil {
+		return job, ReportedResultAccepted, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Job{}, "", err
+	}
+
+	current, ok, err := s.Get(id)
+	if err != nil {
+		return Job{}, "", err
+	}
+	if !ok {
+		return Job{}, ReportedResultNotFound, nil
+	}
+	return current, classifyReportedResultMiss(current, nodeID), nil
 }
 
 func (s *PostgresJobStore) ExpireQueuedJobs(now time.Time, maxAge time.Duration, lastError string) (int64, error) {
@@ -549,19 +618,55 @@ func (s *PostgresJobStore) transitionError(id string, to JobStatus) error {
 }
 
 func (s *PostgresJobStore) FailRunningJobs(lastError string) (int64, error) {
+	ids, err := s.ListRunningIDs()
+	if err != nil {
+		return 0, err
+	}
+	return s.FailRunningJobIDs(ids, lastError)
+}
+
+func (s *PostgresJobStore) FailRunningJobIDs(ids []string, lastError string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
 	now := time.Now().UTC()
-	res, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
 UPDATE jobs
 SET status = $1,
     completed_at = $2,
     last_error = $3,
     updated_at = $2
-WHERE status = $4
-`, JobStatusFailed, now, lastError, JobStatusRunning)
+WHERE id = $4
+  AND status = $5
+`)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	defer stmt.Close()
+
+	var count int64
+	for _, id := range ids {
+		res, err := stmt.Exec(JobStatusFailed, now, lastError, id, JobStatusRunning)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		count += affected
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 const jobColumns = `

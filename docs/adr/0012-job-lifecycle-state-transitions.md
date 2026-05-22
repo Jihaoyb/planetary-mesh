@@ -34,7 +34,7 @@ Allowed transitions:
 - successful execution transitions `RUNNING` to `COMPLETED`
 - terminal execution or dispatch failure transitions `RUNNING` to `FAILED`
 - queued expiration can transition `QUEUED` to `FAILED`
-- Postgres startup recovery transitions persisted `RUNNING` jobs to `FAILED`
+- Postgres startup recovery can transition persisted `RUNNING` jobs to `FAILED`
 
 Details:
 
@@ -48,6 +48,11 @@ Details:
   behavior is added.
 - Public job JSON fields, status strings, and protocol version are unchanged.
 - Postgres schema readiness metadata remains version `2`.
+
+Milestone 15 narrows the Postgres startup recovery behavior for persisted
+`RUNNING` jobs by adding bounded reconciliation grace before unreconciled
+startup-running jobs are failed. See
+[ADR 0013](0013-agent-reconciliation-strategy.md).
 
 ## Alternatives Considered
 
@@ -74,4 +79,4 @@ Details:
   - Terminal job history is protected from accidental lifecycle overwrites.
 - Negative:
   - Unsupported persisted statuses remain inspectable but are not dispatchable.
-  - Cancellation, reconciliation, and richer progress states remain future work.
+  - Cancellation and richer progress states remain future work.

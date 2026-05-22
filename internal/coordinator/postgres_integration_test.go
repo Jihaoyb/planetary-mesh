@@ -199,6 +199,97 @@ func TestPostgresJobLifecyclePersistence(t *testing.T) {
 	}
 }
 
+func TestPostgresAcceptReportedResult(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(created.ID, "node-pg"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	exitCode := 0
+	completed, outcome, err := jobs.AcceptReportedResult(created.ID, "node-pg", JobStatusCompleted, JobResult{
+		ExitCode: &exitCode,
+		Stdout:   "reported\n",
+	})
+	if err != nil {
+		t.Fatalf("accept reported result: %v", err)
+	}
+	if outcome != ReportedResultAccepted {
+		t.Fatalf("expected accepted outcome, got %s", outcome)
+	}
+	if completed.Status != JobStatusCompleted || completed.Stdout != "reported\n" || completed.ExitCode == nil || *completed.ExitCode != 0 {
+		t.Fatalf("unexpected completed report: %+v", completed)
+	}
+
+	duplicate, outcome, err := jobs.AcceptReportedResult(created.ID, "node-pg", JobStatusFailed, JobResult{LastError: "overwrite"})
+	if err != nil {
+		t.Fatalf("accept duplicate report: %v", err)
+	}
+	if outcome != ReportedResultDuplicateTerminal {
+		t.Fatalf("expected duplicate terminal outcome, got %s", outcome)
+	}
+	if duplicate.Status != JobStatusCompleted || duplicate.Stdout != "reported\n" || duplicate.LastError != "" {
+		t.Fatalf("duplicate report mutated terminal job: %+v", duplicate)
+	}
+}
+
+func TestPostgresRejectsWrongNodeReportedResult(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(created.ID, "node-a"); err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+
+	got, outcome, err := jobs.AcceptReportedResult(created.ID, "node-b", JobStatusCompleted, JobResult{Stdout: "wrong\n"})
+	if err != nil {
+		t.Fatalf("accept wrong-node report: %v", err)
+	}
+	if outcome != ReportedResultWrongNode {
+		t.Fatalf("expected wrong-node outcome, got %s", outcome)
+	}
+	if got.Status != JobStatusRunning || got.NodeID != "node-a" || got.Stdout != "" {
+		t.Fatalf("wrong-node report mutated job: %+v", got)
+	}
+}
+
+func TestPostgresReportedResultOutcomes(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	if _, outcome, err := jobs.AcceptReportedResult("missing", "node-pg", JobStatusCompleted, JobResult{}); err != nil {
+		t.Fatalf("accept missing report: %v", err)
+	} else if outcome != ReportedResultNotFound {
+		t.Fatalf("expected not-found outcome, got %s", outcome)
+	}
+
+	queued, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create queued job: %v", err)
+	}
+	if _, outcome, err := jobs.AcceptReportedResult(queued.ID, "node-pg", JobStatusCancelled, JobResult{}); err != nil {
+		t.Fatalf("accept unsupported report status: %v", err)
+	} else if outcome != ReportedResultUnsupportedStatus {
+		t.Fatalf("expected unsupported-status outcome, got %s", outcome)
+	}
+	if got, outcome, err := jobs.AcceptReportedResult(queued.ID, "node-pg", JobStatusCompleted, JobResult{Stdout: "queued\n"}); err != nil {
+		t.Fatalf("accept queued report: %v", err)
+	} else if outcome != ReportedResultWrongState {
+		t.Fatalf("expected wrong-state outcome, got %s", outcome)
+	} else if got.Status != JobStatusQueued || got.Stdout != "" {
+		t.Fatalf("queued report mutated job: %+v", got)
+	}
+}
+
 func TestPostgresJobAttemptReassignmentPersistence(t *testing.T) {
 	store := openPostgresTestStore(t)
 	status := store.SchemaStatus()
@@ -553,6 +644,77 @@ func TestPostgresFailRunningJobs(t *testing.T) {
 	}
 	if got.Status != JobStatusFailed || got.LastError != RestartRecoveryError || got.CompletedAt == nil {
 		t.Fatalf("unexpected recovered job: %+v", got)
+	}
+}
+
+func TestPostgresFailRunningJobIDsOnlyFailsCapturedIDs(t *testing.T) {
+	store := openPostgresTestStore(t)
+	jobs := store.Jobs()
+
+	captured, err := jobs.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create captured job: %v", err)
+	}
+	notCaptured, err := jobs.Create(JobCreateInput{Type: "command", Command: "sleep"})
+	if err != nil {
+		t.Fatalf("create uncaptured job: %v", err)
+	}
+	queued, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create queued job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(captured.ID, "node-pg"); err != nil {
+		t.Fatalf("start captured job: %v", err)
+	}
+	if _, err := jobs.StartAttempt(notCaptured.ID, "node-pg"); err != nil {
+		t.Fatalf("start uncaptured job: %v", err)
+	}
+
+	runningIDs, err := jobs.ListRunningIDs()
+	if err != nil {
+		t.Fatalf("list running ids: %v", err)
+	}
+	if len(runningIDs) != 2 || runningIDs[0] != captured.ID || runningIDs[1] != notCaptured.ID {
+		t.Fatalf("unexpected running ids: %v", runningIDs)
+	}
+
+	failed, err := jobs.FailRunningJobIDs([]string{captured.ID, queued.ID, "missing"}, RestartRecoveryError)
+	if err != nil {
+		t.Fatalf("fail running ids: %v", err)
+	}
+	if failed != 1 {
+		t.Fatalf("expected one captured running job to fail, got %d", failed)
+	}
+
+	gotCaptured, ok, err := jobs.Get(captured.ID)
+	if err != nil {
+		t.Fatalf("get captured job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected captured job")
+	}
+	if gotCaptured.Status != JobStatusFailed || gotCaptured.LastError != RestartRecoveryError {
+		t.Fatalf("unexpected captured job: %+v", gotCaptured)
+	}
+	gotNotCaptured, ok, err := jobs.Get(notCaptured.ID)
+	if err != nil {
+		t.Fatalf("get uncaptured job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected uncaptured job")
+	}
+	if gotNotCaptured.Status != JobStatusRunning {
+		t.Fatalf("uncaptured running job should remain RUNNING, got %+v", gotNotCaptured)
+	}
+	gotQueued, ok, err := jobs.Get(queued.ID)
+	if err != nil {
+		t.Fatalf("get queued job: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected queued job")
+	}
+	if gotQueued.Status != JobStatusQueued {
+		t.Fatalf("queued job should remain QUEUED, got %+v", gotQueued)
 	}
 }
 

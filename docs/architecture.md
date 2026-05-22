@@ -64,6 +64,7 @@ Coordinator endpoints:
 - `POST /jobs` - submit a job
 - `GET /jobs` - list jobs
 - `GET /jobs/{id}` - inspect a job
+- `POST /jobs/{id}/result` - agent terminal result report
 - `GET /metrics` - Prometheus-style text metrics
 
 Agent endpoints:
@@ -93,10 +94,11 @@ Coordinator responsibilities:
 - dispatch to agent `/execute`
 - retry retryable transport errors and agent `5xx` responses
 - mark terminal job outcomes as `COMPLETED` or `FAILED`
+- validate and accept matching agent terminal result reports
 - expose `/status` and `/metrics`
 - use in-memory storage by default or Postgres when configured
-- recover persisted `RUNNING` jobs by marking them `FAILED` on Postgres
-  startup; ADR 0013 records the future reconciliation strategy
+- with Postgres, capture startup `RUNNING` jobs for a bounded reconciliation
+  grace window before failing unreconciled captured jobs
 
 The coordinator owns validation, scheduling, retry policy, and state
 transitions. These responsibilities should not move into agents or `pmctl`.
@@ -115,11 +117,14 @@ Agent responsibilities:
 - execute only locally allowlisted command jobs
 - enforce fixed execution timeout and bounded output capture
 - return execution result fields to the coordinator
+- keep a bounded in-memory cache of recent terminal command results and report
+  them best-effort to the coordinator
 
 The current registration payload includes node id, address, optional static
 capabilities, and an approximate active command execution count. Agents do not
-persist execution result history, reconcile after coordinator restart, or
-report capacity, queue depth, GPU state, or task-level progress today.
+persist execution result history across agent restart, provide full in-progress
+execution recovery, or report capacity, queue depth, GPU state, or task-level
+progress today.
 
 ### pmctl
 
@@ -164,12 +169,14 @@ Postgres behavior today:
   expects
 - expose schema readiness through startup logs, `/status`, `/metrics`,
   `pmctl --json status`, tests, and the Postgres smoke workflow
-- mark persisted `RUNNING` jobs as `FAILED` during coordinator startup with:
+- capture persisted startup `RUNNING` jobs for a bounded reconciliation grace
+  window; matching result reports can complete or fail them during grace
+- mark remaining captured startup `RUNNING` jobs as `FAILED` after grace with:
   `coordinator restarted before result was recorded`
 - enforce the same job lifecycle transition rules as the in-memory store
 
-ADR 0013 documents the accepted future reconciliation strategy. Milestone 14
-does not change storage behavior or schema versioning. This is not a full
+ADR 0013 documents the accepted reconciliation strategy. Milestone 15 implements
+the first runtime slice without changing schema versioning. This is not a full
 migration framework.
 
 ### Command Execution Model
@@ -267,10 +274,11 @@ Allowed coordinator-owned transitions:
 | none | accepted `POST /jobs` | `QUEUED` |
 | `QUEUED` | dispatch attempt starts | `RUNNING` |
 | `RUNNING` | retry or cross-node reassignment attempt starts | `RUNNING` |
-| `RUNNING` | successful agent execution | `COMPLETED` |
-| `RUNNING` | terminal execution/dispatch failure | `FAILED` |
+| `RUNNING` | successful synchronous or matching reported agent execution | `COMPLETED` |
+| `RUNNING` | terminal synchronous or matching reported execution failure | `FAILED` |
+| `RUNNING` | terminal dispatch failure | `FAILED` |
 | `QUEUED` | queued expiration or pre-attempt coordinator failure | `FAILED` |
-| `RUNNING` | Postgres coordinator startup recovery | `FAILED` |
+| `RUNNING` | Postgres reconciliation grace expires without a matching result report | `FAILED` |
 
 If no healthy node exists, the job remains `QUEUED` with no attempts recorded.
 Duplicate dispatch protection is process-local and skips concurrent dispatches
@@ -282,17 +290,27 @@ by later lifecycle methods.
 Current runtime behavior:
 
 - in-memory coordinator state is lost on restart
-- Postgres startup marks persisted `RUNNING` jobs `FAILED` immediately with
+- Postgres startup captures persisted `RUNNING` job ids and leaves those jobs
+  `RUNNING` during a bounded reconciliation grace window
+- the default grace is `30s` and can be configured with
+  `COORDINATOR_RECONCILIATION_GRACE`
+- the coordinator starts serving HTTP during the grace window
+- a matching `POST /jobs/{id}/result` report can complete or fail a captured
+  `RUNNING` job during grace
+- when grace expires, only the remaining captured startup `RUNNING` job ids are
+  marked `FAILED` with
   `coordinator restarted before result was recorded`
-- agents do not persist or replay completed execution results
-- a result can be lost if an agent completed before a coordinator crash but the
-  coordinator did not persist the synchronous `/execute` response
+- `COORDINATOR_RECONCILIATION_GRACE=0s` preserves immediate startup failure
+  behavior for Postgres-backed coordinators
+- agents keep only bounded in-memory result history, so agent restart loses
+  cached reports
+- commands are still tied to the `/execute` request context; this is not full
+  in-progress execution recovery after a dropped coordinator connection
 
-ADR 0013 defines the future strategy: add explicit agent-to-coordinator result
-reporting, keep protocol version `1`, preserve nodes/jobs-only storage for the
-first runtime slice, and use a bounded Postgres reconciliation grace window
-before failing persisted `RUNNING` jobs. This future strategy is not implemented
-today, and terminal `COMPLETED` or `FAILED` jobs remain immutable.
+ADR 0013 records the reconciliation strategy. Milestone 15 implements its first
+runtime slice while keeping protocol version `1`, public job JSON fields,
+nodes/jobs-only storage, and Postgres schema readiness version `2` unchanged.
+Terminal `COMPLETED` or `FAILED` jobs remain immutable.
 
 ### Node Registration and Health
 
@@ -363,7 +381,9 @@ Current private-mesh limitations:
   uses a fixed 24-hour queued-job expiration window
 - reported node capabilities/load are visibility fields only; there is no
   load-aware or capability-aware scheduling
-- no runtime agent reconciliation or result reporting after coordinator restart
+- reconciliation is best-effort only: agents cache recent terminal results in
+  memory, agent restart loses cached reports, and dropped in-progress
+  `/execute` requests can still leave no terminal result to report
 - no strong sandbox/container/VM isolation
 - no per-job timeout override
 - no file upload/result download workflow
@@ -395,8 +415,8 @@ Private mesh hardening:
 - API inventory and contract decision
 - better install/release workflow
 - certificate/onboarding helper
-- runtime implementation of the accepted agent reconciliation/result-reporting
-  strategy
+- follow-up reconciliation hardening if private mesh operations show the need
+  for durable agent-side result history or richer recovery semantics
 
 Productized private mesh:
 

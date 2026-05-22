@@ -56,8 +56,9 @@ func TestRunCommandStatus(t *testing.T) {
 	client := &fakeClient{status: protocol.CoordinatorStatusResponse{
 		Status:          "ok",
 		ProtocolVersion: protocol.Version,
-		StorageBackend:  "in_memory",
+		StorageBackend:  "postgres",
 		Dispatch:        protocol.DispatchStatus{MaxAttempts: 3, Timeout: "10s", BaseBackoff: "500ms"},
+		Reconciliation:  &protocol.ReconciliationStatus{Grace: "30s", PendingRunningJobs: 2},
 	}}
 	var out bytes.Buffer
 
@@ -65,7 +66,7 @@ func TestRunCommandStatus(t *testing.T) {
 		t.Fatalf("status command: %v", err)
 	}
 	text := out.String()
-	for _, want := range []string{"STATUS", "PROTOCOL", "in_memory", "attempts=3"} {
+	for _, want := range []string{"STATUS", "PROTOCOL", "postgres", "attempts=3", "RECONCILIATION", "grace=30s pending=2"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected output to contain %q, got:\n%s", want, text)
 		}

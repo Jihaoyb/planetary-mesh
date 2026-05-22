@@ -105,8 +105,8 @@ Current constraints:
 - embedded schema initialization remains current
 - schema readiness metadata version `2` is current
 - node rows store reported capabilities and active execution count
-- Milestone 14 made no schema changes for the accepted future reconciliation
-  strategy
+- result reporting and Postgres startup reconciliation use existing job rows;
+  Milestone 15 did not add schema changes
 - schema readiness metadata is not a full migration framework
 
 Future decisions:
@@ -247,12 +247,15 @@ Current behavior:
   incrementing attempts and updating the current node
 - successful execution transitions `RUNNING` to `COMPLETED`
 - terminal execution or dispatch failures transition `RUNNING` to `FAILED`
+- accepted matching terminal result reports can transition `RUNNING` jobs to
+  `COMPLETED` or `FAILED`
 - queued expiration can transition `QUEUED` to `FAILED`
-- Postgres startup recovery transitions persisted `RUNNING` jobs to `FAILED`
+- Postgres startup recovery captures persisted `RUNNING` job ids, leaves them
+  `RUNNING` during reconciliation grace, and transitions only remaining
+  captured ids to `FAILED` after grace expires
 - terminal `COMPLETED` and `FAILED` jobs are not overwritten by lifecycle
   methods
 - `CANCELLED` remains reserved/unsupported; there is no cancellation API today
-- runtime agent reconciliation after coordinator restart is not implemented
 
 Current constraints:
 
@@ -264,14 +267,14 @@ Current constraints:
 Future decisions:
 
 - cancellation semantics
-- runtime implementation of ADR 0013 result reporting and Postgres
-  reconciliation grace-window behavior
+- durable agent result history, if best-effort in-memory reconciliation proves
+  insufficient
 - richer progress states, if a future workload model needs them
 
 ## Agent Reconciliation Strategy
 
-Choice: record the coordinator restart reconciliation strategy before changing
-runtime behavior.
+Choice: explicit agent-to-coordinator terminal result reporting with bounded
+Postgres startup reconciliation grace.
 
 Related ADR:
 
@@ -279,24 +282,27 @@ Related ADR:
 
 Current behavior:
 
-- the coordinator records terminal results only after the synchronous agent
-  `/execute` response returns
-- agents do not persist result history or replay completed results
-- Postgres startup marks persisted `RUNNING` jobs `FAILED` immediately
+- the coordinator records terminal results from the synchronous agent
+  `/execute` response and can also accept matching terminal result reports at
+  `POST /jobs/{id}/result`
+- reported status is limited to `COMPLETED` and `FAILED`
+- reported results are accepted only for existing `RUNNING` jobs whose current
+  node id matches the reporting node
+- duplicate, late, wrong-node, unknown-job, unsupported-status, and
+  unsupported-state reports do not mutate jobs
+- agents keep a bounded in-memory result cache for recent terminal command
+  outcomes and report best-effort while still returning synchronous `/execute`
+  responses
+- agent restart loses cached reports
+- Postgres startup captures persisted `RUNNING` job ids, serves during
+  reconciliation grace, accepts matching reports during grace, and fails only
+  remaining captured ids when grace expires
 - in-memory storage has no restart recovery
-
-Accepted future strategy:
-
-- add explicit agent-to-coordinator result reporting rather than carrying
-  reports in heartbeat payloads
-- keep HTTP/JSON and `X-Planetary-Protocol-Version: 1`
-- keep the coordinator responsible for validating and accepting reported
-  results
-- preserve terminal job immutability
-- keep nodes/jobs-only storage and schema readiness version `2` for the first
-  runtime slice unless implementation proves a schema change is needed
-- use a bounded Postgres reconciliation grace window before failing persisted
-  `RUNNING` jobs
+- commands remain tied to the `/execute` request context, so this is not full
+  in-progress execution recovery
+- HTTP/JSON and `X-Planetary-Protocol-Version: 1` remain unchanged
+- terminal job immutability remains absolute
+- nodes/jobs-only storage and schema readiness version `2` remain unchanged
 
 ## Node Capability and Load Reporting
 
@@ -399,11 +405,14 @@ Choice: structured logs and basic coordinator metrics.
 Current observability:
 
 - coordinator and agent structured logs
-- `/status` for non-secret runtime status/config
-- `/metrics` for Prometheus-style counters and gauges
+- `/status` for non-secret runtime status/config, including additive
+  reconciliation metadata when configured
+- `/metrics` for Prometheus-style counters and gauges, including reported
+  result counters and reconciliation pending-job gauge
 - `/nodes` and `pmctl nodes list` for node capability/load visibility
 - Postgres schema readiness metrics when Postgres is enabled
-- startup recovery metric for persisted `RUNNING` jobs
+- startup recovery metric for persisted `RUNNING` jobs failed after
+  reconciliation grace
 
 Future decisions:
 
