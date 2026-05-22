@@ -409,7 +409,6 @@ Response shape:
 ```json
 {
   "status": "ok",
-  "exit_code": 0,
   "stdout": "hello mesh\n",
   "stderr": "",
   "stdout_truncated": false,
@@ -418,9 +417,12 @@ Response shape:
 }
 ```
 
-`exit_code` is omitted when nil. Failed command execution responses use
-`"status": "error"` and set `last_error`. Stdout and stderr are capped at
-`1 MiB` per stream and set the corresponding truncation flag when clipped.
+`exit_code` is omitted when nil. The current agent sets it for non-zero process
+exits and omits it for successful command execution, timeout, allowlist
+rejection, request cancellation, and internal execution errors. Failed command
+execution responses use `"status": "error"` and set `last_error`. Stdout and
+stderr are capped at `1 MiB` per stream and set the corresponding truncation
+flag when clipped.
 
 ## Compatibility Policy
 
