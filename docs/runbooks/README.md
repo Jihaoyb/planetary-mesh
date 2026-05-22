@@ -13,9 +13,14 @@ owns or controls:
 - [Local Private Mesh](local-private-mesh.md) - in-memory coordinator storage,
   tracked config examples, `examples/demo.sh`, manual starts, and basic
   `pmctl` workflows.
+- [Postgres Durability](postgres-durability.md) - optional durable
+  coordinator storage, schema readiness, Compose workflows, and startup
+  reconciliation behavior.
+- [mTLS Trusted LAN](mtls-trusted-lan.md) - opt-in mutual TLS, manual
+  certificate provisioning, node allowlists, and secure `pmctl` access.
 
-The remaining Milestone 17 runbooks cover Postgres durability, mTLS trusted-LAN
-setup, command execution safety, and troubleshooting.
+The remaining Milestone 17 runbooks cover command execution safety and
+troubleshooting.
 
 ## Current Boundaries
 
