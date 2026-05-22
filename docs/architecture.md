@@ -11,6 +11,7 @@ For product framing and sequencing, see:
 - [roadmap.md](roadmap.md)
 - [current-limitations.md](current-limitations.md)
 - [api-http-json-v0.md](api-http-json-v0.md)
+- [runbooks/README.md](runbooks/README.md)
 - [tech-choices.md](tech-choices.md)
 - [adr/](adr/)
 
@@ -44,6 +45,11 @@ Current runtime components:
   storage remains the default for local runs and ordinary unit tests.
 
 There is no dashboard today.
+
+Task-oriented operator procedures for local runs, Postgres durability, mTLS,
+command-execution safety, troubleshooting, and validation live in
+[runbooks/README.md](runbooks/README.md). This architecture document remains
+the component and boundary reference.
 
 ### Transport and Versioning
 
