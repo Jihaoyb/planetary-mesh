@@ -18,9 +18,10 @@ owns or controls:
   reconciliation behavior.
 - [mTLS Trusted LAN](mtls-trusted-lan.md) - opt-in mutual TLS, manual
   certificate provisioning, node allowlists, and secure `pmctl` access.
-
-The remaining Milestone 17 runbooks cover command execution safety and
-troubleshooting.
+- [Command Execution Safety](command-execution-safety.md) - allowlisted direct
+  command execution, timeout/output bounds, and current isolation limits.
+- [Troubleshooting](troubleshooting.md) - common failure symptoms and current
+  inspection surfaces.
 
 ## Current Boundaries
 
