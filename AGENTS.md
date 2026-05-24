@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 16 HTTP/JSON v0 API inventory and
-compatibility policy.
+Current `main` is after Milestone 17 private mesh operator runbooks and safety
+readiness.
 
-Milestones 1 through 16 are complete:
+Milestones 1 through 17 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -47,13 +47,16 @@ Milestones 1 through 16 are complete:
 - Postgres schema readiness metadata version `2`
 - manual HTTP/JSON v0 API inventory and compatibility policy with focused
   DB-free API drift tests
+- task-oriented operator runbooks for local private mesh operation, Postgres
+  durability/reconciliation, mTLS trusted-LAN setup, command-execution safety,
+  troubleshooting, and validation workflows
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 The next phase should focus on narrow private mesh hardening such as operator
-runbooks, security hardening, packaging, and explicitly planned scheduler/API
-follow-up work. Do not jump to
+runbook refinement, security hardening, packaging, and explicitly planned
+scheduler/API follow-up work. Do not jump to
 marketplace, payment, dashboard, public-node, or remote-node product work
 without explicit planning and an accepted direction.
 
@@ -69,6 +72,8 @@ changes:
 - `docs/architecture.md` - component model and system boundaries
 - `docs/api-http-json-v0.md` - authoritative manual HTTP/JSON v0 API inventory
   and compatibility policy
+- `docs/runbooks/README.md` - task-oriented operator runbooks for current
+  private mesh operation
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
   execution choices
 - `docs/adr/` - accepted Architecture Decision Records
@@ -113,7 +118,7 @@ planetary-mesh/
     configfile/        # Env-style config file parser
 
   config/              # Tracked example env-style config files
-  docs/                # Roadmap, architecture, product docs, ADRs
+  docs/                # Roadmap, architecture, product docs, runbooks, ADRs
   examples/            # Local and Postgres smoke demos
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
@@ -330,7 +335,7 @@ Allowed near-term direction is private mesh hardening:
 - clearer job state transitions
 - follow-up reconciliation hardening if the current best-effort slice proves
   insufficient
-- operator runbooks and API inventory
+- operator runbook maintenance and API inventory
 - install/release packaging
 - certificate/onboarding helper planning
 - optional private batch/AI demo pipeline

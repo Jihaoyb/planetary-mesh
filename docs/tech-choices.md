@@ -134,6 +134,7 @@ Current shape:
 - `examples/demo.sh` for in-memory smoke workflow
 - `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
 - `compose.yaml` for local coordinator + Postgres + agents
+- task-oriented operator runbooks under [runbooks/](runbooks/README.md)
 
 Related ADR:
 

@@ -60,6 +60,9 @@ Practical MVP success means:
   limitations are documented without implying full execution recovery exists
 - a user can see node state, configured capabilities, and active execution count
 - a user can choose in-memory or Postgres coordinator storage
+- a user can follow current operator runbooks for local startup, Postgres
+  durability, mTLS trusted-LAN setup, command-execution safety,
+  troubleshooting, and validation workflows
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services

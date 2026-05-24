@@ -83,6 +83,9 @@ shared compute scenarios.
 See [docs/current-limitations.md](docs/current-limitations.md) for the current
 limitation and risk register.
 
+Task-oriented operating guides are in
+[docs/runbooks/README.md](docs/runbooks/README.md).
+
 ## Architecture Summary
 
 Planetary Mesh has three runtime components:
@@ -197,6 +200,9 @@ That workflow starts coordinator + Postgres + agents, verifies status, schema
 readiness, and reconciliation metadata, checks deferred restart recovery for
 persisted `RUNNING` jobs, checks `/metrics`, and submits another command after
 restart.
+
+For step-by-step operator workflows, see the
+[operator runbooks](docs/runbooks/README.md).
 
 ## Run Manually
 
@@ -388,6 +394,7 @@ Current sources of truth:
 - [Roadmap](docs/roadmap.md)
 - [Architecture](docs/architecture.md)
 - [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
+- [Operator Runbooks](docs/runbooks/README.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)
 - [Tech Choices](docs/tech-choices.md)

@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 16 HTTP/JSON v0 API inventory and
-  compatibility policy
+- Baseline: `main` after Milestone 17 private mesh operator runbooks and safety
+  readiness
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -47,6 +47,9 @@ Implemented capability:
 - manual HTTP/JSON v0 API inventory and compatibility policy
 - DB-free API drift tests for route, protocol, JSON-field, and metrics
   expectations
+- task-oriented operator runbooks for local private mesh operation, Postgres
+  durability/reconciliation, mTLS trusted-LAN setup, command-execution safety,
+  troubleshooting, and validation workflows
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
@@ -57,9 +60,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-16
+## Completed Baseline / Milestones 1-17
 
-The first sixteen milestones established a working private LAN/trusted-network
+The first seventeen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -389,6 +392,36 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 17: Private Mesh Operator Runbooks and Safety Readiness
+
+Goal: give private mesh operators task-oriented runbooks for the current
+runtime without adding features or changing behavior.
+
+Completed outcomes:
+
+- runbook index at `docs/runbooks/README.md`
+- local private mesh runbook for tracked config examples, `examples/demo.sh`,
+  manual starts, `pmctl`, health checks, and validation
+- Postgres durability runbook for `COORDINATOR_DATABASE_URL`, Compose,
+  `examples/postgres_smoke.sh`, schema readiness version `2`, metrics, status,
+  and reconciliation grace
+- mTLS trusted-LAN runbook for manual CA/cert/key provisioning, complete TLS
+  file requirements, node identity/fingerprint allowlists, secure agent URLs,
+  and secure `pmctl` access
+- command execution safety runbook for allowlisted direct execution,
+  `exec.CommandContext`, no shell, fixed timeout, `1 MiB` stream caps,
+  non-zero exit handling, and no strong sandboxing
+- troubleshooting runbook for protocol mismatch, config errors, partial TLS,
+  unhealthy nodes, allowlist rejection, command failures, Postgres readiness,
+  and reconciliation states
+- README, architecture, product requirements, tech choices, and limitations now
+  point operators to the runbooks where appropriate
+- runtime behavior, public API fields, protocol version, endpoint behavior,
+  scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
+  Postgres schema version `2` are unchanged
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -399,7 +432,7 @@ Potential work:
   planned
 - follow-up reconciliation hardening only where the current best-effort slice
   proves insufficient
-- better operator runbooks
+- continued operator runbook refinement as workflows evolve
 - future generated API contract decision after the manual inventory stabilizes
 - improved local install workflow
 - certificate/onboarding helper planning
