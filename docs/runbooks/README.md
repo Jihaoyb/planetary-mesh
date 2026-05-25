@@ -20,6 +20,12 @@ owns or controls:
   certificate provisioning, node allowlists, and secure `pmctl` access.
 - [Command Execution Safety](command-execution-safety.md) - allowlisted direct
   command execution, timeout/output bounds, and current isolation limits.
+- [Real LAN Validation](real-lan-validation.md) - two-physical-machine LAN
+  validation workflow, sanitized evidence checklist, and failure/restart
+  observation steps.
+- [Practical Workload Recipe](practical-workload-recipe.md) - trusted
+  host-local `wc` text processing workload beyond `echo`, `sleep`, and
+  `false`.
 - [Troubleshooting](troubleshooting.md) - common failure symptoms and current
   inspection surfaces.
 
@@ -65,6 +71,15 @@ Secure mTLS operation additionally expects:
 - Coordinator, agent, and optional operator client certificate/key pairs.
 - Node allowlists by certificate identity or SHA-256 fingerprint.
 
+Real LAN validation additionally expects:
+
+- A coordinator on one physical machine.
+- At least one agent on a different physical machine on the same LAN.
+- Firewall rules or host settings that allow the chosen coordinator and agent
+  ports.
+- Sanitized evidence capture using placeholders, not private IP addresses,
+  hostnames, credentials, certificates, keys, or local env files.
+
 ## Validation Matrix
 
 | Workflow | Command | Notes |
@@ -77,6 +92,7 @@ Secure mTLS operation additionally expects:
 | Local smoke | `./examples/demo.sh` | Starts local coordinator and two agents with in-memory storage. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |
+| Real LAN validation | Follow [Real LAN Validation](real-lan-validation.md) | Manual gate for proving coordinator, remote agent, `pmctl`, dispatch, result capture, and failure/restart behavior across physical LAN machines. |
 
 The default `go test ./...` path must remain DB-free. Do not commit local-only
 files such as `.DS_Store`, `.claude/`, `.gocache/`, or local `config/*.env`

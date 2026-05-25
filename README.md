@@ -11,8 +11,8 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 16 HTTP/JSON
-  v0 API inventory and compatibility policy.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 17 private
+  mesh operator runbooks and safety readiness.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -73,6 +73,7 @@ shared compute scenarios.
 - Dashboard or rich operator UI.
 - OpenAPI, protobuf, or generated API contracts.
 - Production Docker image or packaged release workflow.
+- Committed real multi-device LAN validation evidence.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
 - Durable agent result history after agent restart.
@@ -85,6 +86,10 @@ limitation and risk register.
 
 Task-oriented operating guides are in
 [docs/runbooks/README.md](docs/runbooks/README.md).
+Milestone 18 real LAN validation guidance is in
+[docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
+with a practical `wc` workload recipe in
+[docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
 
 ## Architecture Summary
 
@@ -203,6 +208,9 @@ restart.
 
 For step-by-step operator workflows, see the
 [operator runbooks](docs/runbooks/README.md).
+
+For real multi-device LAN validation, use
+[docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md).
 
 ## Run Manually
 

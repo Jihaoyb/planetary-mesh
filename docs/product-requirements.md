@@ -52,6 +52,12 @@ The current implemented workload remains allowlisted command execution.
 Practical MVP success means:
 
 - a user can run coordinator + agent locally
+- the project has sanitized evidence of coordinator and agent running on
+  different physical LAN machines
+- the project has sanitized evidence of `pmctl` inspecting remote node, job,
+  and result state over the LAN
+- the project has at least one practical trusted workload recipe beyond local
+  smoke commands
 - a user can submit an allowlisted command job
 - a user can inspect job result, stdout, stderr, and errors
 - job state transitions are documented and consistent across in-memory and
@@ -69,6 +75,10 @@ Practical MVP success means:
 - Postgres durability checks are opt-in and documented
 - docs accurately describe current behavior
 - docs do not imply marketplace or stronger security features than exist
+
+Phase 1 is not complete until real multi-device LAN validation is captured in
+the repository with sanitized evidence. Documentation alone is not product
+readiness.
 
 ## Future Expansion
 
