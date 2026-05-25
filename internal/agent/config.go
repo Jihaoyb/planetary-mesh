@@ -10,7 +10,7 @@ import (
 
 const (
 	DefaultExecutionTimeout = 30 * time.Second
-	DefaultAllowlist        = "echo=echo,false=false,sleep=sleep"
+	DefaultAllowlist        = "echo=builtin:echo,false=builtin:false,sleep=builtin:sleep"
 	DefaultCapabilities     = ""
 )
 

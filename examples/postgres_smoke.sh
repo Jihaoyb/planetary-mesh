@@ -231,7 +231,7 @@ fi
 
 echo
 echo "Submitting long-running job for restart recovery"
-SLEEP_JSON="$(pmctl --json submit command sleep 30)"
+SLEEP_JSON="$(pmctl --json submit command sleep 30s)"
 SLEEP_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${SLEEP_JSON}")"
 wait_for_job_status "${SLEEP_ID}" "RUNNING" >/dev/null
 
