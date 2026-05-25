@@ -49,6 +49,9 @@ func ParseAllowlist(raw string) (map[string]string, error) {
 		if key == "" || value == "" {
 			return nil, fmt.Errorf("invalid allowlist entry %q", entry)
 		}
+		if err := validateAllowlistTarget(value); err != nil {
+			return nil, fmt.Errorf("invalid allowlist entry %q: %w", entry, err)
+		}
 
 		out[key] = value
 	}

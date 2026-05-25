@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +30,7 @@ func newExecuteRequest(t *testing.T, payload protocol.ExecuteRequest) *http.Requ
 
 func TestExecuteHandlerSuccess(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   2 * time.Second,
 	}
 	req := newExecuteRequest(t, protocol.ExecuteRequest{
@@ -51,14 +54,14 @@ func TestExecuteHandlerSuccess(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if !strings.Contains(resp.Stdout, "hello") {
-		t.Fatalf("expected stdout to contain hello, got %q", resp.Stdout)
+	if resp.Stdout != "hello\n" {
+		t.Fatalf("expected stdout hello line, got %q", resp.Stdout)
 	}
 }
 
 func TestExecuteHandlerRecordsSuccessfulResultReport(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   2 * time.Second,
 	}
 	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
@@ -80,8 +83,108 @@ func TestExecuteHandlerRecordsSuccessfulResultReport(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected result report to be cached")
 	}
-	if entry.report.Status != protocol.JobResultStatusCompleted || !strings.Contains(entry.report.Stdout, "hello") {
+	if entry.report.Status != protocol.JobResultStatusCompleted || entry.report.Stdout != "hello\n" {
 		t.Fatalf("unexpected cached report: %+v", entry.report)
+	}
+}
+
+func TestExecuteHandlerDoesNotRunBuiltinTargetWithoutLogicalAllowlistEntry(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"echo": "builtin:echo"},
+		Timeout:   time.Second,
+	}
+	status, resp := executeCommand(t, cfg, "builtin:echo", "hello")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", status)
+	}
+	if !strings.Contains(resp.LastError, "not allowlisted") {
+		t.Fatalf("expected allowlist error, got %+v", resp)
+	}
+}
+
+func TestExecuteHandlerCanUseExplicitBuiltinNamedLogicalKey(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"builtin:echo": "builtin:echo"},
+		Timeout:   time.Second,
+	}
+	status, resp := executeCommand(t, cfg, "builtin:echo", "hello", "mesh")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if resp.Stdout != "hello mesh\n" {
+		t.Fatalf("expected joined stdout, got %q", resp.Stdout)
+	}
+}
+
+func TestExecuteHandlerBuiltinLineCount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma"), 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"line-count": "builtin:line-count"},
+		Timeout:   time.Second,
+	}
+	status, resp := executeCommand(t, cfg, "line-count", path)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", status, resp)
+	}
+	if resp.Stdout != "3\n" {
+		t.Fatalf("expected 3 lines, got %q", resp.Stdout)
+	}
+	if resp.Stderr != "" || resp.LastError != "" || resp.ExitCode != nil {
+		t.Fatalf("unexpected line-count response: %+v", resp)
+	}
+}
+
+func TestExecuteHandlerBuiltinLineCountEmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.txt")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"line-count": "builtin:line-count"},
+		Timeout:   time.Second,
+	}
+	status, resp := executeCommand(t, cfg, "line-count", path)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", status, resp)
+	}
+	if resp.Stdout != "0\n" {
+		t.Fatalf("expected 0 lines, got %q", resp.Stdout)
+	}
+}
+
+func TestExecuteHandlerBuiltinSleepAcceptsPlainSeconds(t *testing.T) {
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"sleep": "builtin:sleep"},
+		Timeout:   time.Second,
+	}
+	status, resp := executeCommand(t, cfg, "sleep", "0")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", status, resp)
+	}
+}
+
+func TestExecuteHandlerExternalExecutableAllowlistStillWorks(t *testing.T) {
+	t.Setenv("PLANETARY_MESH_AGENT_HELPER", "1")
+	cfg := ExecutorConfig{
+		Allowlist: map[string]string{"helper": os.Args[0]},
+		Timeout:   2 * time.Second,
+	}
+	args := externalHelperArgs("echo", "hello", "from", "helper")
+	status, resp := executeCommand(t, cfg, "helper", args...)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %+v", status, resp)
+	}
+	if resp.Stdout != "hello from helper\n" {
+		t.Fatalf("unexpected helper stdout: %q", resp.Stdout)
 	}
 }
 
@@ -97,7 +200,7 @@ func TestExecuteHandlerRejectsMissingVersion(t *testing.T) {
 
 func TestExecuteHandlerRejectsDisallowedCommand(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   time.Second,
 	}
 	req := newExecuteRequest(t, protocol.ExecuteRequest{
@@ -115,7 +218,7 @@ func TestExecuteHandlerRejectsDisallowedCommand(t *testing.T) {
 
 func TestExecuteHandlerRecordsAllowlistRejectionReport(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   time.Second,
 	}
 	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
@@ -143,7 +246,7 @@ func TestExecuteHandlerRecordsAllowlistRejectionReport(t *testing.T) {
 
 func TestExecuteHandlerNonZeroExit(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"false": "false"},
+		Allowlist: map[string]string{"false": "builtin:false"},
 		Timeout:   time.Second,
 	}
 	req := newExecuteRequest(t, protocol.ExecuteRequest{
@@ -158,11 +261,18 @@ func TestExecuteHandlerNonZeroExit(t *testing.T) {
 	if w.Result().StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d", w.Result().StatusCode)
 	}
+	var resp protocol.ExecuteResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ExitCode == nil || *resp.ExitCode != 1 || resp.LastError != "command exited with code 1" {
+		t.Fatalf("unexpected non-zero response: %+v", resp)
+	}
 }
 
 func TestExecuteHandlerRecordsNonZeroExitReport(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"false": "false"},
+		Allowlist: map[string]string{"false": "builtin:false"},
 		Timeout:   time.Second,
 	}
 	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
@@ -190,14 +300,14 @@ func TestExecuteHandlerRecordsNonZeroExitReport(t *testing.T) {
 
 func TestExecuteHandlerTimeout(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"sleep": "sleep"},
+		Allowlist: map[string]string{"sleep": "builtin:sleep"},
 		Timeout:   10 * time.Millisecond,
 	}
 	req := newExecuteRequest(t, protocol.ExecuteRequest{
 		JobID:   "job-1",
 		Type:    "command",
 		Command: "sleep",
-		Args:    []string{"1"},
+		Args:    []string{"1s"},
 	})
 	w := httptest.NewRecorder()
 
@@ -209,7 +319,7 @@ func TestExecuteHandlerTimeout(t *testing.T) {
 
 func TestExecuteHandlerRecordsTimeoutReport(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"sleep": "sleep"},
+		Allowlist: map[string]string{"sleep": "builtin:sleep"},
 		Timeout:   10 * time.Millisecond,
 	}
 	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
@@ -217,7 +327,7 @@ func TestExecuteHandlerRecordsTimeoutReport(t *testing.T) {
 		JobID:   "job-1",
 		Type:    "command",
 		Command: "sleep",
-		Args:    []string{"1"},
+		Args:    []string{"1s"},
 	})
 	w := httptest.NewRecorder()
 
@@ -260,7 +370,7 @@ func TestExecuteHandlerDoesNotReportInternalExecutionError(t *testing.T) {
 
 func TestExecuteHandlerDoesNotReportCanceledRequest(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"sleep": "sleep"},
+		Allowlist: map[string]string{"sleep": "builtin:sleep"},
 		Timeout:   time.Second,
 	}
 	reporter := NewResultReporterWithConfig(http.DefaultClient, "http://coordinator.test", "node-1", 4, time.Minute)
@@ -268,7 +378,7 @@ func TestExecuteHandlerDoesNotReportCanceledRequest(t *testing.T) {
 		JobID:   "job-1",
 		Type:    "command",
 		Command: "sleep",
-		Args:    []string{"1"},
+		Args:    []string{"1s"},
 	})
 	ctx, cancel := context.WithCancel(req.Context())
 	cancel()
@@ -286,7 +396,7 @@ func TestExecuteHandlerDoesNotReportCanceledRequest(t *testing.T) {
 
 func TestExecuteHandlerTracksActiveExecution(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"sleep": "sleep"},
+		Allowlist: map[string]string{"sleep": "builtin:sleep"},
 		Timeout:   time.Second,
 	}
 	tracker := NewLoadTracker()
@@ -294,7 +404,7 @@ func TestExecuteHandlerTracksActiveExecution(t *testing.T) {
 		JobID:   "job-1",
 		Type:    "command",
 		Command: "sleep",
-		Args:    []string{"0.1"},
+		Args:    []string{"100ms"},
 	})
 	w := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -332,5 +442,53 @@ func TestExecuteHandlerLegacyStubStillWorks(t *testing.T) {
 	ExecuteHandler(w, req)
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func executeCommand(t *testing.T, cfg ExecutorConfig, command string, args ...string) (int, protocol.ExecuteResponse) {
+	t.Helper()
+	req := newExecuteRequest(t, protocol.ExecuteRequest{
+		JobID:   "job-1",
+		Type:    "command",
+		Command: command,
+		Args:    args,
+	})
+	w := httptest.NewRecorder()
+
+	NewExecuteHandler(cfg)(w, req)
+
+	var resp protocol.ExecuteResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return w.Result().StatusCode, resp
+}
+
+func externalHelperArgs(args ...string) []string {
+	return append([]string{"-test.run=TestExternalCommandHelperProcess", "--"}, args...)
+}
+
+func TestExternalCommandHelperProcess(t *testing.T) {
+	if os.Getenv("PLANETARY_MESH_AGENT_HELPER") != "1" {
+		return
+	}
+
+	args := os.Args
+	for i, arg := range args {
+		if arg == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	if len(args) == 0 {
+		os.Exit(2)
+	}
+
+	switch args[0] {
+	case "echo":
+		fmt.Println(strings.Join(args[1:], " "))
+		os.Exit(0)
+	default:
+		os.Exit(2)
 	}
 }
