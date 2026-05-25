@@ -31,6 +31,7 @@ Near-term MVP work should harden the private/local mesh:
 - narrow runtime result reporting after coordinator restart, based on the
   accepted agent reconciliation strategy
 - stronger execution-risk docs and runbooks
+- portable no-shell validation commands for cross-OS private mesh checks
 - improved install/onboarding workflow
 - optional demo pipeline for private batch/AI-style work
 - manual HTTP/JSON v0 API inventory and compatibility policy
@@ -53,6 +54,8 @@ Practical MVP success means:
 
 - a user can run coordinator + agent locally
 - a user can submit an allowlisted command job
+- a user can run portable smoke validation commands without relying on
+  platform shell built-ins
 - a user can inspect job result, stdout, stderr, and errors
 - job state transitions are documented and consistent across in-memory and
   Postgres-backed coordinator storage

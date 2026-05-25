@@ -177,7 +177,7 @@ Run an agent in another terminal:
 ```bash
 COORDINATOR_URL=http://localhost:8080 \
 AGENT_ADDR=:8081 \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep' \
 go run ./cmd/agent
 ```
 
@@ -247,12 +247,13 @@ Command execution is security-sensitive. Preserve these rules:
   - `stdout_truncated`
   - `stderr_truncated`
   - `last_error`
-- Agent execution uses `exec.CommandContext`.
+- Agent external executable targets use `exec.CommandContext`.
 - Never execute through a shell.
 - Submitted command names are logical allowlist keys, not arbitrary executable
   paths.
-- The agent maps logical command names to executable paths through explicit
-  allowlist configuration.
+- The agent maps logical command names to executable paths or reserved
+  `builtin:<name>` validation targets through explicit allowlist configuration.
+- Built-ins must only run when explicitly mapped in `AGENT_COMMAND_ALLOWLIST`.
 - The execution timeout is fixed by agent config. The default is `30s`.
 - There is no per-job timeout override today.
 - Stdout and stderr are captured separately.
@@ -267,7 +268,7 @@ Command execution is security-sensitive. Preserve these rules:
   in-flight execution attempt in v0.
 
 Do not describe this model as strong sandboxing. It is allowlisted direct
-process execution with bounded output and a fixed timeout.
+execution on trusted hosts with bounded output and a fixed timeout.
 
 ## Storage Rules
 

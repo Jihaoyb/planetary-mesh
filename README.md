@@ -21,8 +21,9 @@ shared compute scenarios.
   in Postgres.
 - **Agent**: registers with the coordinator, sends heartbeats with optional
   static capabilities and current active execution count, executes allowlisted
-  command jobs without invoking a shell, and best-effort reports terminal command
-  results from a bounded in-memory cache.
+  command jobs without invoking a shell, including explicit portable validation
+  built-ins when configured, and best-effort reports terminal command results
+  from a bounded in-memory cache.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
   inspection, and command job submission.
 - **Security**: plain HTTP is available for local development; mTLS and node
@@ -47,7 +48,9 @@ shared compute scenarios.
 - Command job submission with `type="command"`, `command`, and optional `args`.
 - Explicit coordinator-owned job lifecycle states: `QUEUED`, `RUNNING`,
   `COMPLETED`, and `FAILED`.
-- Allowlisted direct process execution using `exec.CommandContext`.
+- Allowlisted external process execution using `exec.CommandContext`.
+- Explicit no-shell built-in validation targets for `echo`, `false`, `sleep`,
+  and agent-local line counting when mapped through `AGENT_COMMAND_ALLOWLIST`.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -112,11 +115,14 @@ Command execution is security-sensitive. The current implementation narrows the
 trust boundary but is not a strong sandbox:
 
 - Job submissions name a logical command key, not an executable path.
-- Agents map logical command names to executable paths through
+- Agents map logical command names to executable paths or reserved built-in
+  targets through
   `AGENT_COMMAND_ALLOWLIST`.
 - Operators can label agents with static `AGENT_CAPABILITIES`.
-- Agents execute commands directly with `exec.CommandContext`.
+- Agents execute external command targets directly with `exec.CommandContext`.
 - Agents never execute through a shell.
+- Built-in targets are explicit validation helpers, not shell built-ins and not
+  stronger isolation.
 - Stdout and stderr are captured separately and capped at `1 MiB` per stream.
 - mTLS and node allowlists are supported for trusted LAN operation, but
   certificate generation, distribution, enrollment, and rotation are manual.
@@ -218,7 +224,7 @@ Start an agent in another terminal:
 COORDINATOR_URL=http://localhost:8080 \
 AGENT_ADDR=:8081 \
 AGENT_CAPABILITIES='profile:local,role:worker' \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep' \
 go run ./cmd/agent
 ```
 
@@ -305,7 +311,7 @@ AGENT_TLS_CA_FILE=./certs/ca.pem \
 AGENT_TLS_CERT_FILE=./certs/agent-1.pem \
 AGENT_TLS_KEY_FILE=./certs/agent-1-key.pem \
 AGENT_CAPABILITIES='profile:local,role:worker' \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep' \
 go run ./cmd/agent
 ```
 
