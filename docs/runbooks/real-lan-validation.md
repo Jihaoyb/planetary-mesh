@@ -181,6 +181,52 @@ Expected result:
 - `Stdout` is `hello from real lan`.
 - `Last Error` is absent.
 
+## Validation Finding: Windows Command Portability
+
+Partial real LAN validation on 2026-05-25 used a macOS coordinator/operator
+host and a Windows remote agent host.
+
+Observed working behavior:
+
+- the coordinator started on the macOS host
+- the Windows agent started and reached the coordinator
+- registration and heartbeats worked
+- `pmctl` submitted a job to the coordinator over the LAN
+- coordinator dispatch reached the Windows agent
+
+The validation job did not complete because the default example mapping
+`echo=echo` is not portable to Windows. Planetary Mesh uses
+`exec.CommandContext` directly and intentionally does not invoke a shell. On
+Windows, `echo` is usually a shell built-in rather than a standalone
+`echo.exe`, so the agent cannot execute it through a no-shell allowlist entry.
+
+Sanitized failure shape:
+
+```text
+Dispatch:
+- coordinator host: physical machine A, macOS, operator and coordinator role
+- agent host: physical machine B, Windows, remote agent role
+- <job-id>: command=echo, status=FAILED, node=<node-id>, attempts=3
+- last_error: exec: "echo": executable file not found in %PATH%
+
+Agent log:
+- execute internal error: exec: "echo": executable file not found in %PATH%
+```
+
+Interpretation:
+
+- basic LAN networking, registration, heartbeat, `pmctl` submission, and
+  dispatch reached the remote machine
+- the blocker is command portability for validation examples, not the basic
+  coordinator-agent LAN path
+- the no-shell execution model is behaving as designed
+
+Do not mark Milestone 18 complete from this partial validation alone. Completion
+still requires a successful cross-device terminal command result, practical
+workload validation, and failure/restart observation. A follow-up milestone
+should add portable no-shell validation commands or document platform-specific
+real executables before relying on cross-OS validation examples.
+
 ## Failure and Restart Observation
 
 Use this flow with a single healthy agent. If another healthy agent remains

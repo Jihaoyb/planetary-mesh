@@ -90,6 +90,9 @@ Milestone 18 real LAN validation guidance is in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
 with a practical `wc` workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
+A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
+portable command-example gap: no-shell agents need real platform executables,
+not shell built-ins such as Windows `echo`.
 
 ## Architecture Summary
 

@@ -20,6 +20,12 @@ Reported capabilities are operator-visible only and do not select nodes. For
 this recipe, use one healthy agent or prepare the same input path and allowlist
 on every healthy agent that might receive the job.
 
+This `wc` recipe is Unix-oriented. On Windows agents, use a real
+platform-specific executable with predictable argument behavior, or wait for a
+future portable built-in validation command. Do not map logical commands to
+shell built-ins such as `echo` unless they resolve to a standalone executable;
+Planetary Mesh does not invoke a shell.
+
 Command execution remains allowlisted direct process execution with
 `exec.CommandContext`. The agent does not invoke a shell, so shell features such
 as redirection, glob expansion, command substitution, and pipelines are not
@@ -72,6 +78,7 @@ Examples of platform-specific `wc` executable paths:
 ```text
 macOS: /usr/bin/wc
 Linux: /usr/bin/wc or /bin/wc
+Windows: no default `wc`; choose an installed executable or use a future portable built-in
 ```
 
 The submitted command name is the logical allowlist key `wc`, not an arbitrary
