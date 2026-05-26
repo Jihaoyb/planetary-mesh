@@ -59,7 +59,7 @@ func TestAgentAPIContractExecuteRequiresProtocolHeader(t *testing.T) {
 
 func TestAgentAPIContractExecuteResponseJSONFields(t *testing.T) {
 	cfg := ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   2 * time.Second,
 	}
 	req := newExecuteRequest(t, protocol.ExecuteRequest{

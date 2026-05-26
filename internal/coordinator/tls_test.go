@@ -226,7 +226,7 @@ func TestSecuredDispatchToAgent(t *testing.T) {
 	agentCert, _ := pki.leaf(t, "agent-1", []string{"agent.local", "localhost"}, []net.IP{net.ParseIP("127.0.0.1")})
 
 	agentHandler := agentpkg.MuxWithConfig(agentpkg.ExecutorConfig{
-		Allowlist: map[string]string{"echo": "echo"},
+		Allowlist: map[string]string{"echo": "builtin:echo"},
 		Timeout:   2 * time.Second,
 	})
 	agentTLSConfig := &tls.Config{

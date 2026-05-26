@@ -42,7 +42,7 @@ services:
       AGENT_ADDR: ":8081"
       AGENT_ADVERTISE_ADDR: "http://agent-1:8081"
       NODE_ID: "compose-agent-1"
-      AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
+      AGENT_COMMAND_ALLOWLIST: "echo=builtin:echo,false=builtin:false,sleep=builtin:sleep"
       AGENT_CAPABILITIES: "profile:local,role:worker"
     ports:
       - "${AGENT1_HOST_PORT:-8081}:8081"
@@ -60,7 +60,7 @@ services:
       AGENT_ADDR: ":8082"
       AGENT_ADVERTISE_ADDR: "http://agent-2:8082"
       NODE_ID: "compose-agent-2"
-      AGENT_COMMAND_ALLOWLIST: "echo=echo,false=false,sleep=sleep"
+      AGENT_COMMAND_ALLOWLIST: "echo=builtin:echo,false=builtin:false,sleep=builtin:sleep"
       AGENT_CAPABILITIES: "profile:local,role:worker"
     ports:
       - "${AGENT2_HOST_PORT:-8082}:8082"

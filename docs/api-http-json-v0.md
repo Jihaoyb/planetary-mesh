@@ -385,10 +385,11 @@ Executes a job assigned by the coordinator.
 - Security: when the agent server is configured for mTLS, the TLS handshake
   requires a client certificate. The coordinator presents its configured
   certificate for secure dispatch.
-- Compatibility notes: command execution uses `exec.CommandContext` directly
-  with an allowlisted executable mapping. The agent does not invoke a shell.
-  Execution timeout is fixed by agent config; there is no per-job timeout
-  override in v0.
+- Compatibility notes: command execution uses allowlisted target mappings.
+  External executable targets use `exec.CommandContext`; reserved built-in
+  validation targets such as `builtin:echo` are available only when explicitly
+  mapped in agent config. The agent does not invoke a shell. Execution timeout
+  is fixed by agent config; there is no per-job timeout override in v0.
 
 Request shape:
 

@@ -1,8 +1,8 @@
 # Command Execution Safety Runbook
 
 This runbook describes the current command execution safety model. Planetary
-Mesh runs allowlisted direct processes on trusted agent hosts. It does not
-provide strong sandbox, container, VM, or multi-tenant isolation.
+Mesh runs allowlisted direct execution targets on trusted agent hosts. It does
+not provide strong sandbox, container, VM, or multi-tenant isolation.
 
 Use this model only with machines and workloads you trust.
 
@@ -21,20 +21,39 @@ Command jobs are submitted with:
 The `command` value is a logical allowlist key. It is not an executable path
 from the client.
 
-Agents map logical keys to local executables through
+Agents map logical keys to local executables or explicit built-in validation
+targets through
 `AGENT_COMMAND_ALLOWLIST`:
 
 ```bash
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep'
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep'
 ```
 
-The current agent executes the mapped executable with:
+External executable targets are executed with:
 
 ```text
 exec.CommandContext
 ```
 
 Arguments are passed as an argument vector. The agent does not invoke a shell.
+Built-in targets use reserved allowlist values such as `builtin:echo`; they are
+not platform shell built-ins and cannot be invoked unless a logical command key
+maps to them.
+
+Current portable validation built-ins:
+
+| Target | Behavior |
+|---|---|
+| `builtin:echo` | Writes args joined by one space plus a trailing newline to stdout. |
+| `builtin:false` | Fails with exit code `1`, matching terminal non-zero exit semantics. |
+| `builtin:sleep` | Sleeps for one duration argument, such as `1s`; plain integer seconds are also accepted. |
+| `builtin:line-count` | Counts lines in one agent-local file path and writes `<count>` to stdout. |
+
+`builtin:line-count` reads only an agent-local path supplied as an argument. It
+does not upload, download, or transfer file contents through Planetary Mesh.
+These built-ins are intentionally small validation helpers. They are not a
+plugin system, a sandbox, or the intended path for adding each real user
+workflow.
 
 ## What This Protects Against
 
@@ -42,6 +61,7 @@ The current model reduces several common risks:
 
 - clients cannot submit arbitrary executable paths
 - command keys must exist in the agent allowlist
+- built-ins run only when explicitly mapped in the agent allowlist
 - arguments are not shell-expanded by Planetary Mesh
 - stdout and stderr capture is bounded
 - command runtime is bounded by a fixed agent timeout
@@ -74,11 +94,15 @@ Keep allowlists narrow and task-specific:
 - avoid commands that mutate host state unless that is the intended private
   workflow
 - keep node-specific allowlists aligned with the node's trusted role
+- use built-in targets for portable smoke validation instead of shell built-ins
+  such as Windows `echo`
+- use external commands or wrapper scripts for real private workflows; do not
+  treat built-ins as a growing workflow catalog
 
 Example narrow local allowlist:
 
 ```bash
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep'
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep'
 ```
 
 This example is for local smoke workflows. It is not a production safety

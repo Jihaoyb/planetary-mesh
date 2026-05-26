@@ -33,7 +33,9 @@ Implemented capability:
 - cross-node reassignment after retryable dispatch failures
 - periodic queued-job scheduler/re-dispatch loop
 - queued jobs expire as `FAILED` after 24 hours
-- allowlisted direct command execution using `exec.CommandContext`
+- allowlisted external command execution using `exec.CommandContext`
+- explicit portable no-shell agent built-in validation targets when mapped
+  through `AGENT_COMMAND_ALLOWLIST`
 - no shell execution
 - bounded stdout/stderr capture with truncation flags
 - retry handling for retryable dispatch failures
@@ -91,7 +93,10 @@ Completed outcomes:
 - job responses include attempts, timestamps, exit code, stdout, stderr,
   truncation flags, and last error
 - all control-plane requests use `X-Planetary-Protocol-Version: 1`
-- agent executes only allowlisted commands with `exec.CommandContext`
+- agent executes only allowlisted external command targets with
+  `exec.CommandContext`
+- portable validation built-ins are available only through explicit allowlist
+  mappings
 - no shell execution
 - fixed agent timeout, default `30s`
 - stdout and stderr capped at `1 MiB` each
@@ -433,10 +438,16 @@ Potential work:
 - follow-up reconciliation hardening only where the current best-effort slice
   proves insufficient
 - continued operator runbook refinement as workflows evolve
+- real multi-device LAN validation using portable built-in smoke targets; if
+  separate Milestone 18 validation runbooks are merged, update those runbooks to
+  use `builtin:echo`, `builtin:sleep`, and `builtin:line-count`
 - future generated API contract decision after the manual inventory stabilizes
 - improved local install workflow
 - certificate/onboarding helper planning
 - stronger docs around execution risks
+- workflow/job template planning for approved private actions layered on
+  allowlisted commands, instead of turning agent built-ins into a general
+  workflow framework
 
 Non-goals:
 
@@ -445,6 +456,7 @@ Non-goals:
 - public-node onboarding
 - remote private mesh networking
 - dashboard unless explicitly scoped as operator UX work
+- hardcoding arbitrary user workflows into the agent binary as built-ins
 
 ## Phase 2: Productized Private Mesh
 

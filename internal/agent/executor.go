@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"sync"
 
 	"planetary-mesh/internal/protocol"
@@ -84,7 +83,7 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	executable, ok := e.cfg.Allowlist[req.Command]
+	target, ok := e.cfg.Allowlist[req.Command]
 	if !ok {
 		resp := protocol.ExecuteResponse{
 			Status:    "error",
@@ -103,13 +102,10 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), e.cfg.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, executable, req.Args...)
 	stdoutBuf := &limitedBuffer{limit: streamLimit}
 	stderrBuf := &limitedBuffer{limit: streamLimit}
-	cmd.Stdout = stdoutBuf
-	cmd.Stderr = stderrBuf
 
-	err := cmd.Run()
+	err := runAllowlistedTarget(ctx, target, req.Args, stdoutBuf, stderrBuf)
 	resp := protocol.ExecuteResponse{
 		Status:          "ok",
 		Stdout:          stdoutBuf.String(),
@@ -138,9 +134,7 @@ func (e *executor) handleExecute(w http.ResponseWriter, r *http.Request) {
 		e.writeJSON(w, http.StatusInternalServerError, resp)
 		return
 	default:
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code := exitErr.ExitCode()
+		if code, ok := commandExitCode(err); ok {
 			resp.Status = "error"
 			resp.ExitCode = &code
 			resp.LastError = fmt.Sprintf("command exited with code %d", code)
