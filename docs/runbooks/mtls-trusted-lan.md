@@ -112,6 +112,8 @@ dispatching to secure agent `/execute`.
 The allowlist example uses portable no-shell built-in validation targets. Real
 private workloads can still map logical keys to external executable paths, but
 those tools must exist on the agent host.
+Do not treat mTLS plus built-ins as a sandbox or as support for arbitrary user
+workloads.
 
 ## Secure pmctl Access
 

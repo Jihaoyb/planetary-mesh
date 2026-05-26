@@ -65,6 +65,9 @@ Those are allowlist entries, not a general permission to execute arbitrary
 commands. The `builtin:<name>` values are explicit no-shell validation targets
 chosen so the local smoke command behavior is portable across macOS, Linux, and
 Windows agents.
+They are not a generic workflow extension mechanism; real local/private
+workloads should use explicitly allowlisted external commands or wrapper
+scripts.
 
 ## Manual Startup
 

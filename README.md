@@ -123,6 +123,9 @@ trust boundary but is not a strong sandbox:
 - Agents never execute through a shell.
 - Built-in targets are explicit validation helpers, not shell built-ins and not
   stronger isolation.
+- Built-ins are not a general workflow extension model. Real private workflows
+  should continue to use explicit allowlisted external commands or wrapper
+  scripts.
 - Stdout and stderr are captured separately and capped at `1 MiB` per stream.
 - mTLS and node allowlists are supported for trusted LAN operation, but
   certificate generation, distribution, enrollment, and rotation are manual.

@@ -40,6 +40,13 @@ These are product directions, not all implemented features today:
 The current implemented workload is allowlisted command execution. Workflow
 templates, file handling, and richer job types are future work.
 
+Portable built-ins are smoke/validation helpers, not the intended product
+surface for adding every user workflow. Near-term real workflows should remain
+explicit allowlisted external commands or wrapper scripts. A future product UX
+can expose approved actions such as OCR, transcription, embeddings, image
+conversion, or batch processing through workflow/job templates after separate
+planning.
+
 ## Product Path
 
 ### 1. Private / Local Compute Mesh

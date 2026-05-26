@@ -37,6 +37,8 @@ Near-term MVP work should harden the private/local mesh:
 - manual HTTP/JSON v0 API inventory and compatibility policy
 
 The current implemented workload remains allowlisted command execution.
+Portable built-ins are validation helpers for cross-OS smoke checks; they are
+not the long-term mechanism for adding every product workflow.
 
 ## Non-goals
 
@@ -72,6 +74,8 @@ Practical MVP success means:
 - Postgres durability checks are opt-in and documented
 - docs accurately describe current behavior
 - docs do not imply marketplace or stronger security features than exist
+- docs do not imply built-ins replace approved allowlisted commands, wrapper
+  scripts, or future workflow/job templates for real workloads
 
 ## Future Expansion
 

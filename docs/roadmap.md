@@ -445,6 +445,9 @@ Potential work:
 - improved local install workflow
 - certificate/onboarding helper planning
 - stronger docs around execution risks
+- workflow/job template planning for approved private actions layered on
+  allowlisted commands, instead of turning agent built-ins into a general
+  workflow framework
 
 Non-goals:
 
@@ -453,6 +456,7 @@ Non-goals:
 - public-node onboarding
 - remote private mesh networking
 - dashboard unless explicitly scoped as operator UX work
+- hardcoding arbitrary user workflows into the agent binary as built-ins
 
 ## Phase 2: Productized Private Mesh
 

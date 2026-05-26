@@ -51,6 +51,9 @@ Current portable validation built-ins:
 
 `builtin:line-count` reads only an agent-local path supplied as an argument. It
 does not upload, download, or transfer file contents through Planetary Mesh.
+These built-ins are intentionally small validation helpers. They are not a
+plugin system, a sandbox, or the intended path for adding each real user
+workflow.
 
 ## What This Protects Against
 
@@ -93,6 +96,8 @@ Keep allowlists narrow and task-specific:
 - keep node-specific allowlists aligned with the node's trusted role
 - use built-in targets for portable smoke validation instead of shell built-ins
   such as Windows `echo`
+- use external commands or wrapper scripts for real private workflows; do not
+  treat built-ins as a growing workflow catalog
 
 Example narrow local allowlist:
 

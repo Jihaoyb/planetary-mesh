@@ -215,6 +215,9 @@ line-count=builtin:line-count
 For real external commands, confirm the mapped executable exists on the agent
 host. Shell built-ins such as Windows `echo` are not executable targets because
 Planetary Mesh does not invoke a shell.
+If a workflow needs richer behavior, prefer a narrow wrapper script or
+allowlisted executable. Do not add or expect arbitrary agent built-ins for each
+workflow.
 
 ## Command Timeout or Non-Zero Exit
 

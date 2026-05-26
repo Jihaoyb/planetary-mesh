@@ -178,6 +178,8 @@ Current rules:
 - agents do not invoke a shell
 - portable validation built-ins currently cover `echo`, `false`, `sleep`, and
   agent-local `line-count`
+- built-ins are intentionally small, stable validation helpers and are not a
+  generic plugin or workflow framework
 - timeout is fixed by agent config, default `30s`
 - stdout/stderr are captured separately and capped at `1 MiB` each
 - non-zero command exit is terminal
@@ -189,6 +191,8 @@ Important limitation:
 
 Future decisions:
 
+- workflow/job templates that expose approved private actions while still
+  mapping to allowlisted commands or wrapper scripts
 - container-based execution
 - VM/microVM execution
 - per-job resource limits

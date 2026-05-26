@@ -215,6 +215,9 @@ Rules:
 - Built-in targets use explicit `builtin:<name>` allowlist values and are
   limited to portable validation helpers such as `builtin:echo`,
   `builtin:false`, `builtin:sleep`, and `builtin:line-count`.
+- Built-ins are not the workflow extensibility model. Real private workflows
+  should use explicit allowlisted external tools or wrapper scripts unless a
+  future milestone designs workflow/job templates.
 - Agents never invoke a shell.
 - The execution timeout is fixed by agent config, default `30s`.
 - Stdout and stderr are captured separately.
@@ -433,6 +436,8 @@ Private mesh hardening:
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need
   for durable agent-side result history or richer recovery semantics
+- workflow/job templates for approved actions layered on the allowlisted command
+  model, not a growing catalog of hardcoded agent built-ins
 
 Productized private mesh:
 

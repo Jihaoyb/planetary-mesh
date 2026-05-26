@@ -254,6 +254,11 @@ Command execution is security-sensitive. Preserve these rules:
 - The agent maps logical command names to executable paths or reserved
   `builtin:<name>` validation targets through explicit allowlist configuration.
 - Built-ins must only run when explicitly mapped in `AGENT_COMMAND_ALLOWLIST`.
+- Treat built-ins as narrow, stable smoke/validation helpers only. Do not add
+  new built-ins as a generic workflow extension mechanism without explicit
+  product/architecture planning.
+- Real private workflows should use explicit allowlisted external commands or
+  wrapper scripts until a future job/workflow template layer is designed.
 - The execution timeout is fixed by agent config. The default is `30s`.
 - There is no per-job timeout override today.
 - Stdout and stderr are captured separately.
