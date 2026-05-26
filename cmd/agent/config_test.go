@@ -24,6 +24,9 @@ func TestLoadAgentConfigDefaults(t *testing.T) {
 	if cfg.Executor.Timeout != 30*time.Second {
 		t.Fatalf("expected default timeout, got %s", cfg.Executor.Timeout)
 	}
+	if cfg.Executor.Allowlist["echo"] != "builtin:echo" {
+		t.Fatalf("expected default echo built-in allowlist entry, got %+v", cfg.Executor.Allowlist)
+	}
 	if len(cfg.Capabilities) != 0 {
 		t.Fatalf("expected no default capabilities, got %q", cfg.Capabilities)
 	}
@@ -119,7 +122,7 @@ func TestLoadAgentExampleConfigs(t *testing.T) {
 			if cfg.CoordinatorURL != "http://localhost:8080" {
 				t.Fatalf("expected local coordinator URL, got %q", cfg.CoordinatorURL)
 			}
-			if cfg.Executor.Allowlist["echo"] != "echo" {
+			if cfg.Executor.Allowlist["echo"] != "builtin:echo" {
 				t.Fatalf("expected echo allowlist entry, got %+v", cfg.Executor.Allowlist)
 			}
 			if len(cfg.Capabilities) == 0 {

@@ -58,11 +58,16 @@ Default local addresses:
 The example agents allow logical command keys:
 
 ```text
-echo=echo,false=false,sleep=sleep
+echo=builtin:echo,false=builtin:false,sleep=builtin:sleep
 ```
 
 Those are allowlist entries, not a general permission to execute arbitrary
-commands.
+commands. The `builtin:<name>` values are explicit no-shell validation targets
+chosen so the local smoke command behavior is portable across macOS, Linux, and
+Windows agents.
+They are not a generic workflow extension mechanism; real local/private
+workloads should use explicitly allowlisted external commands or wrapper
+scripts.
 
 ## Manual Startup
 
@@ -173,8 +178,10 @@ use [HTTP/JSON v0 API inventory](../api-http-json-v0.md).
 - Initial dispatch selects the first healthy node; retryable dispatch failures
   can reassign work to another healthy node.
 - `CANCELLED` is reserved but unsupported; there is no cancellation API.
-- Command execution is allowlisted direct process execution, not strong
+- Command execution is allowlisted direct execution on trusted hosts, not strong
   sandboxing.
+- Built-in validation targets are available only when explicitly mapped through
+  `AGENT_COMMAND_ALLOWLIST`.
 
 ## Basic Validation
 

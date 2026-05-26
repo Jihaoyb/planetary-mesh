@@ -38,7 +38,8 @@ Current behavior:
 - Optional Postgres coordinator storage for nodes and jobs.
 - Optional mTLS with manual CA/certificate/key provisioning and node
   allowlists.
-- Allowlisted direct command execution on trusted hosts.
+- Allowlisted command execution on trusted hosts, including explicit portable
+  built-in validation targets when configured.
 - `pmctl` as a thin client over the coordinator API.
 
 Current non-goals:

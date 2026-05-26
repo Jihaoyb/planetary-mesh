@@ -208,17 +208,24 @@ Rules:
 - `command` is a logical allowlist key.
 - `args` is an argument vector.
 - `payload` is rejected for `type="command"`.
-- Agents map logical command keys to local executable paths through
+- Agents map logical command keys to local executable paths or reserved
+  built-in validation targets through
   `AGENT_COMMAND_ALLOWLIST`.
-- Agents execute with `exec.CommandContext`.
+- Agents execute external command targets with `exec.CommandContext`.
+- Built-in targets use explicit `builtin:<name>` allowlist values and are
+  limited to portable validation helpers such as `builtin:echo`,
+  `builtin:false`, `builtin:sleep`, and `builtin:line-count`.
+- Built-ins are not the workflow extensibility model. Real private workflows
+  should use explicit allowlisted external tools or wrapper scripts unless a
+  future milestone designs workflow/job templates.
 - Agents never invoke a shell.
 - The execution timeout is fixed by agent config, default `30s`.
 - Stdout and stderr are captured separately.
 - Each stream is capped at `1 MiB` and reports a truncation flag when clipped.
 - Non-zero command exit is terminal and is not retried by the coordinator.
 
-This is allowlisted direct process execution. It is not strong sandbox,
-container, VM, or multi-tenant isolation.
+This is allowlisted direct execution on trusted hosts. It is not strong
+sandbox, container, VM, or multi-tenant isolation.
 
 ### Scheduling and Dispatch
 
@@ -429,6 +436,8 @@ Private mesh hardening:
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need
   for durable agent-side result history or richer recovery semantics
+- workflow/job templates for approved actions layered on the allowlisted command
+  model, not a growing catalog of hardcoded agent built-ins
 
 Productized private mesh:
 

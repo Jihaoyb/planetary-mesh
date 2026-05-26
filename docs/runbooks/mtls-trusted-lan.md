@@ -96,7 +96,7 @@ AGENT_ADVERTISE_ADDR=https://agent-1.local:8081 \
 AGENT_TLS_CA_FILE=./certs/ca.pem \
 AGENT_TLS_CERT_FILE=./certs/agent-1.pem \
 AGENT_TLS_KEY_FILE=./certs/agent-1-key.pem \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep' \
 go run ./cmd/agent
 ```
 
@@ -108,6 +108,12 @@ can reach.
 
 The coordinator uses HTTPS and presents its configured certificate when
 dispatching to secure agent `/execute`.
+
+The allowlist example uses portable no-shell built-in validation targets. Real
+private workloads can still map logical keys to external executable paths, but
+those tools must exist on the agent host.
+Do not treat mTLS plus built-ins as a sandbox or as support for arbitrary user
+workloads.
 
 ## Secure pmctl Access
 

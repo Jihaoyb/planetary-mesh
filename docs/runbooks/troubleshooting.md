@@ -85,6 +85,7 @@ Likely causes:
 - invalid duration such as `AGENT_EXEC_TIMEOUT=not-a-duration`
 - invalid `COORDINATOR_RECONCILIATION_GRACE`
 - invalid `AGENT_COMMAND_ALLOWLIST`
+- unknown built-in allowlist target such as `builtin:not-real`
 - invalid `AGENT_CAPABILITIES`
 
 Check the tracked examples:
@@ -196,11 +197,27 @@ go run ./cmd/pmctl --json jobs inspect <job-id>
 Then inspect the agent configuration. Example local allowlist:
 
 ```bash
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep'
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep'
 ```
 
 The submitted command must be the logical key, such as `echo`, not an arbitrary
-path.
+path or built-in target string. A job submitted as `builtin:echo` does not run
+unless that exact logical key is explicitly present in `AGENT_COMMAND_ALLOWLIST`.
+
+For portable smoke validation, prefer built-in targets:
+
+```text
+echo=builtin:echo
+sleep=builtin:sleep
+line-count=builtin:line-count
+```
+
+For real external commands, confirm the mapped executable exists on the agent
+host. Shell built-ins such as Windows `echo` are not executable targets because
+Planetary Mesh does not invoke a shell.
+If a workflow needs richer behavior, prefer a narrow wrapper script or
+allowlisted executable. Do not add or expect arbitrary agent built-ins for each
+workflow.
 
 ## Command Timeout or Non-Zero Exit
 

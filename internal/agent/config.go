@@ -10,7 +10,7 @@ import (
 
 const (
 	DefaultExecutionTimeout = 30 * time.Second
-	DefaultAllowlist        = "echo=echo,false=false,sleep=sleep"
+	DefaultAllowlist        = "echo=builtin:echo,false=builtin:false,sleep=builtin:sleep"
 	DefaultCapabilities     = ""
 )
 
@@ -48,6 +48,9 @@ func ParseAllowlist(raw string) (map[string]string, error) {
 		value := strings.TrimSpace(parts[1])
 		if key == "" || value == "" {
 			return nil, fmt.Errorf("invalid allowlist entry %q", entry)
+		}
+		if err := validateAllowlistTarget(value); err != nil {
+			return nil, fmt.Errorf("invalid allowlist entry %q: %w", entry, err)
 		}
 
 		out[key] = value
