@@ -81,10 +81,15 @@ NODE_ID=<node-id> \
 AGENT_ADDR=:<agent-port> \
 AGENT_ADVERTISE_ADDR=http://<agent-lan-host>:<agent-port> \
 COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-AGENT_COMMAND_ALLOWLIST='echo=echo,false=false,sleep=sleep' \
+AGENT_COMMAND_ALLOWLIST='echo=builtin:echo,false=builtin:false,sleep=builtin:sleep,line-count=builtin:line-count' \
 AGENT_CAPABILITIES='profile:lan,role:worker' \
 go run ./cmd/agent
 ```
+
+The submitted command names remain logical allowlist keys such as `echo`,
+`sleep`, and `line-count`. The `builtin:<name>` values are explicit portable
+no-shell validation targets. They are not platform shell built-ins and cannot
+run unless mapped in `AGENT_COMMAND_ALLOWLIST`.
 
 Confirm the agent health endpoint from the agent host:
 
@@ -157,6 +162,9 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl --json submit command echo "hello from real lan"
 ```
 
+This uses the logical command key `echo`, which the agent allowlist above maps
+to `builtin:echo`.
+
 Record the returned job id as `<job-id>`.
 
 List jobs:
@@ -181,7 +189,7 @@ Expected result:
 - `Stdout` is `hello from real lan`.
 - `Last Error` is absent.
 
-## Validation Finding: Windows Command Portability
+## Historical Validation Finding: Windows Command Portability
 
 Partial real LAN validation on 2026-05-25 used a macOS coordinator/operator
 host and a Windows remote agent host.
@@ -194,8 +202,8 @@ Observed working behavior:
 - `pmctl` submitted a job to the coordinator over the LAN
 - coordinator dispatch reached the Windows agent
 
-The validation job did not complete because the default example mapping
-`echo=echo` is not portable to Windows. Planetary Mesh uses
+The validation job did not complete because the previous default example
+mapping `echo=echo` is not portable to Windows. Planetary Mesh uses
 `exec.CommandContext` directly and intentionally does not invoke a shell. On
 Windows, `echo` is usually a shell built-in rather than a standalone
 `echo.exe`, so the agent cannot execute it through a no-shell allowlist entry.
@@ -221,11 +229,14 @@ Interpretation:
   coordinator-agent LAN path
 - the no-shell execution model is behaving as designed
 
+Milestone 19 added portable no-shell validation built-ins. This runbook now
+uses `builtin:echo`, `builtin:sleep`, and `builtin:line-count` through explicit
+allowlist mappings to avoid platform shell built-ins during validation.
+
 Do not mark Milestone 18 complete from this partial validation alone. Completion
 still requires a successful cross-device terminal command result, practical
-workload validation, and failure/restart observation. A follow-up milestone
-should add portable no-shell validation commands or document platform-specific
-real executables before relying on cross-OS validation examples.
+workload validation, and failure/restart observation captured from actual LAN
+runs with the portable built-ins.
 
 ## Failure and Restart Observation
 
@@ -283,6 +294,10 @@ Use placeholders for network identifiers.
 
 Required evidence:
 
+For a cross-OS validation matrix, repeat the evidence block for each tested
+coordinator/agent OS pair. At minimum, committed completion evidence must show
+the coordinator and agent running on different physical LAN machines.
+
 - [ ] Coordinator ran on one physical machine.
 - [ ] Agent ran on a different physical LAN machine.
 - [ ] Operator ran `pmctl status` against the coordinator LAN address.
@@ -313,7 +328,7 @@ Nodes:
 - <node-id>: HEALTHY, address=http://<agent-lan-host>:<agent-port>, capabilities=profile:lan,role:worker
 
 Dispatch:
-- <job-id>: command=echo, status=COMPLETED, node=<node-id>, attempts=1, stdout="hello from real lan"
+- <job-id>: command=echo, allowlist=echo=builtin:echo, status=COMPLETED, node=<node-id>, attempts=1, stdout="hello from real lan"
 
 Failure/restart:
 - remote agent stopped
@@ -323,9 +338,10 @@ Failure/restart:
 - <job-id>: status=COMPLETED after queued scheduler re-dispatch
 
 Practical workload:
-- command=wc -l <agent-local-input-path>
+- command=line-count <agent-local-input-path>
+- allowlist=line-count=builtin:line-count
 - status=COMPLETED
-- stdout="<line-count> <agent-local-input-path>"
+- stdout="<line-count>"
 
 Limitations:
 - plain HTTP validation only unless mTLS was explicitly configured

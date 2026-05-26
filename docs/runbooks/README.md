@@ -24,8 +24,8 @@ owns or controls:
   validation workflow, sanitized evidence checklist, and failure/restart
   observation steps.
 - [Practical Workload Recipe](practical-workload-recipe.md) - trusted
-  host-local `wc` text processing workload beyond `echo`, `sleep`, and
-  `false`.
+  host-local `line-count` text processing workload beyond `echo`, `sleep`,
+  and `false`.
 - [Troubleshooting](troubleshooting.md) - common failure symptoms and current
   inspection surfaces.
 

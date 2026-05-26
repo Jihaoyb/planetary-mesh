@@ -91,11 +91,13 @@ Task-oriented operating guides are in
 [docs/runbooks/README.md](docs/runbooks/README.md).
 Milestone 18 real LAN validation guidance is in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
-with a practical `wc` workload recipe in
+with a practical `line-count` workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
 A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
 portable command-example gap: no-shell agents need real platform executables,
-not shell built-ins such as Windows `echo`.
+not shell built-ins such as Windows `echo`. Milestone 19 added explicit
+portable validation built-ins to address that gap; Milestone 18 still needs
+fresh sanitized LAN evidence captured from successful runs.
 
 ## Architecture Summary
 
