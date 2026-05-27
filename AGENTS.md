@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 17 private mesh operator runbooks and safety
-readiness.
+Current `main` is after Milestone 18 real multi-device LAN validation and
+Milestone 19 portable agent validation built-ins.
 
-Milestones 1 through 17 are complete:
+Milestones 1 through 19 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -50,13 +50,18 @@ Milestones 1 through 17 are complete:
 - task-oriented operator runbooks for local private mesh operation, Postgres
   durability/reconciliation, mTLS trusted-LAN setup, command-execution safety,
   troubleshooting, and validation workflows
+- sanitized real multi-device LAN validation evidence across macOS, Linux, and
+  Windows coordinator/agent pairs using portable built-in validation targets
+- explicit portable no-shell built-in validation targets for `echo`, `false`,
+  `sleep`, and agent-local `line-count` workloads when mapped through
+  `AGENT_COMMAND_ALLOWLIST`
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
-The next phase should focus on narrow private mesh hardening such as operator
-runbook refinement, security hardening, packaging, and explicitly planned
-scheduler/API follow-up work. Do not jump to
+The next phase should focus on Phase 1 readiness review and narrow private mesh
+hardening such as install/onboarding ergonomics, security hardening, packaging,
+and explicitly planned scheduler/API follow-up work. Do not jump to
 marketplace, payment, dashboard, public-node, or remote-node product work
 without explicit planning and an accepted direction.
 

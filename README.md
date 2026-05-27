@@ -11,8 +11,9 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 17 private
-  mesh operator runbooks and safety readiness.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 18 real
+  multi-device LAN validation and Milestone 19 portable agent validation
+  built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -65,6 +66,8 @@ shared compute scenarios.
 - Optional Postgres persistence for nodes/jobs, node capability/load metadata,
   bounded startup reconciliation grace for persisted `RUNNING` jobs, and schema
   readiness reporting.
+- Sanitized real multi-device LAN validation evidence across macOS, Linux, and
+  Windows coordinator/agent pairs.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -76,7 +79,6 @@ shared compute scenarios.
 - Dashboard or rich operator UI.
 - OpenAPI, protobuf, or generated API contracts.
 - Production Docker image or packaged release workflow.
-- Committed real multi-device LAN validation evidence.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
 - Durable agent result history after agent restart.
@@ -89,15 +91,16 @@ limitation and risk register.
 
 Task-oriented operating guides are in
 [docs/runbooks/README.md](docs/runbooks/README.md).
-Milestone 18 real LAN validation guidance is in
+Milestone 18 real LAN validation guidance and sanitized completion evidence are
+in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
 with a practical `line-count` workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
 A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
 portable command-example gap: no-shell agents need real platform executables,
 not shell built-ins such as Windows `echo`. Milestone 19 added explicit
-portable validation built-ins to address that gap; Milestone 18 still needs
-fresh sanitized LAN evidence captured from successful runs.
+portable validation built-ins to address that gap, and Milestone 18 then
+captured successful sanitized LAN validation evidence.
 
 ## Architecture Summary
 

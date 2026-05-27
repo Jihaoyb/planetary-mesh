@@ -83,9 +83,9 @@ Practical MVP success means:
 - docs do not imply built-ins replace approved allowlisted commands, wrapper
   scripts, or future workflow/job templates for real workloads
 
-Phase 1 is not complete until real multi-device LAN validation is captured in
-the repository with sanitized evidence. Documentation alone is not product
-readiness.
+Real multi-device LAN validation is now captured in the repository with
+sanitized evidence. Documentation alone is still not product readiness; use a
+separate Phase 1 readiness review before recommending Phase 2 work.
 
 ## Future Expansion
 

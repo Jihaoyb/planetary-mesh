@@ -5,8 +5,9 @@ as a private/local mesh across real machines on the same LAN. It uses
 placeholder values only. Do not commit private IP addresses, private hostnames,
 certificates, keys, credentials, local env files, or machine-specific notes.
 
-Milestone 18 is not complete until the validation evidence section is filled
-with sanitized results from at least two physical machines.
+Milestone 18 completion evidence was captured on 2026-05-26 from manual
+multi-device LAN validation across macOS, Linux, and Windows coordinator/agent
+pairs. The evidence below is intentionally sanitized and uses placeholders.
 
 ## Hardware and Network Assumptions
 
@@ -233,10 +234,9 @@ Milestone 19 added portable no-shell validation built-ins. This runbook now
 uses `builtin:echo`, `builtin:sleep`, and `builtin:line-count` through explicit
 allowlist mappings to avoid platform shell built-ins during validation.
 
-Do not mark Milestone 18 complete from this partial validation alone. Completion
-still requires a successful cross-device terminal command result, practical
-workload validation, and failure/restart observation captured from actual LAN
-runs with the portable built-ins.
+This partial finding is retained because it explains why the portable built-in
+validation targets are used below. It has been superseded by the completed
+2026-05-26 validation evidence.
 
 ## Failure and Restart Observation
 
@@ -298,20 +298,85 @@ For a cross-OS validation matrix, repeat the evidence block for each tested
 coordinator/agent OS pair. At minimum, committed completion evidence must show
 the coordinator and agent running on different physical LAN machines.
 
-- [ ] Coordinator ran on one physical machine.
-- [ ] Agent ran on a different physical LAN machine.
-- [ ] Operator ran `pmctl status` against the coordinator LAN address.
-- [ ] `pmctl nodes list` showed the remote node as `HEALTHY`.
-- [ ] An allowlisted command job dispatched across devices and reached
+- [x] Coordinator ran on one physical machine.
+- [x] Agent ran on a different physical LAN machine.
+- [x] Operator ran `pmctl status` against the coordinator LAN address.
+- [x] `pmctl nodes list` showed the remote node as `HEALTHY`.
+- [x] An allowlisted command job dispatched across devices and reached
       `COMPLETED`.
-- [ ] `pmctl jobs inspect <job-id>` showed the remote node id, attempts,
+- [x] `pmctl jobs inspect <job-id>` showed the remote node id, attempts,
       terminal status, and stdout.
-- [ ] Remote agent stop/restart behavior was observed.
-- [ ] A job queued while no healthy agent was available later completed after
+- [x] Remote agent stop/restart behavior was observed.
+- [x] A job queued while no healthy agent was available later completed after
       agent restart.
-- [ ] A practical workload beyond `echo`, `sleep`, and `false` was validated
+- [x] A practical workload beyond `echo`, `sleep`, and `false` was validated
       using [Practical Workload Recipe](practical-workload-recipe.md).
-- [ ] Remaining limitations and friction were recorded.
+- [x] Remaining limitations and friction were recorded.
+
+## Captured Sanitized Evidence
+
+Validation date: 2026-05-26.
+
+Validation scope:
+
+- coordinator and agent ran on different physical machines on the same LAN
+- operator used `pmctl` against the coordinator LAN address
+- agent allowlist used
+  `echo=builtin:echo,false=builtin:false,sleep=builtin:sleep,line-count=builtin:line-count`
+- all evidence below uses placeholders instead of private addresses, hostnames,
+  usernames, certificates, credentials, or raw local notes
+
+Validated OS matrix:
+
+| Coordinator host | Agent host | Result |
+|---|---|---|
+| macOS physical machine | Windows physical machine | Passed |
+| macOS physical machine | Linux physical machine | Passed |
+| Windows physical machine | macOS physical machine | Passed |
+| Windows physical machine | Linux physical machine | Passed |
+| Linux physical machine | macOS physical machine | Passed |
+| Linux physical machine | Windows physical machine | Passed |
+
+For each coordinator/agent pair:
+
+```text
+Topology:
+- Coordinator host: physical machine A, <coordinator-os>/<arch>, listening on <coordinator-port>
+- Agent host: physical machine B, <agent-os>/<arch>, listening on <agent-port>
+- Operator client: coordinator host or trusted LAN client
+
+Status:
+- pmctl status: status=ok protocol=1 storage=in_memory secure=false
+
+Nodes:
+- <node-id>: HEALTHY, address=http://<agent-lan-host>:<agent-port>, capabilities=profile:lan,role:worker
+
+Portable command dispatch:
+- <job-id>: command=echo, allowlist=echo=builtin:echo, status=COMPLETED, node=<node-id>, attempts>=1, stdout="hello from real lan"
+
+Practical workload:
+- <job-id>: command=line-count <agent-local-input-path>, allowlist=line-count=builtin:line-count, status=COMPLETED, node=<node-id>, stdout="3"
+
+Failure/restart:
+- remote agent stopped
+- node observed as OFFLINE
+- <job-id>: command=echo, status=QUEUED while no healthy agent was available
+- remote agent restarted with the same NODE_ID and advertised address
+- <job-id>: status=COMPLETED after queued scheduler re-dispatch
+```
+
+Validation outcome:
+
+- coordinator-to-agent registration and heartbeat worked across each OS pair
+- `pmctl` inspected remote status, node, job, and result state over the LAN
+- allowlisted `builtin:echo` command dispatch completed across devices
+- practical `builtin:line-count` workload completed against an agent-local
+  input file
+- basic stop/restart behavior was observed: the node became `OFFLINE`, a job
+  stayed `QUEUED` while no healthy agent was available, and the job completed
+  after the agent restarted
+- no private LAN addresses, private hostnames, credentials, certificates, keys,
+  local env files, or raw machine-specific notes were committed
 
 Suggested sanitized evidence shape:
 

@@ -21,7 +21,7 @@ owns or controls:
 - [Command Execution Safety](command-execution-safety.md) - allowlisted direct
   command execution, timeout/output bounds, and current isolation limits.
 - [Real LAN Validation](real-lan-validation.md) - two-physical-machine LAN
-  validation workflow, sanitized evidence checklist, and failure/restart
+  validation workflow, sanitized completion evidence, and failure/restart
   observation steps.
 - [Practical Workload Recipe](practical-workload-recipe.md) - trusted
   host-local `line-count` text processing workload beyond `echo`, `sleep`,
