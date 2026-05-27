@@ -11,9 +11,9 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 18 real
-  multi-device LAN validation and Milestone 19 portable agent validation
-  built-ins.
+- **Stage**: Phase 1 complete trusted LAN/private-network prototype after
+  Milestone 20 Phase 1 readiness review, Milestone 18 real multi-device LAN
+  validation, and Milestone 19 portable agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -68,6 +68,7 @@ shared compute scenarios.
   readiness reporting.
 - Sanitized real multi-device LAN validation evidence across macOS, Linux, and
   Windows coordinator/agent pairs.
+- Phase 1 readiness review with no remaining Phase 1 exit blockers.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -101,6 +102,10 @@ portable command-example gap: no-shell agents need real platform executables,
 not shell built-ins such as Windows `echo`. Milestone 19 added explicit
 portable validation built-ins to address that gap, and Milestone 18 then
 captured successful sanitized LAN validation evidence.
+Milestone 20 reviewed that evidence and closed Phase 1; remaining gaps such as
+packaging, onboarding polish, scheduler policy, cancellation, generated API
+contracts, richer operator UX, and stronger isolation are Phase 2 or later
+backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -417,6 +422,7 @@ Current sources of truth:
 
 - [Product Positioning](docs/product-positioning.md)
 - [Roadmap](docs/roadmap.md)
+- [Phase 1 Readiness Review](docs/phase-1-readiness-review.md)
 - [Architecture](docs/architecture.md)
 - [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
 - [Operator Runbooks](docs/runbooks/README.md)
