@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 17 private mesh operator runbooks and safety
-  readiness
+- Baseline: `main` after Milestone 18 real multi-device LAN validation and
+  Milestone 19 portable agent validation built-ins
 - Stage: Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -52,6 +52,8 @@ Implemented capability:
 - task-oriented operator runbooks for local private mesh operation, Postgres
   durability/reconciliation, mTLS trusted-LAN setup, command-execution safety,
   troubleshooting, and validation workflows
+- sanitized real multi-device LAN validation evidence across macOS, Linux, and
+  Windows coordinator/agent pairs
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
@@ -62,9 +64,9 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-17
+## Completed Baseline / Milestones 1-19
 
-The first seventeen milestones established a working private LAN/trusted-network
+The first nineteen milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -427,6 +429,64 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 18: Real Multi-Device LAN Validation and Practical Workload Recipe
+
+Goal: validate Planetary Mesh as a real private/local mesh across physical
+machines on the same LAN and capture sanitized evidence.
+
+Completed outcomes:
+
+- real LAN validation runbook with hardware/network assumptions, coordinator
+  startup, remote agent startup, `pmctl` inspection, dispatch, failure/restart,
+  and evidence capture workflow
+- practical workload recipe using `builtin:line-count` against an
+  agent-local input file beyond local smoke commands
+- historical macOS-coordinator/Windows-agent portability finding preserved to
+  explain why no-shell portable validation built-ins are used
+- sanitized completion evidence captured on 2026-05-26 for these physical
+  LAN coordinator/agent OS pairs:
+  - macOS coordinator to Windows agent
+  - macOS coordinator to Linux agent
+  - Windows coordinator to macOS agent
+  - Windows coordinator to Linux agent
+  - Linux coordinator to macOS agent
+  - Linux coordinator to Windows agent
+- each validated pair covered coordinator health, remote agent registration and
+  heartbeat, `pmctl status`, `pmctl nodes list`, cross-device `builtin:echo`
+  command completion, `builtin:line-count` practical workload completion, job
+  inspection, and basic agent stop/restart queued-job behavior
+- evidence uses placeholders and does not commit private IPs, private
+  hostnames, credentials, certificates, keys, local env files, or raw
+  machine-specific notes
+
+Status: complete
+
+### Milestone 19: Portable Agent Validation Built-ins
+
+Goal: make Phase 1 LAN validation portable across macOS, Linux, and Windows
+without invoking a shell or relying on platform shell built-ins.
+
+Completed outcomes:
+
+- explicit no-shell agent built-in targets available only when mapped through
+  `AGENT_COMMAND_ALLOWLIST`
+- `builtin:echo`, `builtin:false`, `builtin:sleep`, and
+  `builtin:line-count`
+- external executable allowlist behavior preserved
+- job submissions still use logical command keys, not executable paths or
+  built-in target strings
+- HTTP/JSON v0 protocol, endpoint behavior, coordinator scheduling,
+  coordinator-owned lifecycle transitions, storage behavior, mTLS behavior,
+  and Postgres schema readiness version `2` unchanged
+- focused DB-free tests for built-in target behavior, allowlist enforcement,
+  external executable behavior, stdout/stderr/exit semantics, line counting,
+  and sleep timeout/cancellation
+- examples, config files, runbooks, troubleshooting docs, tech choices,
+  architecture, product docs, and API inventory aligned with the portable
+  validation built-ins
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
@@ -438,9 +498,7 @@ Potential work:
 - follow-up reconciliation hardening only where the current best-effort slice
   proves insufficient
 - continued operator runbook refinement as workflows evolve
-- real multi-device LAN validation using portable built-in smoke targets; if
-  separate Milestone 18 validation runbooks are merged, update those runbooks to
-  use `builtin:echo`, `builtin:sleep`, and `builtin:line-count`
+- Phase 1 readiness review using the captured real LAN validation evidence
 - future generated API contract decision after the manual inventory stabilizes
 - improved local install workflow
 - certificate/onboarding helper planning

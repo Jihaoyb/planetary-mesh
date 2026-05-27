@@ -11,8 +11,9 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Trusted LAN/private-network prototype after Milestone 16 HTTP/JSON
-  v0 API inventory and compatibility policy.
+- **Stage**: Trusted LAN/private-network prototype after Milestone 18 real
+  multi-device LAN validation and Milestone 19 portable agent validation
+  built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -65,6 +66,8 @@ shared compute scenarios.
 - Optional Postgres persistence for nodes/jobs, node capability/load metadata,
   bounded startup reconciliation grace for persisted `RUNNING` jobs, and schema
   readiness reporting.
+- Sanitized real multi-device LAN validation evidence across macOS, Linux, and
+  Windows coordinator/agent pairs.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -88,6 +91,16 @@ limitation and risk register.
 
 Task-oriented operating guides are in
 [docs/runbooks/README.md](docs/runbooks/README.md).
+Milestone 18 real LAN validation guidance and sanitized completion evidence are
+in
+[docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
+with a practical `line-count` workload recipe in
+[docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
+A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
+portable command-example gap: no-shell agents need real platform executables,
+not shell built-ins such as Windows `echo`. Milestone 19 added explicit
+portable validation built-ins to address that gap, and Milestone 18 then
+captured successful sanitized LAN validation evidence.
 
 ## Architecture Summary
 
@@ -212,6 +225,9 @@ restart.
 
 For step-by-step operator workflows, see the
 [operator runbooks](docs/runbooks/README.md).
+
+For real multi-device LAN validation, use
+[docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md).
 
 ## Run Manually
 
