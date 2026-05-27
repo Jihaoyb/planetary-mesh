@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 18 real multi-device LAN validation and
-Milestone 19 portable agent validation built-ins.
+Current `main` is after Milestone 20 Phase 1 readiness review and phase gate
+decision.
 
-Milestones 1 through 19 are complete:
+Milestones 1 through 20 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -55,15 +55,17 @@ Milestones 1 through 19 are complete:
 - explicit portable no-shell built-in validation targets for `echo`, `false`,
   `sleep`, and agent-local `line-count` workloads when mapped through
   `AGENT_COMMAND_ALLOWLIST`
+- Phase 1 readiness review with no remaining Phase 1 exit blockers
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
-The next phase should focus on Phase 1 readiness review and narrow private mesh
-hardening such as install/onboarding ergonomics, security hardening, packaging,
-and explicitly planned scheduler/API follow-up work. Do not jump to
-marketplace, payment, dashboard, public-node, or remote-node product work
-without explicit planning and an accepted direction.
+Phase 1 is closed. The next work should be explicitly planned Phase 2
+productized private mesh work such as install/onboarding ergonomics, packaging,
+richer operator UX, workflow/template planning, security hardening, or
+explicitly planned scheduler/API follow-up work. Do not jump to marketplace,
+payment, public-node, shared-pool, or remote-node product work without explicit
+planning and an accepted direction.
 
 ## Canonical Context
 
@@ -74,6 +76,8 @@ changes:
 - `docs/product-positioning.md` - current product framing and staged direction
 - `docs/current-limitations.md` - current limitations and risk register
 - `docs/roadmap.md` - canonical roadmap and sequencing
+- `docs/phase-1-readiness-review.md` - Phase 1 exit criteria review and phase
+  gate decision
 - `docs/architecture.md` - component model and system boundaries
 - `docs/api-http-json-v0.md` - authoritative manual HTTP/JSON v0 API inventory
   and compatibility policy
@@ -338,17 +342,19 @@ Do not implement or imply current support for:
 - multi-tenant authorization or public cloud platform behavior
 - remote private mesh networking without explicit planning
 
-Allowed near-term direction is private mesh hardening:
+Allowed near-term direction after Phase 1 closure is explicitly scoped
+productized private mesh work:
 
-- queued-job scheduler/re-dispatch loop
-- cross-node reassignment after dispatch failure
-- scheduler policy for reported node capabilities/load
-- clearer job state transitions
+- improved install/onboarding workflow
+- release packaging
+- richer CLI/operator UX or scoped dashboard planning
+- certificate/onboarding helper planning
+- workflow/job template planning for approved private actions layered on
+  allowlisted commands
+- scheduler policy for reported node capabilities/load, if explicitly planned
+- generated API contract decision, if explicitly planned
 - follow-up reconciliation hardening if the current best-effort slice proves
   insufficient
-- operator runbook maintenance and API inventory
-- install/release packaging
-- certificate/onboarding helper planning
 - optional private batch/AI demo pipeline
 
 ## Testing Expectations
