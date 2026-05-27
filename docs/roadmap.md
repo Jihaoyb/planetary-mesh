@@ -10,9 +10,9 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 18 real multi-device LAN validation and
-  Milestone 19 portable agent validation built-ins
-- Stage: Go 1.25.4 LAN/private-network command-job prototype
+- Baseline: `main` after Milestone 20 Phase 1 readiness review and phase gate
+  decision
+- Stage: Phase 1 complete Go 1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
   compute
@@ -60,13 +60,14 @@ Implemented capability:
 - thin CLI for status, node/job listing, job inspection, and command submission,
   including human and JSON node metadata output
 - CI/build/test health with default DB-free tests
+- Phase 1 readiness review with no remaining Phase 1 exit blockers
 
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-19
+## Completed Baseline / Milestones 1-20
 
-The first nineteen milestones established a working private LAN/trusted-network
+The first twenty milestones established a working private LAN/trusted-network
 prototype. This history remains useful because it explains why the current
 baseline is intentionally narrow.
 
@@ -487,22 +488,55 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 20: Phase 1 Readiness Review and Phase Gate Decision
+
+Goal: assess whether Phase 1 can be formally closed based on current repo
+state, Milestone 18 real LAN evidence, Milestone 19 portable validation
+built-ins, current limitations, operator docs, and product requirements.
+
+Completed outcomes:
+
+- added `docs/phase-1-readiness-review.md` as the Phase 1 gate artifact
+- evaluated each Phase 1 exit criterion against repository evidence
+- found no remaining Phase 1 exit blockers
+- accepted the decision to close Phase 1
+- classified install/onboarding friction, packaging, CLI-heavy operator UX,
+  scheduler policy, cancellation, generated API contract, stronger isolation,
+  manual mTLS lifecycle tooling, and restart hardening as Phase 2 or later
+  backlog unless a future phase gate reclassifies them
+- preserved runtime behavior, public API fields, protocol version, endpoint
+  behavior, scheduler behavior, storage behavior, mTLS behavior, `pmctl`
+  behavior, and Postgres schema readiness version `2`
+
+Status: complete
+
 ## Phase 1: Private Mesh Hardening
 
 Goal: make the current local/trusted mesh more reliable and easier to operate.
 
-Potential work:
+Status: complete after Milestone 20.
 
-- scheduler policy that can use reported node capabilities/load when explicitly
-  planned
-- follow-up reconciliation hardening only where the current best-effort slice
-  proves insufficient
+Closure evidence:
+
+- real multi-device LAN validation evidence across macOS, Linux, and Windows
+  coordinator/agent pairs
+- portable no-shell validation built-ins for cross-OS smoke checks
+- `pmctl` inspection of remote node, job, and result state
+- basic LAN stop/restart observation
+- practical `line-count` workload recipe beyond local smoke commands
+- task-oriented runbooks and explicit safety limitations
+
+Remaining private-mesh hardening ideas now belong to Phase 2 or later backlog
+unless a future phase gate explicitly reopens Phase 1:
+
+- scheduler policy that can use reported node capabilities/load
+- follow-up reconciliation hardening if the current best-effort slice proves
+  insufficient
 - continued operator runbook refinement as workflows evolve
-- Phase 1 readiness review using the captured real LAN validation evidence
-- future generated API contract decision after the manual inventory stabilizes
+- generated API contract decision after the manual inventory stabilizes
 - improved local install workflow
 - certificate/onboarding helper planning
-- stronger docs around execution risks
+- stronger execution isolation or additional safety controls
 - workflow/job template planning for approved private actions layered on
   allowlisted commands, instead of turning agent built-ins into a general
   workflow framework
@@ -519,6 +553,11 @@ Non-goals:
 ## Phase 2: Productized Private Mesh
 
 Goal: make the private mesh usable by a real developer or small team.
+
+Status: next planning area after the Phase 1 gate decision. Phase 2 work should
+still be selected as explicit, narrow milestones and should not imply remote
+mesh, shared pool, marketplace, payment, or arbitrary untrusted workload
+support.
 
 Potential work:
 

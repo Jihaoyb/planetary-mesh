@@ -20,7 +20,7 @@ for trusted command-based jobs before expanding into remote or shared compute.
 
 ## MVP Scope
 
-Near-term MVP work should harden the private/local mesh:
+Phase 1 MVP work hardened the private/local mesh:
 
 - reliable queued job processing, starting with periodic coordinator-owned
   re-dispatch for jobs left queued without a healthy node
@@ -84,8 +84,10 @@ Practical MVP success means:
   scripts, or future workflow/job templates for real workloads
 
 Real multi-device LAN validation is now captured in the repository with
-sanitized evidence. Documentation alone is still not product readiness; use a
-separate Phase 1 readiness review before recommending Phase 2 work.
+sanitized evidence. Milestone 20 recorded the Phase 1 readiness review and
+closed Phase 1 with no remaining Phase 1 exit blockers. Documentation alone is
+still not product readiness for Phase 2; productized private mesh work should be
+selected as explicit, narrow milestones.
 
 ## Future Expansion
 
