@@ -4,6 +4,9 @@ This runbook maps common current failure symptoms to the inspection surfaces
 available today: health checks, `pmctl`, `/status`, `/metrics`, process logs,
 and smoke script output.
 
+For the ordered source-based setup path, use
+[First-Run Private Mesh Onboarding](first-run-private-mesh.md) first.
+
 For endpoint details and status-code expectations, use the
 [HTTP/JSON v0 API inventory](../api-http-json-v0.md).
 

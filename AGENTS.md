@@ -21,10 +21,9 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 20 Phase 1 readiness review and phase gate
-decision.
+Current `main` is after Milestone 21 first-run private mesh onboarding.
 
-Milestones 1 through 20 are complete:
+Milestones 1 through 21 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -56,16 +55,19 @@ Milestones 1 through 20 are complete:
   `sleep`, and agent-local `line-count` workloads when mapped through
   `AGENT_COMMAND_ALLOWLIST`
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
+- source-based first-run onboarding that connects local smoke, manual local
+  startup, two-machine LAN operation, `pmctl` inspection, practical
+  agent-local `line-count`, cleanup, and failure handling
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
-Phase 1 is closed. The next work should be explicitly planned Phase 2
-productized private mesh work such as install/onboarding ergonomics, packaging,
-richer operator UX, workflow/template planning, security hardening, or
-explicitly planned scheduler/API follow-up work. Do not jump to marketplace,
-payment, public-node, shared-pool, or remote-node product work without explicit
-planning and an accepted direction.
+Phase 1 is closed and Phase 2 has started with source-based first-run
+onboarding. The next work should be explicitly planned Phase 2 productized
+private mesh work such as packaging, richer operator UX, workflow/template
+planning, security hardening, or explicitly planned scheduler/API follow-up
+work. Do not jump to marketplace, payment, public-node, shared-pool, or
+remote-node product work without explicit planning and an accepted direction.
 
 ## Canonical Context
 
@@ -83,6 +85,8 @@ changes:
   and compatibility policy
 - `docs/runbooks/README.md` - task-oriented operator runbooks for current
   private mesh operation
+- `docs/runbooks/first-run-private-mesh.md` - source-based first-run onboarding
+  from local smoke to two-machine LAN operation
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
   execution choices
 - `docs/adr/` - accepted Architecture Decision Records

@@ -4,6 +4,11 @@ This runbook covers the default local workflow: one coordinator, two agents,
 plain HTTP, in-memory coordinator storage, and allowlisted command execution.
 It does not cover durable Postgres operation or mTLS.
 
+For the source-based first-run path that connects local smoke, manual startup,
+two-machine LAN onboarding, practical `line-count` work, cleanup, and common
+failure handling, start with
+[First-Run Private Mesh Onboarding](first-run-private-mesh.md).
+
 ## Quick Smoke
 
 From the repository root:
