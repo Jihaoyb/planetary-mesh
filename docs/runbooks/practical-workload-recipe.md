@@ -4,6 +4,9 @@ This runbook documents a small trusted workload beyond the local smoke commands
 `echo`, `sleep`, and `false`: counting lines in an agent-local text file with
 the portable `builtin:line-count` validation target.
 
+For a shorter first-run path that includes this workload after local smoke, see
+[First-Run Private Mesh Onboarding](first-run-private-mesh.md).
+
 The recipe is intentionally narrow. It validates that Planetary Mesh can run a
 useful allowlisted command on a remote private machine and return the result
 through the coordinator. It does not add file transfer, job templates, shell

@@ -5,6 +5,10 @@ as a private/local mesh across real machines on the same LAN. It uses
 placeholder values only. Do not commit private IP addresses, private hostnames,
 certificates, keys, credentials, local env files, or machine-specific notes.
 
+If this is your first source-based run, start with
+[First-Run Private Mesh Onboarding](first-run-private-mesh.md). This runbook is
+the deeper validation and evidence-capture reference.
+
 Milestone 18 completion evidence was captured on 2026-05-26 from manual
 multi-device LAN validation across macOS, Linux, and Windows coordinator/agent
 pairs. The evidence below is intentionally sanitized and uses placeholders.

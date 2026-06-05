@@ -11,9 +11,10 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Phase 1 complete trusted LAN/private-network prototype after
-  Milestone 20 Phase 1 readiness review, Milestone 18 real multi-device LAN
-  validation, and Milestone 19 portable agent validation built-ins.
+- **Stage**: Phase 2 source-based onboarding has started after Milestone 21
+  first-run private mesh onboarding. Phase 1 closed after the Milestone 20
+  readiness review, Milestone 18 real multi-device LAN validation, and
+  Milestone 19 portable agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -69,6 +70,7 @@ shared compute scenarios.
 - Sanitized real multi-device LAN validation evidence across macOS, Linux, and
   Windows coordinator/agent pairs.
 - Phase 1 readiness review with no remaining Phase 1 exit blockers.
+- Source-based first-run onboarding from local smoke to a two-machine LAN mesh.
 - Config-driven local smoke demos and a Compose-backed Postgres smoke workflow.
 
 ## Not Implemented Yet
@@ -91,7 +93,9 @@ See [docs/current-limitations.md](docs/current-limitations.md) for the current
 limitation and risk register.
 
 Task-oriented operating guides are in
-[docs/runbooks/README.md](docs/runbooks/README.md).
+[docs/runbooks/README.md](docs/runbooks/README.md). Start with
+[docs/runbooks/first-run-private-mesh.md](docs/runbooks/first-run-private-mesh.md)
+for the source-based first-run path from local smoke to a two-machine LAN mesh.
 Milestone 18 real LAN validation guidance and sanitized completion evidence are
 in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
@@ -102,10 +106,11 @@ portable command-example gap: no-shell agents need real platform executables,
 not shell built-ins such as Windows `echo`. Milestone 19 added explicit
 portable validation built-ins to address that gap, and Milestone 18 then
 captured successful sanitized LAN validation evidence.
-Milestone 20 reviewed that evidence and closed Phase 1; remaining gaps such as
-packaging, onboarding polish, scheduler policy, cancellation, generated API
-contracts, richer operator UX, and stronger isolation are Phase 2 or later
-backlog unless explicitly reclassified.
+Milestone 20 reviewed that evidence and closed Phase 1. Milestone 21 added a
+source-based first-run onboarding path. Remaining gaps such as packaging,
+scheduler policy, cancellation, generated API contracts, richer operator UX,
+workflow templates, and stronger isolation are Phase 2 or later backlog unless
+explicitly reclassified.
 
 ## Architecture Summary
 
@@ -204,7 +209,7 @@ go test -tags postgres ./internal/coordinator
 
 The default `go test ./...` path remains DB-free.
 
-## Local Smoke Demo
+## First Run From Source
 
 From a fresh checkout with Go, `curl`, and `python3` available:
 
@@ -216,6 +221,18 @@ The demo builds temporary local binaries, starts one coordinator and two agents
 from tracked config examples, submits an allowlisted command through `pmctl`,
 lists nodes/jobs, and inspects the completed job. It uses in-memory storage and
 plain HTTP by default.
+
+Expected first result:
+
+- `Smoke demo completed successfully`
+- coordinator status `ok`, protocol version `1`, and `in_memory` storage
+- `local-agent-1` and `local-agent-2` listed as `HEALTHY`
+- a completed `echo` job with stdout `hello from planetary mesh`
+
+For manual component startup, a two-machine LAN path, a `line-count` workload
+against an agent-local file, cleanup, and failure handling, follow the
+[First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
+runbook.
 
 For durable-state verification with Docker Compose:
 
@@ -426,6 +443,7 @@ Current sources of truth:
 - [Architecture](docs/architecture.md)
 - [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
 - [Operator Runbooks](docs/runbooks/README.md)
+- [First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)
 - [Tech Choices](docs/tech-choices.md)

@@ -10,9 +10,9 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 20 Phase 1 readiness review and phase gate
-  decision
-- Stage: Phase 1 complete Go 1.25.4 LAN/private-network command-job prototype
+- Baseline: `main` after Milestone 21 first-run private mesh onboarding
+- Stage: Phase 2 source-based onboarding started after the Phase 1 complete Go
+  1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
   compute
@@ -57,6 +57,9 @@ Implemented capability:
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
+- source-based first-run onboarding runbook for local smoke, manual local
+  startup, two-machine LAN operation, `pmctl` inspection, practical
+  `line-count`, cleanup, and failure handling
 - thin CLI for status, node/job listing, job inspection, and command submission,
   including human and JSON node metadata output
 - CI/build/test health with default DB-free tests
@@ -65,11 +68,12 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-20
+## Completed Baseline / Milestones 1-21
 
 The first twenty milestones established a working private LAN/trusted-network
-prototype. This history remains useful because it explains why the current
-baseline is intentionally narrow.
+prototype, and Milestone 21 begins Phase 2 by making source-based first-run
+onboarding explicit. This history remains useful because it explains why the
+current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -554,10 +558,29 @@ Non-goals:
 
 Goal: make the private mesh usable by a real developer or small team.
 
-Status: next planning area after the Phase 1 gate decision. Phase 2 work should
-still be selected as explicit, narrow milestones and should not imply remote
-mesh, shared pool, marketplace, payment, or arbitrary untrusted workload
-support.
+Status: started with Milestone 21 source-based first-run onboarding. Phase 2
+work should still be selected as explicit, narrow milestones and should not
+imply remote mesh, shared pool, marketplace, payment, or arbitrary untrusted
+workload support.
+
+### Milestone 21: First-Run Private Mesh Onboarding
+
+Goal: make the source-based path from fresh checkout to a working private mesh
+explicit, repeatable, and hard to misread.
+
+Completed outcomes:
+
+- first-run runbook for local smoke, manual local startup, two-machine LAN
+  onboarding, `pmctl` inspection, a practical `line-count` workload, cleanup,
+  and failure handling
+- README and runbook index now point new users to the first-run path
+- product docs clarify that source-based onboarding is Phase 2 productization
+  work and not packaged release/install support
+- runtime behavior, public API fields, protocol version, endpoint behavior,
+  scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
+  Postgres schema readiness version `2` are unchanged
+
+Status: complete
 
 Potential work:
 

@@ -10,6 +10,10 @@ authoritative [HTTP/JSON v0 API inventory](../api-http-json-v0.md).
 Use these runbooks for private/local operation across machines a user or team
 owns or controls:
 
+- [First-Run Private Mesh Onboarding](first-run-private-mesh.md) - the
+  source-based path from fresh checkout to local smoke, manual component
+  startup, a two-machine LAN mesh, `pmctl` inspection, a `line-count`
+  workload, cleanup, and failure handling.
 - [Local Private Mesh](local-private-mesh.md) - in-memory coordinator storage,
   tracked config examples, `examples/demo.sh`, manual starts, and basic
   `pmctl` workflows.
@@ -92,6 +96,7 @@ Real LAN validation additionally expects:
 | Vet | `GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...` | DB-free. |
 | Local smoke | `./examples/demo.sh` | Starts local coordinator and two agents with in-memory storage. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
+| First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |
 | Real LAN validation | Follow [Real LAN Validation](real-lan-validation.md) | Manual gate for proving coordinator, remote agent, `pmctl`, dispatch, result capture, and failure/restart behavior across physical LAN machines. |
 
