@@ -133,6 +133,8 @@ Current shape:
 - optional env-style config files
 - `examples/demo.sh` for in-memory smoke workflow
 - `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
+- `examples/external_workload_smoke.sh` for the tracked external workload path
+- `examples/workloads/text-stats` as a small cross-platform external helper
 - `compose.yaml` for local coordinator + Postgres + agents
 - task-oriented operator runbooks under [runbooks/](runbooks/README.md)
 
@@ -180,6 +182,9 @@ Current rules:
   agent-local `line-count`
 - built-ins are intentionally small, stable validation helpers and are not a
   generic plugin or workflow framework
+- real private workflows should use explicit allowlisted external commands or
+  wrapper executables; `examples/workloads/text-stats` is the tracked example
+  of this pattern
 - timeout is fixed by agent config, default `30s`
 - stdout/stderr are captured separately and capped at `1 MiB` each
 - non-zero command exit is terminal

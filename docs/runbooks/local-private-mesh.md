@@ -5,9 +5,11 @@ plain HTTP, in-memory coordinator storage, and allowlisted command execution.
 It does not cover durable Postgres operation or mTLS.
 
 For the source-based first-run path that connects local smoke, manual startup,
-two-machine LAN onboarding, practical `line-count` work, cleanup, and common
+two-machine LAN onboarding, portable validation work, cleanup, and common
 failure handling, start with
 [First-Run Private Mesh Onboarding](first-run-private-mesh.md).
+For the current external executable/wrapper workflow path, use
+[Practical External Workload Recipe](practical-workload-recipe.md).
 
 ## Quick Smoke
 

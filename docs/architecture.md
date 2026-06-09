@@ -218,6 +218,9 @@ Rules:
 - Built-ins are not the workflow extensibility model. Real private workflows
   should use explicit allowlisted external tools or wrapper scripts unless a
   future milestone designs workflow/job templates.
+- `examples/workloads/text-stats` is the tracked example of that external
+  executable/wrapper pattern. It is built and allowlisted on agent hosts; it is
+  not a new agent built-in or protocol feature.
 - Agents never invoke a shell.
 - The execution timeout is fixed by agent config, default `30s`.
 - Stdout and stderr are captured separately.

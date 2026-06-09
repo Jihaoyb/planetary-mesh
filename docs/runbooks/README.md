@@ -12,8 +12,8 @@ owns or controls:
 
 - [First-Run Private Mesh Onboarding](first-run-private-mesh.md) - the
   source-based path from fresh checkout to local smoke, manual component
-  startup, a two-machine LAN mesh, `pmctl` inspection, a `line-count`
-  workload, cleanup, and failure handling.
+  startup, a two-machine LAN mesh, `pmctl` inspection, portable validation
+  workloads, cleanup, and failure handling.
 - [Local Private Mesh](local-private-mesh.md) - in-memory coordinator storage,
   tracked config examples, `examples/demo.sh`, manual starts, and basic
   `pmctl` workflows.
@@ -27,9 +27,8 @@ owns or controls:
 - [Real LAN Validation](real-lan-validation.md) - two-physical-machine LAN
   validation workflow, sanitized completion evidence, and failure/restart
   observation steps.
-- [Practical Workload Recipe](practical-workload-recipe.md) - trusted
-  host-local `line-count` text processing workload beyond `echo`, `sleep`,
-  and `false`.
+- [Practical External Workload Recipe](practical-workload-recipe.md) - trusted
+  host-local `text-stats` external executable/wrapper workload.
 - [Troubleshooting](troubleshooting.md) - common failure symptoms and current
   inspection surfaces.
 
@@ -44,6 +43,8 @@ Current behavior:
   allowlists.
 - Allowlisted command execution on trusted hosts, including explicit portable
   built-in validation targets when configured.
+- Tracked external workload examples under `examples/workloads/` for the
+  current wrapper/executable path.
 - `pmctl` as a thin client over the coordinator API.
 
 Current non-goals:
@@ -95,6 +96,7 @@ Real LAN validation additionally expects:
 | Default tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...` | DB-free. |
 | Vet | `GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...` | DB-free. |
 | Local smoke | `./examples/demo.sh` | Starts local coordinator and two agents with in-memory storage. |
+| External workload smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh` | Builds and runs the tracked `text-stats` helper through the allowlisted external command path. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
 | First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |

@@ -37,7 +37,9 @@ Phase 1 MVP work hardened the private/local mesh:
 
 The current implemented workload remains allowlisted command execution.
 Portable built-ins are validation helpers for cross-OS smoke checks; they are
-not the long-term mechanism for adding every product workflow.
+not the long-term mechanism for adding every product workflow. Real private
+workflows use explicit allowlisted external commands or wrapper executables,
+with `examples/workloads/text-stats` as the first tracked example.
 
 ## Non-goals
 
@@ -74,8 +76,10 @@ Practical MVP success means:
   durability, mTLS trusted-LAN setup, command-execution safety,
   troubleshooting, and validation workflows
 - a new technical user can follow a source-based first-run path from local
-  smoke to a two-machine LAN run, inspect state with `pmctl`, and run a small
-  trusted `line-count` workload against an agent-local file
+  smoke to a two-machine LAN run and inspect state with `pmctl`
+- a user can build a tracked external `text-stats` helper, map it through
+  `AGENT_COMMAND_ALLOWLIST`, submit it with `pmctl`, and inspect its result
+  without relying on validation built-ins as the workflow model
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -91,10 +95,12 @@ closed Phase 1 with no remaining Phase 1 exit blockers. Documentation alone is
 still not product readiness for Phase 2; productized private mesh work should be
 selected as explicit, narrow milestones.
 
-Milestone 21 starts Phase 2 productization by documenting a source-based
-first-run onboarding path. This improves fresh-checkout usability, but it is
-not a packaged install workflow, production image, dashboard, remote private
-mesh, or workflow-template layer.
+Milestone 21 started Phase 2 productization by documenting a source-based
+first-run onboarding path. Milestone 22 adds a tracked external workload helper
+and wrapper-pattern runbook. These improve fresh-checkout usability and the
+real private workload path, but they are not a packaged install workflow,
+production image, dashboard, remote private mesh, file-transfer layer, or
+workflow-template layer.
 
 ## Future Expansion
 

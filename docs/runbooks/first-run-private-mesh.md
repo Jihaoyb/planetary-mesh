@@ -2,7 +2,7 @@
 
 This runbook is the source-based path from a fresh checkout to a working
 private mesh. It starts with the local smoke workflow, then shows the same
-operator model across two LAN machines with a small trusted workload beyond
+operator model across two LAN machines with portable validation commands beyond
 `echo`.
 
 It documents behavior that exists today. It does not add packaging, file
@@ -142,12 +142,16 @@ go run ./cmd/pmctl --config config/pmctl.env.example --json nodes list
 go run ./cmd/pmctl --config config/pmctl.env.example --json jobs inspect job-1
 ```
 
-## 3. Run a Practical Trusted Workload
+## 3. Run a Portable Agent-Local Validation Workload
 
-The current first practical workload is `line-count`, which counts lines in one
-agent-local text file. This proves the mesh can run a useful allowlisted action
-against data on a trusted agent host, without adding file transfer or workflow
+The portable validation workload is `line-count`, which counts lines in one
+agent-local text file. This proves the mesh can run an allowlisted action
+against data on a trusted agent host without adding file transfer or workflow
 templates.
+
+For the current real private workflow pattern using an external executable or
+wrapper, use [Practical External Workload Recipe](practical-workload-recipe.md)
+after this first-run path.
 
 `line-count` must be explicitly mapped in `AGENT_COMMAND_ALLOWLIST`. The
 submitted command name is the logical key `line-count`; clients do not submit
@@ -302,7 +306,7 @@ Expected result:
 - `Node` is `<node-id>`
 - `Stdout` is `hello from first lan`
 
-Submit the practical workload:
+Submit the portable validation workload:
 
 ```bash
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
@@ -340,6 +344,7 @@ after inspection.
 | Job stays `QUEUED` | No healthy node is available | `pmctl nodes list` |
 | `line-count` not allowlisted | Agent allowlist lacks `line-count=builtin:line-count` | Agent startup config |
 | `line-count` exits non-zero | Input path is missing or unreadable on the selected agent | Job `stderr` and agent-local file path |
+| External helper fails with `text-stats:` in stderr | Input path is missing or unreadable on the selected agent | Job `stderr` and the [Practical External Workload Recipe](practical-workload-recipe.md) |
 | Job runs on unexpected node | Multiple healthy agents and first-healthy-node scheduling | Use one eligible agent or prepare the input on all eligible agents |
 
 For deeper troubleshooting, use [Troubleshooting](troubleshooting.md).
@@ -358,10 +363,13 @@ For deeper troubleshooting, use [Troubleshooting](troubleshooting.md).
   exist on the selected agent host.
 - Built-ins such as `echo`, `sleep`, `false`, and `line-count` are explicit
   validation helpers. They are not a product workflow extension model.
+- Real private workflows should use explicit allowlisted external commands or
+  wrapper executables such as the tracked `text-stats` example until a future
+  workflow/template layer is designed.
 - There is no production image, packaged release workflow, dashboard, remote
   private mesh, shared pool, marketplace, payment system, or cancellation API.
 
 Use the [Local Private Mesh](local-private-mesh.md),
-[Practical Workload Recipe](practical-workload-recipe.md), and
+[Practical External Workload Recipe](practical-workload-recipe.md), and
 [Real LAN Validation](real-lan-validation.md) runbooks for more detailed
 operator procedures after first-run onboarding.

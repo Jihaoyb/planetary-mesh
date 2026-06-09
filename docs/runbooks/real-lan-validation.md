@@ -313,8 +313,8 @@ the coordinator and agent running on different physical LAN machines.
 - [x] Remote agent stop/restart behavior was observed.
 - [x] A job queued while no healthy agent was available later completed after
       agent restart.
-- [x] A practical workload beyond `echo`, `sleep`, and `false` was validated
-      using [Practical Workload Recipe](practical-workload-recipe.md).
+- [x] A portable agent-local validation workload beyond `echo`, `sleep`, and
+      `false` was validated using `builtin:line-count`.
 - [x] Remaining limitations and friction were recorded.
 
 ## Captured Sanitized Evidence
@@ -418,6 +418,10 @@ Limitations:
 - no strong sandboxing
 - manual process startup and firewall setup
 ```
+
+This captured evidence is historical Milestone 18 validation evidence. For the
+current real private workload path using an external executable or wrapper, use
+[Practical External Workload Recipe](practical-workload-recipe.md).
 
 ## Cleanup
 
