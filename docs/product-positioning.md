@@ -11,8 +11,9 @@ Planetary Mesh is currently a trusted LAN/private-network command-job runner
 prototype. It has a Go coordinator, agent daemon, and thin `pmctl` CLI. The
 current implementation supports node registration, heartbeat, health states,
 allowlisted direct command execution with explicit portable validation built-ins,
-bounded output capture, optional Postgres persistence, opt-in mTLS, node
-allowlists, metrics, and local smoke workflows.
+bounded output capture, a tracked external `text-stats` workload example,
+optional Postgres persistence, opt-in mTLS, node allowlists, metrics, and local
+smoke workflows.
 
 It is not a public marketplace or production multi-tenant compute platform.
 
@@ -42,10 +43,10 @@ templates, file handling, and richer job types are future work.
 
 Portable built-ins are smoke/validation helpers, not the intended product
 surface for adding every user workflow. Near-term real workflows should remain
-explicit allowlisted external commands or wrapper scripts. A future product UX
-can expose approved actions such as OCR, transcription, embeddings, image
-conversion, or batch processing through workflow/job templates after separate
-planning.
+explicit allowlisted external commands or wrapper scripts, following the
+tracked `text-stats` example pattern. A future product UX can expose approved
+actions such as OCR, transcription, embeddings, image conversion, or batch
+processing through workflow/job templates after separate planning.
 
 ## Product Path
 

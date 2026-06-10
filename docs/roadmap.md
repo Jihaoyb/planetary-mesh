@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 21 first-run private mesh onboarding
-- Stage: Phase 2 source-based onboarding started after the Phase 1 complete Go
+- Baseline: `main` after Milestone 22 practical external workload demo
+- Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
@@ -57,9 +57,12 @@ Implemented capability:
 - env-style config files
 - local in-memory smoke script
 - Postgres durability smoke script
+- external workload smoke script for the tracked `text-stats` helper
 - source-based first-run onboarding runbook for local smoke, manual local
-  startup, two-machine LAN operation, `pmctl` inspection, practical
-  `line-count`, cleanup, and failure handling
+  startup, two-machine LAN operation, `pmctl` inspection, portable validation,
+  cleanup, and failure handling
+- practical external workload recipe for building an allowlisted `text-stats`
+  helper on the agent host and submitting it through `pmctl`
 - thin CLI for status, node/job listing, job inspection, and command submission,
   including human and JSON node metadata output
 - CI/build/test health with default DB-free tests
@@ -68,12 +71,13 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-21
+## Completed Baseline / Milestones 1-22
 
 The first twenty milestones established a working private LAN/trusted-network
-prototype, and Milestone 21 begins Phase 2 by making source-based first-run
-onboarding explicit. This history remains useful because it explains why the
-current baseline is intentionally narrow.
+prototype. Milestone 21 began Phase 2 by making source-based first-run
+onboarding explicit, and Milestone 22 made the external allowlisted
+wrapper/executable workload path repeatable. This history remains useful
+because it explains why the current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -527,7 +531,7 @@ Closure evidence:
 - portable no-shell validation built-ins for cross-OS smoke checks
 - `pmctl` inspection of remote node, job, and result state
 - basic LAN stop/restart observation
-- practical `line-count` workload recipe beyond local smoke commands
+- portable `line-count` agent-local validation beyond local smoke commands
 - task-oriented runbooks and explicit safety limitations
 
 Remaining private-mesh hardening ideas now belong to Phase 2 or later backlog
@@ -558,7 +562,8 @@ Non-goals:
 
 Goal: make the private mesh usable by a real developer or small team.
 
-Status: started with Milestone 21 source-based first-run onboarding. Phase 2
+Status: started with Milestone 21 source-based first-run onboarding and
+continued with Milestone 22 practical external workload documentation. Phase 2
 work should still be selected as explicit, narrow milestones and should not
 imply remote mesh, shared pool, marketplace, payment, or arbitrary untrusted
 workload support.
@@ -571,11 +576,35 @@ explicit, repeatable, and hard to misread.
 Completed outcomes:
 
 - first-run runbook for local smoke, manual local startup, two-machine LAN
-  onboarding, `pmctl` inspection, a practical `line-count` workload, cleanup,
+  onboarding, `pmctl` inspection, portable `line-count` validation, cleanup,
   and failure handling
 - README and runbook index now point new users to the first-run path
 - product docs clarify that source-based onboarding is Phase 2 productization
   work and not packaged release/install support
+- runtime behavior, public API fields, protocol version, endpoint behavior,
+  scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
+  Postgres schema readiness version `2` are unchanged
+
+Status: complete
+
+### Milestone 22: Practical External Workload Demo and Wrapper Pattern
+
+Goal: make the real private workload path explicit and repeatable without
+treating validation built-ins as the product workflow model.
+
+Completed outcomes:
+
+- tracked cross-platform `text-stats` Go helper under `examples/workloads/`
+- DB-free helper tests for stable line, non-empty-line, word-count, argument,
+  and missing-file behavior
+- external workload smoke script that builds the helper, maps it through
+  `AGENT_COMMAND_ALLOWLIST`, submits it with `pmctl`, and verifies the result
+- practical external workload runbook covering build, allowlist mapping,
+  local and LAN operation, expected output, cleanup, failure handling, and
+  sanitized evidence
+- README, runbook, architecture, product, limitations, and contributor docs now
+  distinguish portable validation built-ins from real external wrapper
+  workloads
 - runtime behavior, public API fields, protocol version, endpoint behavior,
   scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
   Postgres schema readiness version `2` are unchanged

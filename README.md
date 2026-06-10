@@ -11,10 +11,11 @@ shared compute scenarios.
 
 ## Current Status
 
-- **Stage**: Phase 2 source-based onboarding has started after Milestone 21
-  first-run private mesh onboarding. Phase 1 closed after the Milestone 20
-  readiness review, Milestone 18 real multi-device LAN validation, and
-  Milestone 19 portable agent validation built-ins.
+- **Stage**: Phase 2 productized private mesh work has started with
+  source-based onboarding and a practical external workload example. Phase 1
+  closed after the Milestone 20 readiness review, Milestone 18 real
+  multi-device LAN validation, and Milestone 19 portable agent validation
+  built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -53,6 +54,8 @@ shared compute scenarios.
 - Allowlisted external process execution using `exec.CommandContext`.
 - Explicit no-shell built-in validation targets for `echo`, `false`, `sleep`,
   and agent-local line counting when mapped through `AGENT_COMMAND_ALLOWLIST`.
+- Tracked external `text-stats` workload example and local smoke script for the
+  current allowlisted wrapper/executable workflow path.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -99,7 +102,7 @@ for the source-based first-run path from local smoke to a two-machine LAN mesh.
 Milestone 18 real LAN validation guidance and sanitized completion evidence are
 in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
-with a practical `line-count` workload recipe in
+with the practical external workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
 A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
 portable command-example gap: no-shell agents need real platform executables,
@@ -107,10 +110,11 @@ not shell built-ins such as Windows `echo`. Milestone 19 added explicit
 portable validation built-ins to address that gap, and Milestone 18 then
 captured successful sanitized LAN validation evidence.
 Milestone 20 reviewed that evidence and closed Phase 1. Milestone 21 added a
-source-based first-run onboarding path. Remaining gaps such as packaging,
-scheduler policy, cancellation, generated API contracts, richer operator UX,
-workflow templates, and stronger isolation are Phase 2 or later backlog unless
-explicitly reclassified.
+source-based first-run onboarding path. Milestone 22 added a tracked external
+`text-stats` workload example to demonstrate the real allowlisted wrapper path.
+Remaining gaps such as packaging, scheduler policy, cancellation, generated API
+contracts, richer operator UX, workflow templates, and stronger isolation are
+Phase 2 or later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -178,7 +182,7 @@ planetary-mesh/
 
   config/              # Tracked example config files
   docs/                # Roadmap, architecture, product, ADRs, limitations
-  examples/            # Local and Postgres smoke workflows
+  examples/            # Smoke workflows and tracked workload examples
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 
@@ -229,10 +233,16 @@ Expected first result:
 - `local-agent-1` and `local-agent-2` listed as `HEALTHY`
 - a completed `echo` job with stdout `hello from planetary mesh`
 
-For manual component startup, a two-machine LAN path, a `line-count` workload
-against an agent-local file, cleanup, and failure handling, follow the
+For manual component startup, a two-machine LAN path, portable validation
+workloads, cleanup, and failure handling, follow the
 [First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
 runbook.
+
+To verify the current external wrapper workload path locally:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh
+```
 
 For durable-state verification with Docker Compose:
 

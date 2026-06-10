@@ -21,9 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 21 first-run private mesh onboarding.
+Current `main` is after Milestone 22 practical external workload demo and
+wrapper pattern.
 
-Milestones 1 through 21 are complete:
+Milestones 1 through 22 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -56,18 +57,22 @@ Milestones 1 through 21 are complete:
   `AGENT_COMMAND_ALLOWLIST`
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
 - source-based first-run onboarding that connects local smoke, manual local
-  startup, two-machine LAN operation, `pmctl` inspection, practical
-  agent-local `line-count`, cleanup, and failure handling
+  startup, two-machine LAN operation, `pmctl` inspection, portable validation,
+  cleanup, and failure handling
+- tracked cross-platform external `text-stats` workload helper, smoke script,
+  and runbook showing the current allowlisted wrapper/executable path for real
+  private workflows
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 Phase 1 is closed and Phase 2 has started with source-based first-run
-onboarding. The next work should be explicitly planned Phase 2 productized
-private mesh work such as packaging, richer operator UX, workflow/template
-planning, security hardening, or explicitly planned scheduler/API follow-up
-work. Do not jump to marketplace, payment, public-node, shared-pool, or
-remote-node product work without explicit planning and an accepted direction.
+onboarding plus a practical external workload pattern. The next work should be
+explicitly planned Phase 2 productized private mesh work such as packaging,
+richer operator UX, workflow/template planning, security hardening, or
+explicitly planned scheduler/API follow-up work. Do not jump to marketplace,
+payment, public-node, shared-pool, or remote-node product work without explicit
+planning and an accepted direction.
 
 ## Canonical Context
 
@@ -87,6 +92,8 @@ changes:
   private mesh operation
 - `docs/runbooks/first-run-private-mesh.md` - source-based first-run onboarding
   from local smoke to two-machine LAN operation
+- `docs/runbooks/practical-workload-recipe.md` - current external
+  executable/wrapper workload pattern
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
   execution choices
 - `docs/adr/` - accepted Architecture Decision Records
@@ -132,7 +139,7 @@ planetary-mesh/
 
   config/              # Tracked example env-style config files
   docs/                # Roadmap, architecture, product docs, runbooks, ADRs
-  examples/            # Local and Postgres smoke demos
+  examples/            # Smoke demos and tracked workload examples
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 

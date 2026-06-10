@@ -5,15 +5,16 @@ and marketplace risks. It is intentionally conservative: if a capability is not
 implemented, docs should not imply that it exists.
 
 Milestone 20 found no remaining Phase 1 exit blockers and closed Phase 1.
-Milestone 21 documented source-based first-run onboarding. The limitations
+Milestone 21 documented source-based first-run onboarding. Milestone 22 added a
+tracked external workload helper and wrapper-pattern runbook. The limitations
 below still matter, and remaining private-mesh productization items are Phase 2
 or later backlog unless a future phase gate reclassifies them.
 
 | Area | Current limitation/risk | Why it matters | Mitigation / future direction | Phase |
 |---|---|---|---|---|
 | Command execution | Agents run allowlisted external processes or explicit built-in validation targets on trusted hosts. | A compromised or misconfigured allowlisted external command can still affect the host. Built-ins improve validation portability but are not sandboxing. | Keep no-shell execution and explicit allowlists; add stronger isolation before shared/untrusted workloads. | Current / Phase 2+ backlog |
-| External command portability | Portable validation built-ins address smoke commands such as Windows `echo`, but operator-configured external executable mappings remain OS-specific. | Cross-OS LAN validation can use `builtin:echo`, `builtin:sleep`, and `builtin:line-count`, while real private workloads still need installed tools or host-specific paths. | Use built-ins for validation and document platform-specific executable requirements for real workloads. | Current / Phase 2 backlog |
-| Workflow extensibility | Built-ins are intentionally narrow validation helpers, not a scalable workflow extension mechanism. | Hardcoding every user workflow into the agent binary would blur product boundaries and security expectations. | Keep real workloads on explicit allowlisted commands or wrapper scripts; plan workflow/job templates separately. | Phase 2 backlog |
+| External command portability | Portable validation built-ins address smoke commands such as Windows `echo`, and the tracked `text-stats` helper gives one cross-platform external example, but operator-configured executable mappings remain host-specific. | Cross-OS validation can use built-ins, while real private workloads still need helper binaries, installed tools, or wrapper paths on each eligible agent. | Use built-ins for validation, use tracked external examples for the wrapper pattern, and document platform-specific executable requirements for real workloads. | Current / Phase 2 backlog |
+| Workflow extensibility | Built-ins are intentionally narrow validation helpers, and `text-stats` is an example external helper, not a scalable workflow extension mechanism. | Hardcoding every user workflow into the agent binary would blur product boundaries and security expectations. | Keep real workloads on explicit allowlisted commands or wrapper scripts; plan workflow/job templates separately. | Phase 2 backlog |
 | Isolation | No strong sandbox, container, VM, or multi-tenant isolation. | The system is not safe for arbitrary third-party workloads. | Evaluate container or VM/microVM execution after private mesh basics are stable. | Phase 2+ backlog |
 | mTLS lifecycle | mTLS and node allowlists are opt-in and certificate lifecycle is manual. | Manual cert setup is error-prone and limits remote/private adoption. | Add certificate/onboarding helper planning, then lifecycle tooling. | Phase 2-3 backlog |
 | Scheduling | Dispatch starts with the first healthy node and can reassign after retryable failures, but it is still not load-aware or capability-aware. | Reported capabilities and active execution counts are visible to operators but do not influence node selection. | Design an explicit scheduler policy before using reported metadata for selection, priority, quotas, or fairness. | Phase 2 backlog |

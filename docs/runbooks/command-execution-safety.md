@@ -99,6 +99,10 @@ Keep allowlists narrow and task-specific:
 - use external commands or wrapper scripts for real private workflows; do not
   treat built-ins as a growing workflow catalog
 
+The tracked `examples/workloads/text-stats` helper and
+[Practical External Workload Recipe](practical-workload-recipe.md) show the
+current wrapper-style path without changing the runtime execution model.
+
 Example narrow local allowlist:
 
 ```bash
