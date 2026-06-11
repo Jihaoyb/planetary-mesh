@@ -1,6 +1,11 @@
 .DS_Store
 .claude/
 .gocache/
+dist/
+*.exe
+planetary-mesh-dev-*.tar.gz
+planetary-mesh-dev-*.zip
+planetary-mesh-dev-*/
 
 config/*.env
 !config/*.env.example
