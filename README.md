@@ -12,10 +12,10 @@ shared compute scenarios.
 ## Current Status
 
 - **Stage**: Phase 2 productized private mesh work has started with
-  source-based onboarding and a practical external workload example. Phase 1
-  closed after the Milestone 20 readiness review, Milestone 18 real
-  multi-device LAN validation, and Milestone 19 portable agent validation
-  built-ins.
+  source-based onboarding, a practical external workload example, and a
+  pre-release local binary artifact/install-smoke workflow. Phase 1 closed
+  after the Milestone 20 readiness review, Milestone 18 real multi-device LAN
+  validation, and Milestone 19 portable agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -56,6 +56,9 @@ shared compute scenarios.
   and agent-local line counting when mapped through `AGENT_COMMAND_ALLOWLIST`.
 - Tracked external `text-stats` workload example and local smoke script for the
   current allowlisted wrapper/executable workflow path.
+- Pre-release local release artifact builder and installed-binary smoke script
+  for coordinator, agent, `pmctl`, and `text-stats` across macOS, Linux, and
+  Windows artifact expectations.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -84,7 +87,8 @@ shared compute scenarios.
 - GPU, storage, or bandwidth pooling as implemented product capabilities.
 - Dashboard or rich operator UI.
 - OpenAPI, protobuf, or generated API contracts.
-- Production Docker image or packaged release workflow.
+- Production Docker image, signed installer, package-manager distribution, or
+  GitHub Release artifact.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
 - Durable agent result history after agent restart.
@@ -104,6 +108,8 @@ in
 [docs/runbooks/real-lan-validation.md](docs/runbooks/real-lan-validation.md),
 with the practical external workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
+The pre-release local binary artifact and installed-binary smoke workflow is in
+[docs/runbooks/local-release-install.md](docs/runbooks/local-release-install.md).
 A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
 portable command-example gap: no-shell agents need real platform executables,
 not shell built-ins such as Windows `echo`. Milestone 19 added explicit
@@ -112,9 +118,11 @@ captured successful sanitized LAN validation evidence.
 Milestone 20 reviewed that evidence and closed Phase 1. Milestone 21 added a
 source-based first-run onboarding path. Milestone 22 added a tracked external
 `text-stats` workload example to demonstrate the real allowlisted wrapper path.
-Remaining gaps such as packaging, scheduler policy, cancellation, generated API
-contracts, richer operator UX, workflow templates, and stronger isolation are
-Phase 2 or later backlog unless explicitly reclassified.
+Milestone 23 added pre-release local artifact generation and an installed-binary
+smoke workflow. Remaining gaps such as production packaging, scheduler policy,
+cancellation, generated API contracts, richer operator UX, workflow templates,
+and stronger isolation are Phase 2 or later backlog unless explicitly
+reclassified.
 
 ## Architecture Summary
 
@@ -243,6 +251,15 @@ To verify the current external wrapper workload path locally:
 ```bash
 GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh
 ```
+
+To verify the pre-release installed-binary path locally:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh
+```
+
+The release smoke builds a temporary host install layout and runs coordinator,
+agent, `pmctl`, and `text-stats` from that layout.
 
 For durable-state verification with Docker Compose:
 

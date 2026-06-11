@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 22 practical external workload demo and
-wrapper pattern.
+Current `main` is after Milestone 23 cross-OS local release build and install
+smoke.
 
-Milestones 1 through 22 are complete:
+Milestones 1 through 23 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -62,17 +62,21 @@ Milestones 1 through 22 are complete:
 - tracked cross-platform external `text-stats` workload helper, smoke script,
   and runbook showing the current allowlisted wrapper/executable path for real
   private workflows
+- pre-release local release artifact builder, installed-binary smoke workflow,
+  local release install runbook, and CI OS matrix coverage for macOS, Linux,
+  and Windows expectations
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 Phase 1 is closed and Phase 2 has started with source-based first-run
-onboarding plus a practical external workload pattern. The next work should be
-explicitly planned Phase 2 productized private mesh work such as packaging,
-richer operator UX, workflow/template planning, security hardening, or
-explicitly planned scheduler/API follow-up work. Do not jump to marketplace,
-payment, public-node, shared-pool, or remote-node product work without explicit
-planning and an accepted direction.
+onboarding, a practical external workload pattern, and a pre-release local
+binary artifact/install-smoke path. The next work should be explicitly planned
+Phase 2 productized private mesh work such as production packaging, richer
+operator UX, workflow/template planning, security hardening, or explicitly
+planned scheduler/API follow-up work. Do not jump to marketplace, payment,
+public-node, shared-pool, or remote-node product work without explicit planning
+and an accepted direction.
 
 ## Canonical Context
 
@@ -92,6 +96,8 @@ changes:
   private mesh operation
 - `docs/runbooks/first-run-private-mesh.md` - source-based first-run onboarding
   from local smoke to two-machine LAN operation
+- `docs/runbooks/local-release-install.md` - pre-release local binary artifact
+  layout and installed-binary smoke workflow
 - `docs/runbooks/practical-workload-recipe.md` - current external
   executable/wrapper workload pattern
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
@@ -140,6 +146,7 @@ planetary-mesh/
   config/              # Tracked example env-style config files
   docs/                # Roadmap, architecture, product docs, runbooks, ADRs
   examples/            # Smoke demos and tracked workload examples
+  tools/               # Development/release helper commands
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 
@@ -180,6 +187,12 @@ repo:
 GOCACHE=/private/tmp/planetary-mesh-gocache-build go build ./...
 GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...
 GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...
+```
+
+Release/install smoke gate:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh
 ```
 
 Do not commit `.gocache/`.
@@ -357,7 +370,8 @@ Allowed near-term direction after Phase 1 closure is explicitly scoped
 productized private mesh work:
 
 - improved install/onboarding workflow
-- release packaging
+- production packaging or service-install follow-up beyond the current
+  pre-release local artifacts
 - richer CLI/operator UX or scoped dashboard planning
 - certificate/onboarding helper planning
 - workflow/job template planning for approved private actions layered on

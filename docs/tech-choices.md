@@ -134,6 +134,9 @@ Current shape:
 - `examples/demo.sh` for in-memory smoke workflow
 - `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
 - `examples/external_workload_smoke.sh` for the tracked external workload path
+- `tools/releasebuild` for pre-release local binary artifact generation
+- `examples/release_smoke.sh` for installed-binary validation of coordinator,
+  agent, `pmctl`, and `text-stats`
 - `examples/workloads/text-stats` as a small cross-platform external helper
 - `compose.yaml` for local coordinator + Postgres + agents
 - task-oriented operator runbooks under [runbooks/](runbooks/README.md)
@@ -145,8 +148,9 @@ Related ADR:
 Future decisions:
 
 - production Dockerfile/image
-- release packaging
-- install scripts
+- signed release packaging
+- package-manager distribution
+- service install scripts
 - systemd or launchd service examples
 - Kubernetes-style orchestration, if ever needed
 

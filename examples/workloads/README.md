@@ -7,6 +7,10 @@ These examples are not agent built-ins, workflow templates, packaging outputs,
 or a file-transfer layer. Build outputs are local artifacts and should not be
 committed.
 
+The local release build helper also builds `text-stats` into generated dev
+artifact layouts under `workloads/`. Those generated layouts and archives are
+local artifacts and should not be committed.
+
 ## text-stats
 
 `text-stats` is a small cross-platform Go helper that reads one agent-local

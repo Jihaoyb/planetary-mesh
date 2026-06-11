@@ -6,9 +6,11 @@ implemented, docs should not imply that it exists.
 
 Milestone 20 found no remaining Phase 1 exit blockers and closed Phase 1.
 Milestone 21 documented source-based first-run onboarding. Milestone 22 added a
-tracked external workload helper and wrapper-pattern runbook. The limitations
-below still matter, and remaining private-mesh productization items are Phase 2
-or later backlog unless a future phase gate reclassifies them.
+tracked external workload helper and wrapper-pattern runbook. Milestone 23
+added pre-release local artifact generation and installed-binary smoke
+validation. The limitations below still matter, and remaining private-mesh
+productization items are Phase 2 or later backlog unless a future phase gate
+reclassifies them.
 
 | Area | Current limitation/risk | Why it matters | Mitigation / future direction | Phase |
 |---|---|---|---|---|
@@ -25,7 +27,7 @@ or later backlog unless a future phase gate reclassifies them.
 | Restart recovery | Postgres-backed coordinators now use bounded startup reconciliation and agents report cached terminal results best-effort, but agent result history is only in memory and active executions remain tied to the `/execute` request context. | A completed result is less likely to be lost after coordinator restart, but agent restart or a dropped in-progress request can still leave no reportable terminal result. | Keep terminal result reporting narrow for v0; consider durable agent history or richer execution recovery only after private mesh operations prove the need. | Phase 2 backlog |
 | Operator UX | `pmctl` and operator runbooks cover current command-line workflows, but there is no dashboard or rich logs UX. | Operational troubleshooting is still command-line heavy. | Continue improving CLI, runbooks, logs UX, or add a scoped dashboard later. | Phase 2 |
 | API contract | A manual HTTP/JSON v0 API inventory exists, but no OpenAPI/protobuf contract is generated. | External clients still do not have generated schemas or SDKs. | Maintain the manual inventory and decide later whether generated OpenAPI/protobuf is warranted. | Phase 2 backlog |
-| Packaging | No production Dockerfile, release artifact, packaged install workflow, or GitHub Release artifact. Source-based first-run onboarding is documented, but users still run from a checkout or Compose examples. | New users can reach first success more easily, but install and distribution are still not productized. | Add release packaging, production image, or installer work as a separate Phase 2 milestone. | Phase 2 |
+| Packaging | Pre-release local artifact generation and installed-binary smoke validation exist, but there is no production Dockerfile, signed installer, package-manager distribution, service install workflow, or GitHub Release artifact. | New users can verify a binary layout locally, but production distribution and host service management are still not productized. | Use the local release build/runbook for dev artifacts; plan production packaging, signing, service install examples, or production image work separately. | Phase 2 |
 | Real LAN validation scope | Sanitized real LAN validation evidence now covers macOS, Linux, and Windows coordinator/agent pairs with portable built-in validation targets, but only for trusted same-LAN operation and basic stop/restart behavior. | The evidence proves the private/local mesh premise, but it does not prove remote networking, strong isolation, production packaging, automated certificate lifecycle, or full in-progress execution recovery. | Treat the captured evidence as sufficient for Phase 1 closure; plan remaining productization and hardening through explicit Phase 2 or later milestones. | Phase 1 evidence / Phase 2 backlog |
 | Docs drift | Historical docs can overstate future-state capabilities. | Misleading docs create unsafe expectations around security and maturity. | Keep README, roadmap, architecture, product positioning, and limitations as current sources of truth. | Current |
 | Remote networking | No remote private mesh support today. | Running trusted nodes outside the LAN needs stronger identity and network handling. | Plan secure remote registration, access control, and failure handling. | Phase 3 |

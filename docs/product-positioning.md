@@ -12,10 +12,11 @@ prototype. It has a Go coordinator, agent daemon, and thin `pmctl` CLI. The
 current implementation supports node registration, heartbeat, health states,
 allowlisted direct command execution with explicit portable validation built-ins,
 bounded output capture, a tracked external `text-stats` workload example,
-optional Postgres persistence, opt-in mTLS, node allowlists, metrics, and local
-smoke workflows.
+optional Postgres persistence, opt-in mTLS, node allowlists, metrics, local
+smoke workflows, and pre-release local binary artifact/install-smoke tooling.
 
-It is not a public marketplace or production multi-tenant compute platform.
+It is not a public marketplace, production multi-tenant compute platform,
+signed installer, or package-manager distributed product.
 
 ## Target Early Users
 
@@ -123,6 +124,7 @@ Planetary Mesh is not currently:
 - a general-purpose cloud platform
 - a GPU/storage/bandwidth marketplace
 - production-ready secure multi-tenant infrastructure
+- a signed/package-manager distributed application
 
 ## Monetization Hypothesis
 
