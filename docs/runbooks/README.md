@@ -14,6 +14,9 @@ owns or controls:
   source-based path from fresh checkout to local smoke, manual component
   startup, a two-machine LAN mesh, `pmctl` inspection, portable validation
   workloads, cleanup, and failure handling.
+- [Local Release Build and Install Smoke](local-release-install.md) - the
+  pre-release local binary artifact layout and installed-binary smoke workflow
+  for coordinator, agent, `pmctl`, and the tracked `text-stats` workload.
 - [Local Private Mesh](local-private-mesh.md) - in-memory coordinator storage,
   tracked config examples, `examples/demo.sh`, manual starts, and basic
   `pmctl` workflows.
@@ -45,12 +48,15 @@ Current behavior:
   built-in validation targets when configured.
 - Tracked external workload examples under `examples/workloads/` for the
   current wrapper/executable path.
+- Pre-release local binary artifact generation and installed-binary smoke
+  validation for development use.
 - `pmctl` as a thin client over the coordinator API.
 
 Current non-goals:
 
 - No dashboard or desktop app.
-- No production image or packaged release workflow.
+- No production image, signed installer, package-manager distribution, or
+  GitHub Release artifact.
 - No generated OpenAPI/protobuf contract.
 - No remote private mesh, shared pool, public-node onboarding, marketplace, or
   payment system.
@@ -97,6 +103,7 @@ Real LAN validation additionally expects:
 | Vet | `GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...` | DB-free. |
 | Local smoke | `./examples/demo.sh` | Starts local coordinator and two agents with in-memory storage. |
 | External workload smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh` | Builds and runs the tracked `text-stats` helper through the allowlisted external command path. |
+| Local release smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh` | Builds a host release layout and runs coordinator, agent, `pmctl`, and `text-stats` from installed binaries. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
 | First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |
