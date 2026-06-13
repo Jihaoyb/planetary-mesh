@@ -117,8 +117,8 @@ vector element.
 The future `pmctl` implementation should validate before submitting any job:
 
 - reject unknown template versions
-- reject missing or duplicate template names, parameter names, and parameter
-  references
+- reject a missing template name, duplicate parameter names, and argument tokens
+  that reference unknown parameters
 - reject unsupported fields in argument tokens
 - reject missing required parameters
 - reject unknown operator-supplied parameters
