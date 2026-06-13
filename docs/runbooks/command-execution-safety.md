@@ -103,6 +103,12 @@ The tracked `examples/workloads/text-stats` helper and
 [Practical External Workload Recipe](practical-workload-recipe.md) show the
 current wrapper-style path without changing the runtime execution model.
 
+ADR 0015 defines a future workflow template model that expands operator
+parameters into existing logical command jobs. That model does not change the
+current safety boundary: templates must still submit logical allowlist keys, and
+agents still enforce allowlists before executing wrapper executables or explicit
+validation built-ins.
+
 Example narrow local allowlist:
 
 ```bash
