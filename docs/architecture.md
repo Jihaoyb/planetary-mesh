@@ -411,7 +411,10 @@ Current private-mesh limitations:
 - no generated API contract such as OpenAPI or protobuf; the current v0 API
   reference is a manual inventory
 - no cancellation API or cancellation behavior
-- no production image or packaged release workflow
+- pre-release local binary artifact generation and installed-binary smoke
+  validation exist, but there is no production image, signed installer,
+  package-manager distribution, GitHub Release artifact, or service install
+  workflow
 - no automated mTLS certificate lifecycle
 - no multi-tenant authorization model
 
@@ -435,7 +438,7 @@ Private mesh hardening:
 - operator runbooks
 - future generated API contract decision if the manual inventory proves
   insufficient
-- better install/release workflow
+- production install/release workflow
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need
   for durable agent-side result history or richer recovery semantics
@@ -449,7 +452,7 @@ Productized private mesh:
 - logs UX
 - file/result handling for selected workflows
 - private AI/batch demo pipelines
-- stronger packaging and release story
+- stronger production packaging and release story
 
 Remote private mesh:
 

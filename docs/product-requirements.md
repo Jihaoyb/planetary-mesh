@@ -80,6 +80,9 @@ Practical MVP success means:
 - a user can build a tracked external `text-stats` helper, map it through
   `AGENT_COMMAND_ALLOWLIST`, submit it with `pmctl`, and inspect its result
   without relying on validation built-ins as the workflow model
+- a user can build pre-release local binary artifacts for coordinator, agent,
+  `pmctl`, and `text-stats`, then run an installed-binary smoke workflow that
+  verifies `text-stats` through the mesh
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -96,11 +99,13 @@ still not product readiness for Phase 2; productized private mesh work should be
 selected as explicit, narrow milestones.
 
 Milestone 21 started Phase 2 productization by documenting a source-based
-first-run onboarding path. Milestone 22 adds a tracked external workload helper
-and wrapper-pattern runbook. These improve fresh-checkout usability and the
-real private workload path, but they are not a packaged install workflow,
-production image, dashboard, remote private mesh, file-transfer layer, or
-workflow-template layer.
+first-run onboarding path. Milestone 22 added a tracked external workload helper
+and wrapper-pattern runbook. Milestone 23 adds pre-release local binary
+artifacts and installed-binary smoke validation. These improve fresh-checkout
+usability, the real private workload path, and local install confidence, but
+they are not a production installer, signed release, package-manager
+distribution, production image, dashboard, remote private mesh, file-transfer
+layer, or workflow-template layer.
 
 ## Future Expansion
 

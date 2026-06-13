@@ -10,7 +10,18 @@ on:
   
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout code
@@ -29,15 +40,29 @@ jobs:
         run: |
           changed=$(gofmt -l .)
           if [ -n "$changed" ]; then
-            echo "The following files are not not gofmt'ed:"
+            echo "The following files are not gofmt'ed:"
             echo "$changed"
             echo
             echo "Run 'gofmt -w .' locally and commit the result."
             exit 1
           fi
+
+      - name: Check whitespace
+        run: git diff --check
       
       - name: Build all packages
         run: go build ./...
 
       - name: Run tests
         run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Build local release artifacts
+        if: runner.os == 'Linux'
+        run: go run ./tools/releasebuild --out "${RUNNER_TEMP}/planetary-mesh-dist" --version dev
+
+      - name: Run release smoke
+        if: runner.os == 'Linux'
+        run: GOCACHE="${RUNNER_TEMP}/planetary-mesh-gocache-release" ./examples/release_smoke.sh

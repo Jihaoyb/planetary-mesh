@@ -10,7 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 22 practical external workload demo
+- Baseline: `main` after Milestone 23 cross-OS local release build and install
+  smoke
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -58,26 +59,34 @@ Implemented capability:
 - local in-memory smoke script
 - Postgres durability smoke script
 - external workload smoke script for the tracked `text-stats` helper
+- pre-release local release artifact builder and installed-binary smoke script
+  for coordinator, agent, `pmctl`, and `text-stats`
 - source-based first-run onboarding runbook for local smoke, manual local
   startup, two-machine LAN operation, `pmctl` inspection, portable validation,
   cleanup, and failure handling
 - practical external workload recipe for building an allowlisted `text-stats`
   helper on the agent host and submitting it through `pmctl`
+- local release install runbook for dev artifact names, install layout,
+  installed-binary startup, `text-stats` validation, cleanup, and failure
+  handling
 - thin CLI for status, node/job listing, job inspection, and command submission,
   including human and JSON node metadata output
-- CI/build/test health with default DB-free tests
+- CI/build/test health with default DB-free tests across Ubuntu, macOS, and
+  Windows expectations
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
 
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-22
+## Completed Baseline / Milestones 1-23
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
 onboarding explicit, and Milestone 22 made the external allowlisted
-wrapper/executable workload path repeatable. This history remains useful
-because it explains why the current baseline is intentionally narrow.
+wrapper/executable workload path repeatable. Milestone 23 added pre-release
+local binary artifact generation and installed-binary smoke validation. This
+history remains useful because it explains why the current baseline is
+intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -562,11 +571,12 @@ Non-goals:
 
 Goal: make the private mesh usable by a real developer or small team.
 
-Status: started with Milestone 21 source-based first-run onboarding and
-continued with Milestone 22 practical external workload documentation. Phase 2
-work should still be selected as explicit, narrow milestones and should not
-imply remote mesh, shared pool, marketplace, payment, or arbitrary untrusted
-workload support.
+Status: started with Milestone 21 source-based first-run onboarding, continued
+with Milestone 22 practical external workload documentation, and now includes
+Milestone 23 pre-release local release build/install smoke. Phase 2 work should
+still be selected as explicit, narrow milestones and should not imply remote
+mesh, shared pool, marketplace, payment, or arbitrary untrusted workload
+support.
 
 ### Milestone 21: First-Run Private Mesh Onboarding
 
@@ -611,6 +621,41 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 23: Cross-OS Local Release Build and Install Smoke
+
+Goal: create a repeatable pre-release binary build and install-smoke path for
+coordinator, agent, `pmctl`, and the tracked `text-stats` external workload
+across macOS, Linux, and Windows expectations.
+
+Completed outcomes:
+
+- standard-library Go release helper that builds dev artifacts for
+  `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, and
+  `windows/amd64`
+- install layout containing `bin/coordinator`, `bin/agent`, `bin/pmctl`,
+  `workloads/text-stats`, copied config examples, and selected docs, with
+  `.exe` suffixes for Windows
+- tar.gz archives for macOS/Linux targets and zip archives for Windows target
+- DB-free tests for release artifact naming, target parsing, and layout
+  planning
+- installed-binary release smoke script that starts a local coordinator and
+  agent from the generated layout, maps installed `text-stats` through
+  `AGENT_COMMAND_ALLOWLIST`, submits the job with installed `pmctl`, and
+  verifies stable output
+- CI matrix for DB-free formatting, build, test, and vet on Ubuntu, macOS, and
+  Windows, with Linux release artifact build and release smoke validation
+- local release install runbook covering artifact names, layout, config paths,
+  startup, `pmctl` inspection, `text-stats` execution, cleanup, and failure
+  handling
+- runtime behavior, public API fields, protocol version, endpoint behavior,
+  scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
+  Postgres schema readiness version `2` are unchanged
+- no production installer, signed binary distribution, package-manager
+  distribution, production Docker image, tag, or GitHub Release artifact was
+  added
+
+Status: complete
+
 Potential work:
 
 - richer CLI/operator UX or dashboard
@@ -619,7 +664,7 @@ Potential work:
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
 - logs UX
-- packaged release or production image
+- production packaging, signing, service install examples, or production image
 - demo pipeline such as OCR, transcription, embeddings, image conversion, or
   developer batch jobs
 - private deployment runbooks

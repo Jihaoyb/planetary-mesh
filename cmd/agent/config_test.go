@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,7 +194,7 @@ func TestLoadAgentConfigRejectsInvalidTimeoutAndAllowlist(t *testing.T) {
 func TestLoadAgentConfigRejectsMissingExplicitFile(t *testing.T) {
 	clearAgentEnv(t)
 	err := loadAgentConfigError(t, []string{"--config", filepath.Join(t.TempDir(), "missing.env")})
-	if err == nil || !strings.Contains(err.Error(), "load config file") || !strings.Contains(err.Error(), "no such file") {
+	if err == nil || !strings.Contains(err.Error(), "load config file") || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected missing file error, got %v", err)
 	}
 }
