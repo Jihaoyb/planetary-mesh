@@ -216,8 +216,9 @@ Rules:
   limited to portable validation helpers such as `builtin:echo`,
   `builtin:false`, `builtin:sleep`, and `builtin:line-count`.
 - Built-ins are not the workflow extensibility model. Real private workflows
-  should use explicit allowlisted external tools or wrapper scripts unless a
-  future milestone designs workflow/job templates.
+  should use explicit allowlisted external tools or wrapper scripts. ADR 0015
+  defines a future `pmctl` client-side template layer over logical command keys,
+  but that layer is not implemented runtime behavior today.
 - `examples/workloads/text-stats` is the tracked example of that external
   executable/wrapper pattern. It is built and allowlisted on agent hosts; it is
   not a new agent built-in or protocol feature.
@@ -442,13 +443,14 @@ Private mesh hardening:
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need
   for durable agent-side result history or richer recovery semantics
-- workflow/job templates for approved actions layered on the allowlisted command
-  model, not a growing catalog of hardcoded agent built-ins
+- implementation of the ADR 0015 `pmctl` template layer for approved actions
+  over the allowlisted command model, not a growing catalog of hardcoded agent
+  built-ins
 
 Productized private mesh:
 
 - richer CLI or dashboard
-- job templates
+- `pmctl` template validation/submission
 - logs UX
 - file/result handling for selected workflows
 - private AI/batch demo pipelines
