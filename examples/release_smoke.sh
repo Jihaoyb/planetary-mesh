@@ -160,6 +160,14 @@ require_executable() {
   fi
 }
 
+require_file() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    echo "Expected file at ${path}" >&2
+    exit 1
+  fi
+}
+
 pmctl() {
   run_clean "${PMCTL_BIN}" --coordinator-url "${COORD_URL}" "$@"
 }
@@ -185,6 +193,7 @@ COORD_BIN="${INSTALL_DIR}/bin/coordinator${EXE}"
 AGENT_BIN="${INSTALL_DIR}/bin/agent${EXE}"
 PMCTL_BIN="${INSTALL_DIR}/bin/pmctl${EXE}"
 WORKLOAD_BIN="${INSTALL_DIR}/workloads/text-stats${EXE}"
+TEMPLATE_PATH="${INSTALL_DIR}/templates/text-stats.pmtemplate.json"
 
 mkdir -p "${LOG_DIR}"
 printf 'alpha\nbeta\ngamma\n' >"${INPUT_PATH}"
@@ -196,6 +205,7 @@ require_executable "${COORD_BIN}"
 require_executable "${AGENT_BIN}"
 require_executable "${PMCTL_BIN}"
 require_executable "${WORKLOAD_BIN}"
+require_file "${TEMPLATE_PATH}"
 if [[ ! -f "${ARCHIVE_PATH}" ]]; then
   echo "Expected archive at ${ARCHIVE_PATH}" >&2
   exit 1
@@ -230,8 +240,19 @@ echo "Registered nodes"
 pmctl nodes list
 
 echo
-echo "Submitting installed text-stats workload"
-JOB_JSON="$(pmctl --json submit command text-stats "${INPUT_PATH}")"
+echo "Validating installed text-stats template"
+TEMPLATE_JSON="$(pmctl --json templates validate "${TEMPLATE_PATH}")"
+if ! require_json_contains "${TEMPLATE_JSON}" '"valid": true,' ||
+  ! require_json_contains "${TEMPLATE_JSON}" '"name": "text-stats",' ||
+  ! require_json_contains "${TEMPLATE_JSON}" '"command": "text-stats"'; then
+  echo "Unexpected installed template validation result" >&2
+  echo "Logs are in ${LOG_DIR}" >&2
+  exit 1
+fi
+
+echo
+echo "Submitting installed text-stats template"
+JOB_JSON="$(pmctl --json submit template "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
 JOB_ID="$(json_string_field "${JOB_JSON}" "id")"
 if [[ -z "${JOB_ID}" ]]; then
   echo "Could not parse submitted job id" >&2
