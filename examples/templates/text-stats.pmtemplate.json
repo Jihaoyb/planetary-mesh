@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "text-stats",
+  "description": "Count text statistics for one agent-local file.",
+  "command": "text-stats",
+  "parameters": [
+    {
+      "name": "input_path",
+      "description": "Agent-local text file path.",
+      "required": true
+    }
+  ],
+  "args": [
+    {
+      "param": "input_path"
+    }
+  ]
+}

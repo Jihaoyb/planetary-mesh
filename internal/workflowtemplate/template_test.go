@@ -1,6 +1,7 @@
 package workflowtemplate
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -185,6 +186,22 @@ func TestParameterNamesReturnsSortedNames(t *testing.T) {
 	want := []string{"a", "m", "z"}
 	if !equalStrings(got, want) {
 		t.Fatalf("expected names %q, got %q", want, got)
+	}
+}
+
+func TestTextStatsExampleTemplateIsValid(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "templates", "text-stats.pmtemplate.json")
+	tmpl, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load example template returned error: %v", err)
+	}
+
+	expanded, err := Expand(tmpl, map[string]string{"input_path": "/agent/input.txt"})
+	if err != nil {
+		t.Fatalf("Expand example template returned error: %v", err)
+	}
+	if expanded.Command != "text-stats" || !equalStrings(expanded.Args, []string{"/agent/input.txt"}) {
+		t.Fatalf("unexpected expanded example: %+v", expanded)
 	}
 }
 
