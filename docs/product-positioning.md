@@ -13,8 +13,8 @@ current implementation supports node registration, heartbeat, health states,
 allowlisted direct command execution with explicit portable validation built-ins,
 bounded output capture, a tracked external `text-stats` workload example,
 optional Postgres persistence, opt-in mTLS, node allowlists, metrics, local
-smoke workflows, and pre-release local binary artifact/install-smoke tooling.
-ADR 0015 also records the accepted future private workflow template model.
+smoke workflows, pre-release local binary artifact/install-smoke tooling, and
+`pmctl` client-side workflow template validation/submission.
 
 It is not a public marketplace, production multi-tenant compute platform,
 signed installer, or package-manager distributed product.
@@ -40,17 +40,18 @@ These are product directions, not all implemented features today:
 - image and file conversion
 - developer automation jobs
 
-The current implemented workload is allowlisted command execution. ADR 0015
-defines a future `pmctl` client-side template model, but workflow template
-commands, file handling, and richer job types are not implemented today.
+The current implemented workload is allowlisted command execution. `pmctl`
+templates can validate approved JSON files and expand operator parameters into
+one existing command job. File handling, richer job types, coordinator-owned
+template registries, and workflow engines are not implemented today.
 
 Portable built-ins are smoke/validation helpers, not the intended product
 surface for adding every user workflow. Near-term real workflows should remain
 explicit allowlisted external commands or wrapper scripts, following the
-tracked `text-stats` example pattern. A future product UX can expose approved
+tracked `text-stats` example pattern. Current templates can expose approved
 actions such as OCR, transcription, embeddings, image conversion, or batch
-processing through workflow/job templates after the ADR 0015 model is
-implemented and validated.
+processing after those wrappers are explicitly built, allowlisted, and
+validated.
 
 ## Product Path
 

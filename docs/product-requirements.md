@@ -39,9 +39,9 @@ The current implemented workload remains allowlisted command execution.
 Portable built-ins are validation helpers for cross-OS smoke checks; they are
 not the long-term mechanism for adding every product workflow. Real private
 workflows use explicit allowlisted external commands or wrapper executables,
-with `examples/workloads/text-stats` as the first tracked example. ADR 0015
-defines a future client-side `pmctl` template layer over those logical command
-keys, but templates are not implemented runtime behavior today.
+with `examples/workloads/text-stats` as the first tracked example. Milestone 25
+implements the ADR 0015 client-side `pmctl` template layer over those logical
+command keys without changing coordinator or agent runtime behavior.
 
 ## Non-goals
 
@@ -82,9 +82,11 @@ Practical MVP success means:
 - a user can build a tracked external `text-stats` helper, map it through
   `AGENT_COMMAND_ALLOWLIST`, submit it with `pmctl`, and inspect its result
   without relying on validation built-ins as the workflow model
+- a user can validate and submit a tracked `text-stats` JSON template through
+  `pmctl`, expanding it into the existing command-job request path
 - a user can build pre-release local binary artifacts for coordinator, agent,
-  `pmctl`, and `text-stats`, then run an installed-binary smoke workflow that
-  verifies `text-stats` through the mesh
+  `pmctl`, `text-stats`, and selected templates, then run an installed-binary
+  smoke workflow that verifies `text-stats` template submission through the mesh
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -92,7 +94,7 @@ Practical MVP success means:
 - docs accurately describe current behavior
 - docs do not imply marketplace or stronger security features than exist
 - docs do not imply built-ins replace approved allowlisted commands, wrapper
-  scripts, or the accepted future workflow/job template model for real
+  scripts, or the implemented `pmctl` workflow template layer for real
   workloads
 
 Real multi-device LAN validation is now captured in the repository with
@@ -105,12 +107,12 @@ Milestone 21 started Phase 2 productization by documenting a source-based
 first-run onboarding path. Milestone 22 added a tracked external workload helper
 and wrapper-pattern runbook. Milestone 23 added pre-release local binary
 artifacts and installed-binary smoke validation. Milestone 24 accepted the
-private workflow template model for a future `pmctl` implementation. These
-improve fresh-checkout usability, the real private workload path, local install
-confidence, and implementation readiness for repeatable templates, but they are
-not a production installer, signed release, package-manager distribution,
-production image, dashboard, remote private mesh, file-transfer layer, or
-implemented workflow-template layer.
+private workflow template model, and Milestone 25 implemented it in `pmctl`.
+These improve fresh-checkout usability, the real private workload path, local
+install confidence, and repeatable template submission, but they are not a
+production installer, signed release, package-manager distribution, production
+image, dashboard, remote private mesh, file-transfer layer, coordinator-owned
+template registry, or workflow engine.
 
 ## Future Expansion
 

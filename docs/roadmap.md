@@ -10,7 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 24 private workflow template model ADR
+- Baseline: `main` after Milestone 25 `pmctl` template submission and example
+  templates
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -47,8 +48,8 @@ Implemented capability and accepted planning baseline:
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
 - manual HTTP/JSON v0 API inventory and compatibility policy
-- accepted private workflow template model ADR for future `pmctl` client-side
-  expansion to existing command jobs
+- accepted private workflow template model ADR and implemented `pmctl`
+  client-side expansion to existing command jobs
 - DB-free API drift tests for route, protocol, JSON-field, and metrics
   expectations
 - task-oriented operator runbooks for local private mesh operation, Postgres
@@ -60,18 +61,20 @@ Implemented capability and accepted planning baseline:
 - local in-memory smoke script
 - Postgres durability smoke script
 - external workload smoke script for the tracked `text-stats` helper
+- template smoke script for the tracked `text-stats` template
 - pre-release local release artifact builder and installed-binary smoke script
-  for coordinator, agent, `pmctl`, and `text-stats`
+  for coordinator, agent, `pmctl`, `text-stats`, and installed templates
 - source-based first-run onboarding runbook for local smoke, manual local
   startup, two-machine LAN operation, `pmctl` inspection, portable validation,
   cleanup, and failure handling
 - practical external workload recipe for building an allowlisted `text-stats`
-  helper on the agent host and submitting it through `pmctl`
+  helper on the agent host and submitting it directly or through a template
 - local release install runbook for dev artifact names, install layout,
-  installed-binary startup, `text-stats` validation, cleanup, and failure
-  handling
-- thin CLI for status, node/job listing, job inspection, and command submission,
-  including human and JSON node metadata output
+  installed-binary startup, `text-stats` template validation/submission,
+  cleanup, and failure handling
+- thin CLI for status, node/job listing, job inspection, command submission,
+  and client-side template validation/submission, including human and JSON
+  output where supported
 - CI/build/test health with default DB-free tests across Ubuntu, macOS, and
   Windows expectations
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
@@ -79,17 +82,17 @@ Implemented capability and accepted planning baseline:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-24
+## Completed Baseline / Milestones 1-25
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
 onboarding explicit, and Milestone 22 made the external allowlisted
 wrapper/executable workload path repeatable. Milestone 23 added pre-release
 local binary artifact generation and installed-binary smoke validation.
-Milestone 24 accepted the private workflow template model for a future
-implementation milestone without changing runtime behavior. This history
-remains useful because it explains why the current baseline is intentionally
-narrow.
+Milestone 24 accepted the private workflow template model without changing
+runtime behavior. Milestone 25 implemented that model as `pmctl` client-side
+expansion to existing command jobs. This history remains useful because it
+explains why the current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -577,7 +580,8 @@ Goal: make the private mesh usable by a real developer or small team.
 Status: started with Milestone 21 source-based first-run onboarding, continued
 with Milestone 22 practical external workload documentation, Milestone 23
 pre-release local release build/install smoke, and Milestone 24 private workflow
-template model planning. Phase 2 work should still be selected as explicit,
+template model planning. Milestone 25 implemented `pmctl` template
+validation/submission. Phase 2 work should still be selected as explicit,
 narrow milestones and should not imply remote mesh, shared pool, marketplace,
 payment, or arbitrary untrusted workload support.
 
@@ -677,7 +681,7 @@ Completed outcomes:
   parameter tokens, with no interpolation, shell expansion, DAGs, or workflow
   engine behavior
 - wrappers and external executables remain the runtime unit for real private
-  workflows, while templates are a future operator repeatability layer
+  workflows, while templates are the planned operator repeatability layer
 - stdout, stderr, truncation flags, `last_error`, attempts, timestamps, and node
   id keep their existing meanings
 - file upload/download, artifact storage, secret management, cancellation,
@@ -686,8 +690,41 @@ Completed outcomes:
 - runtime behavior, public API fields, protocol version, endpoint behavior,
   scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
   Postgres schema readiness version `2` are unchanged
-- Milestone 25 is defined as the likely implementation follow-up for `pmctl`
-  template validation/submission and example template files
+- Milestone 25 later implemented `pmctl` template validation/submission and
+  example template files
+
+Status: complete
+
+### Milestone 25: pmctl Template Submission and Example Templates
+
+Goal: implement the ADR 0015 client-side template layer so operators can
+validate and submit approved JSON templates through `pmctl`.
+
+Completed outcomes:
+
+- `internal/workflowtemplate` parses, strictly validates, and expands JSON
+  `version: 1` templates using the Go standard library
+- template commands are constrained to logical allowlist keys and reject paths,
+  whitespace/control characters, reserved `builtin:` target syntax, and
+  shell-like command strings
+- `pmctl templates validate <template-file>` validates templates locally with
+  human and JSON output
+- `pmctl submit template <template-file> --set name=value` expands templates
+  into the existing command-job request path
+- validation errors, missing parameters, unknown parameters, and duplicate
+  `--set` values fail before a job is created
+- tracked `examples/templates/text-stats.pmtemplate.json` demonstrates the
+  template layer over the existing external `text-stats` helper
+- `examples/template_smoke.sh` validates and submits the template end to end
+  against a local coordinator and agent
+- local release layouts copy selected example templates under `templates/`
+  and release smoke validates installed template submission
+- coordinator, agent, HTTP/JSON v0, protocol version, job states, scheduling,
+  storage, mTLS behavior, command execution semantics, and Postgres schema
+  readiness version `2` are unchanged
+- no coordinator-owned registry, agent-side registry, file transfer, artifact
+  storage, workflow engine, new built-ins, stronger isolation, remote mesh,
+  shared pool, marketplace, production packaging, or new dependency was added
 
 Status: complete
 
@@ -695,7 +732,6 @@ Potential work:
 
 - richer CLI/operator UX or dashboard
 - API keys or another user-facing auth model
-- `pmctl` template validation/submission for repeatable private workloads
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
 - logs UX

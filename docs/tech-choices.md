@@ -134,10 +134,13 @@ Current shape:
 - `examples/demo.sh` for in-memory smoke workflow
 - `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
 - `examples/external_workload_smoke.sh` for the tracked external workload path
+- `examples/template_smoke.sh` for the tracked template submission path
 - `tools/releasebuild` for pre-release local binary artifact generation
 - `examples/release_smoke.sh` for installed-binary validation of coordinator,
-  agent, `pmctl`, and `text-stats`
+  agent, `pmctl`, `text-stats`, and selected templates
 - `examples/workloads/text-stats` as a small cross-platform external helper
+- `examples/templates/text-stats.pmtemplate.json` as a client-side `pmctl`
+  template over the `text-stats` logical command key
 - `compose.yaml` for local coordinator + Postgres + agents
 - task-oriented operator runbooks under [runbooks/](runbooks/README.md)
 
@@ -190,9 +193,9 @@ Current rules:
 - real private workflows should use explicit allowlisted external commands or
   wrapper executables; `examples/workloads/text-stats` is the tracked example
   of this pattern
-- ADR 0015 defines a future JSON template model where `pmctl` expands operator
-  parameters into existing logical command jobs, but no template commands are
-  implemented yet
+- ADR 0015's JSON template model is implemented in `pmctl`: templates validate
+  local JSON files and expand operator parameters into existing logical command
+  jobs
 - timeout is fixed by agent config, default `30s`
 - stdout/stderr are captured separately and capped at `1 MiB` each
 - non-zero command exit is terminal
@@ -202,18 +205,19 @@ Important limitation:
 - This is not strong sandboxing. There is no container, VM, microVM, or
   multi-tenant isolation today.
 
-Accepted future implementation direction:
+Current template direction:
 
 - workflow/job templates that expose approved private actions while still
-  mapping to allowlisted commands or wrapper scripts, using the ADR 0015
-  client-side `pmctl` expansion model
+  mapping to allowlisted commands or wrapper scripts through client-side
+  `pmctl` expansion
 
 Future decisions:
 
+- coordinator-owned template registry
+- file/result handling for selected workflows
 - container-based execution
 - VM/microVM execution
 - per-job resource limits
-- approved workload templates
 - stronger isolation for shared or marketplace compute
 
 ## Scheduling Strategy
@@ -415,10 +419,14 @@ Current commands:
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
 - `pmctl submit command <command> [args...]`
+- `pmctl templates validate <template-file>`
+- `pmctl submit template <template-file> --set name=value`
 
 `pmctl nodes list` includes node state, active execution count, capabilities,
 address, last seen time, and certificate fingerprint. JSON output includes the
-same node metadata for automation.
+same node metadata for automation. Template validation also supports human and
+JSON output. Template submission returns the same job output as direct command
+submission.
 
 Future decisions:
 

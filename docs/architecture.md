@@ -147,12 +147,16 @@ Supported operations:
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
 - `pmctl submit command <command> [args...]`
+- `pmctl templates validate <template-file>`
+- `pmctl submit template <template-file> --set name=value`
 
 `pmctl` sends the protocol version header, supports JSON output, and can be
 configured with a coordinator URL plus optional CA/cert/key files for secure
 coordinator access. `pmctl nodes list` shows node state, active execution count,
-capabilities, address, last seen time, and certificate fingerprint. It does not
-own scheduling, validation, retries, storage, or state transitions.
+capabilities, address, last seen time, and certificate fingerprint. Template
+commands validate local JSON files and expand them into the existing command-job
+request path. `pmctl` does not own scheduling, lifecycle transitions, retries,
+storage, or result acceptance.
 
 ### Storage
 
@@ -216,9 +220,9 @@ Rules:
   limited to portable validation helpers such as `builtin:echo`,
   `builtin:false`, `builtin:sleep`, and `builtin:line-count`.
 - Built-ins are not the workflow extensibility model. Real private workflows
-  should use explicit allowlisted external tools or wrapper scripts. ADR 0015
-  defines a future `pmctl` client-side template layer over logical command keys,
-  but that layer is not implemented runtime behavior today.
+  should use explicit allowlisted external tools or wrapper scripts, optionally
+  exposed through the implemented `pmctl` client-side template layer over
+  logical command keys.
 - `examples/workloads/text-stats` is the tracked example of that external
   executable/wrapper pattern. It is built and allowlisted on agent hosts; it is
   not a new agent built-in or protocol feature.
@@ -230,6 +234,28 @@ Rules:
 
 This is allowlisted direct execution on trusted hosts. It is not strong
 sandbox, container, VM, or multi-tenant isolation.
+
+### Workflow Templates
+
+The current template layer is local to `pmctl`.
+
+Templates:
+
+- are JSON `version: 1` files loaded from explicit operator-provided paths
+- reference one logical allowlist command key
+- define ordered literal and parameter argument tokens
+- expand into the existing `POST /jobs` command request shape
+- are not stored by the coordinator or agents
+
+Template validation rejects unsupported JSON fields, unknown template versions,
+duplicate parameters, unknown parameter references, unsafe command keys, missing
+required `--set` values, unknown `--set` values, and duplicate `--set` values.
+Successful submission still creates an ordinary command job. The coordinator
+stores the expanded command and args; it does not store the template name or
+parameter map.
+
+Templates do not transfer files, store artifacts, choose nodes, manage secrets,
+override timeouts, cancel jobs, or create multi-step workflows.
 
 ### Scheduling and Dispatch
 

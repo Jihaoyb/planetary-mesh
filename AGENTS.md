@@ -21,9 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 24 private workflow template model ADR.
+Current `main` is after Milestone 25 `pmctl` template submission and example
+templates.
 
-Milestones 1 through 24 are complete:
+Milestones 1 through 25 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -64,21 +65,25 @@ Milestones 1 through 24 are complete:
 - pre-release local release artifact builder, installed-binary smoke workflow,
   local release install runbook, and CI OS matrix coverage for macOS, Linux,
   and Windows expectations
-- accepted private workflow template model ADR for future `pmctl` client-side
-  expansion to existing command jobs without runtime behavior changes
+- accepted private workflow template model ADR and implemented `pmctl`
+  client-side expansion to existing command jobs without runtime behavior
+  changes
+- runtime implementation of `pmctl` client-side workflow template validation
+  and submission to existing command jobs, plus tracked `text-stats` example
+  template, template smoke, and release-layout template copy
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 Phase 1 is closed and Phase 2 has started with source-based first-run
 onboarding, a practical external workload pattern, and a pre-release local
-binary artifact/install-smoke path. ADR 0015 defines the accepted template model
-for a future implementation milestone. The next work should be explicitly
-planned Phase 2 productized private mesh work such as `pmctl` template
-implementation, production packaging, richer operator UX, security hardening, or
-explicitly planned scheduler/API follow-up work. Do not jump to marketplace,
-payment, public-node, shared-pool, or remote-node product work without explicit
-planning and an accepted direction.
+binary artifact/install-smoke path, and `pmctl` templates for repeatable
+private wrapper invocations. The next work should be explicitly planned Phase 2
+productized private mesh work such as production packaging, richer operator UX,
+security hardening, scheduler policy, generated API contract planning, or
+certificate helper planning. Do not jump to marketplace, payment, public-node,
+shared-pool, or remote-node product work without explicit planning and an
+accepted direction.
 
 ## Canonical Context
 
@@ -102,6 +107,8 @@ changes:
   layout and installed-binary smoke workflow
 - `docs/runbooks/practical-workload-recipe.md` - current external
   executable/wrapper workload pattern
+- `docs/runbooks/workflow-templates.md` - current `pmctl` client-side template
+  validation/submission workflow
 - `docs/tech-choices.md` - accepted language, protocol, storage, runtime, and
   execution choices
 - `docs/adr/` - accepted Architecture Decision Records
@@ -293,9 +300,8 @@ Command execution is security-sensitive. Preserve these rules:
   new built-ins as a generic workflow extension mechanism without explicit
   product/architecture planning.
 - Real private workflows should use explicit allowlisted external commands or
-  wrapper scripts. ADR 0015 defines a future `pmctl` client-side template layer
-  over logical command keys, but no runtime template behavior exists until that
-  follow-up is implemented.
+  wrapper scripts, optionally exposed through the implemented `pmctl`
+  client-side template layer over logical command keys.
 - The execution timeout is fixed by agent config. The default is `30s`.
 - There is no per-job timeout override today.
 - Stdout and stderr are captured separately.
