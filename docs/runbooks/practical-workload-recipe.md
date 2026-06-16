@@ -42,8 +42,14 @@ Command execution remains allowlisted direct process execution with
 as redirection, glob expansion, command substitution, and pipelines are not
 available inside the submitted job.
 
-The helper is an example wrapper-style executable, not a workflow template
-system, file-transfer contract, or stronger isolation boundary.
+The helper is an example wrapper-style executable, not an implemented workflow
+template system, file-transfer contract, or stronger isolation boundary.
+
+ADR 0015 defines the accepted future template model: templates should expand
+operator parameters into existing logical command jobs, and wrappers such as
+`text-stats` remain the runtime execution unit. That template layer is not
+implemented yet, so this runbook still uses direct `pmctl submit command`
+examples.
 
 ## Automated Local Smoke
 
@@ -254,5 +260,6 @@ local config files, generated binaries, raw logs, or real workload data.
 - Treat stdout and stderr as bounded result fields, not an artifact store.
 - This is allowlisted direct host process execution, not strong sandboxing.
 - Built-ins remain smoke/validation helpers; real private workflows should use
-  external commands or wrappers until a future workflow/template layer is
-  explicitly designed.
+  external commands or wrappers. ADR 0015 defines a future template layer over
+  those logical command keys, but that layer is not implemented in this
+  runbook.

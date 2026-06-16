@@ -171,6 +171,7 @@ Why:
 Related ADR:
 
 - [ADR 0005](adr/0005-command-execution-v0.md)
+- [ADR 0015](adr/0015-private-workflow-template-model.md)
 
 Current rules:
 
@@ -189,6 +190,9 @@ Current rules:
 - real private workflows should use explicit allowlisted external commands or
   wrapper executables; `examples/workloads/text-stats` is the tracked example
   of this pattern
+- ADR 0015 defines a future JSON template model where `pmctl` expands operator
+  parameters into existing logical command jobs, but no template commands are
+  implemented yet
 - timeout is fixed by agent config, default `30s`
 - stdout/stderr are captured separately and capped at `1 MiB` each
 - non-zero command exit is terminal
@@ -198,10 +202,14 @@ Important limitation:
 - This is not strong sandboxing. There is no container, VM, microVM, or
   multi-tenant isolation today.
 
-Future decisions:
+Accepted future implementation direction:
 
 - workflow/job templates that expose approved private actions while still
-  mapping to allowlisted commands or wrapper scripts
+  mapping to allowlisted commands or wrapper scripts, using the ADR 0015
+  client-side `pmctl` expansion model
+
+Future decisions:
+
 - container-based execution
 - VM/microVM execution
 - per-job resource limits

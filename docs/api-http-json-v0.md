@@ -440,6 +440,10 @@ flag when clipped.
 - Error responses currently use `http.Error` text bodies, not a JSON envelope.
 - Generated OpenAPI/protobuf contracts are out of scope for Milestone 16 and
   require a future explicit decision.
+- ADR 0015's private workflow template model does not add a v0 API surface by
+  itself. The accepted initial implementation direction is `pmctl` client-side
+  expansion into the existing command-job request shape unless a future API ADR
+  changes that boundary.
 - `pmctl` remains a thin API client. It must not become authoritative for
   coordinator validation, scheduling, lifecycle transitions, result acceptance,
   metrics, or storage behavior.

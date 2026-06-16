@@ -6,8 +6,8 @@ operator model across two LAN machines with portable validation commands beyond
 `echo`.
 
 It documents behavior that exists today. It does not add packaging, file
-transfer, workflow templates, remote private mesh, automated certificate
-lifecycle, a dashboard, or stronger execution isolation.
+transfer, implemented workflow templates, remote private mesh, automated
+certificate lifecycle, a dashboard, or stronger execution isolation.
 
 ## Prerequisites
 
@@ -146,8 +146,8 @@ go run ./cmd/pmctl --config config/pmctl.env.example --json jobs inspect job-1
 
 The portable validation workload is `line-count`, which counts lines in one
 agent-local text file. This proves the mesh can run an allowlisted action
-against data on a trusted agent host without adding file transfer or workflow
-templates.
+against data on a trusted agent host without adding file transfer or implemented
+workflow templates.
 
 For the current real private workflow pattern using an external executable or
 wrapper, use [Practical External Workload Recipe](practical-workload-recipe.md)
@@ -364,8 +364,9 @@ For deeper troubleshooting, use [Troubleshooting](troubleshooting.md).
 - Built-ins such as `echo`, `sleep`, `false`, and `line-count` are explicit
   validation helpers. They are not a product workflow extension model.
 - Real private workflows should use explicit allowlisted external commands or
-  wrapper executables such as the tracked `text-stats` example until a future
-  workflow/template layer is designed.
+  wrapper executables such as the tracked `text-stats` example. ADR 0015
+  defines a future template layer over those logical command keys, but this
+  first-run path does not implement or require templates.
 - There is no production image, packaged release workflow, dashboard, remote
   private mesh, shared pool, marketplace, payment system, or cancellation API.
 

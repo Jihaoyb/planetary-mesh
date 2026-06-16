@@ -7,8 +7,8 @@ from those binaries instead of `go run`.
 
 This is Phase 2 install ergonomics work. It is not a production installer,
 signed binary distribution, package-manager release, GitHub Release, Docker
-image, remote private mesh, file-transfer layer, workflow template system, or
-stronger execution sandbox.
+image, remote private mesh, file-transfer layer, implemented workflow template
+system, or stronger execution sandbox.
 
 ## Prerequisites
 

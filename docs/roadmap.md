@@ -10,15 +10,14 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 23 cross-OS local release build and install
-  smoke
+- Baseline: `main` after Milestone 24 private workflow template model ADR
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
   across machines you own or control, with a future path toward trusted overflow
   compute
 
-Implemented capability:
+Implemented capability and accepted planning baseline:
 
 - `cmd/coordinator`, `cmd/agent`, and `cmd/pmctl`
 - HTTP/JSON coordinator/agent control plane
@@ -48,6 +47,8 @@ Implemented capability:
 - opt-in mTLS and node allowlists with manual certificate lifecycle
 - coordinator `/status` and `/metrics`
 - manual HTTP/JSON v0 API inventory and compatibility policy
+- accepted private workflow template model ADR for future `pmctl` client-side
+  expansion to existing command jobs
 - DB-free API drift tests for route, protocol, JSON-field, and metrics
   expectations
 - task-oriented operator runbooks for local private mesh operation, Postgres
@@ -78,15 +79,17 @@ Implemented capability:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-23
+## Completed Baseline / Milestones 1-24
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
 onboarding explicit, and Milestone 22 made the external allowlisted
 wrapper/executable workload path repeatable. Milestone 23 added pre-release
-local binary artifact generation and installed-binary smoke validation. This
-history remains useful because it explains why the current baseline is
-intentionally narrow.
+local binary artifact generation and installed-binary smoke validation.
+Milestone 24 accepted the private workflow template model for a future
+implementation milestone without changing runtime behavior. This history
+remains useful because it explains why the current baseline is intentionally
+narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -572,11 +575,11 @@ Non-goals:
 Goal: make the private mesh usable by a real developer or small team.
 
 Status: started with Milestone 21 source-based first-run onboarding, continued
-with Milestone 22 practical external workload documentation, and now includes
-Milestone 23 pre-release local release build/install smoke. Phase 2 work should
-still be selected as explicit, narrow milestones and should not imply remote
-mesh, shared pool, marketplace, payment, or arbitrary untrusted workload
-support.
+with Milestone 22 practical external workload documentation, Milestone 23
+pre-release local release build/install smoke, and Milestone 24 private workflow
+template model planning. Phase 2 work should still be selected as explicit,
+narrow milestones and should not imply remote mesh, shared pool, marketplace,
+payment, or arbitrary untrusted workload support.
 
 ### Milestone 21: First-Run Private Mesh Onboarding
 
@@ -656,11 +659,43 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 24: Private Workflow Template Model ADR
+
+Goal: define a narrow, safe, implementable workflow/job template model for
+repeatable trusted private workloads on top of existing allowlisted command
+execution and wrapper executables.
+
+Completed outcomes:
+
+- ADR 0015 accepts client-side `pmctl` template expansion to existing
+  `type="command"` jobs as the first template model
+- templates use JSON files with a standard-library-friendly `version: 1`
+  schema
+- templates reference logical allowlist command keys only, not executable paths,
+  shell snippets, or `builtin:<name>` target strings
+- template argument expansion is structured as literal tokens or string
+  parameter tokens, with no interpolation, shell expansion, DAGs, or workflow
+  engine behavior
+- wrappers and external executables remain the runtime unit for real private
+  workflows, while templates are a future operator repeatability layer
+- stdout, stderr, truncation flags, `last_error`, attempts, timestamps, and node
+  id keep their existing meanings
+- file upload/download, artifact storage, secret management, cancellation,
+  per-job timeouts, scheduler policy, strong sandboxing, remote private mesh,
+  shared pool, marketplace, payment, and public-node work remain out of scope
+- runtime behavior, public API fields, protocol version, endpoint behavior,
+  scheduler behavior, storage behavior, mTLS behavior, `pmctl` behavior, and
+  Postgres schema readiness version `2` are unchanged
+- Milestone 25 is defined as the likely implementation follow-up for `pmctl`
+  template validation/submission and example template files
+
+Status: complete
+
 Potential work:
 
 - richer CLI/operator UX or dashboard
 - API keys or another user-facing auth model
-- job templates for repeatable private workloads
+- `pmctl` template validation/submission for repeatable private workloads
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
 - logs UX

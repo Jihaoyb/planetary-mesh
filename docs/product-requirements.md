@@ -39,7 +39,9 @@ The current implemented workload remains allowlisted command execution.
 Portable built-ins are validation helpers for cross-OS smoke checks; they are
 not the long-term mechanism for adding every product workflow. Real private
 workflows use explicit allowlisted external commands or wrapper executables,
-with `examples/workloads/text-stats` as the first tracked example.
+with `examples/workloads/text-stats` as the first tracked example. ADR 0015
+defines a future client-side `pmctl` template layer over those logical command
+keys, but templates are not implemented runtime behavior today.
 
 ## Non-goals
 
@@ -90,7 +92,8 @@ Practical MVP success means:
 - docs accurately describe current behavior
 - docs do not imply marketplace or stronger security features than exist
 - docs do not imply built-ins replace approved allowlisted commands, wrapper
-  scripts, or future workflow/job templates for real workloads
+  scripts, or the accepted future workflow/job template model for real
+  workloads
 
 Real multi-device LAN validation is now captured in the repository with
 sanitized evidence. Milestone 20 recorded the Phase 1 readiness review and
@@ -100,12 +103,14 @@ selected as explicit, narrow milestones.
 
 Milestone 21 started Phase 2 productization by documenting a source-based
 first-run onboarding path. Milestone 22 added a tracked external workload helper
-and wrapper-pattern runbook. Milestone 23 adds pre-release local binary
-artifacts and installed-binary smoke validation. These improve fresh-checkout
-usability, the real private workload path, and local install confidence, but
-they are not a production installer, signed release, package-manager
-distribution, production image, dashboard, remote private mesh, file-transfer
-layer, or workflow-template layer.
+and wrapper-pattern runbook. Milestone 23 added pre-release local binary
+artifacts and installed-binary smoke validation. Milestone 24 accepted the
+private workflow template model for a future `pmctl` implementation. These
+improve fresh-checkout usability, the real private workload path, local install
+confidence, and implementation readiness for repeatable templates, but they are
+not a production installer, signed release, package-manager distribution,
+production image, dashboard, remote private mesh, file-transfer layer, or
+implemented workflow-template layer.
 
 ## Future Expansion
 

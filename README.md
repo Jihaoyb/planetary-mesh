@@ -13,9 +13,10 @@ shared compute scenarios.
 
 - **Stage**: Phase 2 productized private mesh work has started with
   source-based onboarding, a practical external workload example, and a
-  pre-release local binary artifact/install-smoke workflow. Phase 1 closed
-  after the Milestone 20 readiness review, Milestone 18 real multi-device LAN
-  validation, and Milestone 19 portable agent validation built-ins.
+  pre-release local binary artifact/install-smoke workflow, plus an accepted
+  ADR for a future private workflow template model. Phase 1 closed after the
+  Milestone 20 readiness review, Milestone 18 real multi-device LAN validation,
+  and Milestone 19 portable agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -94,6 +95,7 @@ shared compute scenarios.
 - Durable agent result history after agent restart.
 - Full in-progress execution recovery after coordinator restart.
 - Automated certificate issuance, enrollment, or rotation.
+- Workflow template commands.
 - Remote private mesh, trusted shared pool, or overflow marketplace features.
 
 See [docs/current-limitations.md](docs/current-limitations.md) for the current
@@ -119,10 +121,11 @@ Milestone 20 reviewed that evidence and closed Phase 1. Milestone 21 added a
 source-based first-run onboarding path. Milestone 22 added a tracked external
 `text-stats` workload example to demonstrate the real allowlisted wrapper path.
 Milestone 23 added pre-release local artifact generation and an installed-binary
-smoke workflow. Remaining gaps such as production packaging, scheduler policy,
-cancellation, generated API contracts, richer operator UX, workflow templates,
-and stronger isolation are Phase 2 or later backlog unless explicitly
-reclassified.
+smoke workflow. Milestone 24 accepted the private workflow template model for a
+future `pmctl` implementation without changing runtime behavior. Remaining gaps
+such as production packaging, scheduler policy, cancellation, generated API
+contracts, richer operator UX, workflow template commands, and stronger
+isolation are Phase 2 or later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -495,3 +498,4 @@ Architecture Decision Records:
 - [ADR 0012: Explicit coordinator-owned job lifecycle transitions](docs/adr/0012-job-lifecycle-state-transitions.md)
 - [ADR 0013: Agent reconciliation strategy after coordinator restart](docs/adr/0013-agent-reconciliation-strategy.md)
 - [ADR 0014: HTTP/JSON v0 API inventory and compatibility policy](docs/adr/0014-http-json-v0-api-inventory-and-compatibility.md)
+- [ADR 0015: Private workflow template model](docs/adr/0015-private-workflow-template-model.md)
