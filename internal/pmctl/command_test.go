@@ -3,6 +3,7 @@ package pmctl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ type fakeClient struct {
 
 	command string
 	args    []string
+	creates int
 	err     error
 }
 
@@ -47,6 +49,7 @@ func (f *fakeClient) GetJob(_ context.Context, id string) (Job, error) {
 }
 
 func (f *fakeClient) CreateCommandJob(_ context.Context, command string, args []string) (Job, error) {
+	f.creates++
 	f.command = command
 	f.args = append([]string(nil), args...)
 	return f.job, f.err
@@ -89,6 +92,187 @@ func TestRunCommandSubmitCommand(t *testing.T) {
 	}
 }
 
+func TestRunCommandTemplatesValidateHumanOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "description": "Count text statistics for one agent-local file.",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "description": "Agent-local input path.", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), client, []string{"templates", "validate", path}, &out, false); err != nil {
+		t.Fatalf("templates validate: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"Template:", path, "Status:", "valid", "Name:", "text-stats", "Version:", "1", "Command:", "text-stats", "Parameters:", "input_path(required)", "Args:", "1"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, text)
+		}
+	}
+	if client.creates != 0 {
+		t.Fatalf("templates validate should not create jobs, got %d calls", client.creates)
+	}
+}
+
+func TestRunCommandTemplatesValidateJSONOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), &fakeClient{}, []string{"templates", "validate", path}, &out, true); err != nil {
+		t.Fatalf("templates validate JSON: %v", err)
+	}
+
+	var got struct {
+		Valid    bool   `json:"valid"`
+		Path     string `json:"path"`
+		Template struct {
+			Version int    `json:"version"`
+			Name    string `json:"name"`
+			Command string `json:"command"`
+			Args    []struct {
+				Param string `json:"param"`
+			} `json:"args"`
+		} `json:"template"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out.String())
+	}
+	if !got.Valid || got.Path != path || got.Template.Version != 1 || got.Template.Name != "text-stats" || got.Template.Command != "text-stats" || len(got.Template.Args) != 1 || got.Template.Args[0].Param != "input_path" {
+		t.Fatalf("unexpected validation JSON: %+v", got)
+	}
+}
+
+func TestRunCommandSubmitTemplate(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true},
+    {"name": "format", "required": false, "default": "plain"}
+  ],
+  "args": [
+    {"literal": "--format"},
+    {"param": "format"},
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{job: Job{ID: "job-1", Type: "command", Command: "text-stats", Args: []string{"--format", "json", "/agent/input.txt"}, Status: "QUEUED"}}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{"submit", "template", path, "--set", "input_path=/agent/input.txt", "--set", "format=json"}, &out, false)
+	if err != nil {
+		t.Fatalf("submit template: %v", err)
+	}
+	if client.creates != 1 || client.command != "text-stats" {
+		t.Fatalf("unexpected create call: creates=%d command=%q args=%q", client.creates, client.command, client.args)
+	}
+	wantArgs := []string{"--format", "json", "/agent/input.txt"}
+	if !equalStringSlices(client.args, wantArgs) {
+		t.Fatalf("expected args %q, got %q", wantArgs, client.args)
+	}
+	if !strings.Contains(out.String(), "job-1") || !strings.Contains(out.String(), "QUEUED") {
+		t.Fatalf("unexpected output:\n%s", out.String())
+	}
+}
+
+func TestRunCommandSubmitTemplateValidationErrorsDoNotCreateJobs(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		args []string
+		want string
+	}{
+		{
+			name: "invalid template",
+			body: `{"version":1,"name":"bad","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path","extra":true}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt"},
+			want: "invalid template",
+		},
+		{
+			name: "missing required parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: nil,
+			want: `missing required parameter "input_path"`,
+		},
+		{
+			name: "unknown set parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt", "--set", "other=x"},
+			want: `unknown parameter "other"`,
+		},
+		{
+			name: "duplicate set parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt", "--set", "input_path=/other.txt"},
+			want: `duplicate --set value for parameter "input_path"`,
+		},
+		{
+			name: "invalid set",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path"},
+			want: `invalid --set "input_path": expected name=value`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTemplateFile(t, tc.body)
+			client := &fakeClient{}
+			args := append([]string{"submit", "template", path}, tc.args...)
+			err := runCommandWithClient(context.Background(), client, args, ioDiscard{}, false)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if client.creates != 0 {
+				t.Fatalf("validation error should not create jobs, got %d calls", client.creates)
+			}
+		})
+	}
+}
+
+func TestRunETemplatesValidateDoesNotRequireClientConfig(t *testing.T) {
+	clearPMCTLEnv(t)
+	t.Setenv("PMCTL_TLS_CA_FILE", filepath.Join(t.TempDir(), "missing-ca.pem"))
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+	var out bytes.Buffer
+
+	if err := RunE(context.Background(), []string{"--json", "templates", "validate", path}, &out); err != nil {
+		t.Fatalf("RunE templates validate returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"valid": true`) {
+		t.Fatalf("expected validation JSON, got:\n%s", out.String())
+	}
+}
+
 func TestRunCommandJSONOutput(t *testing.T) {
 	client := &fakeClient{jobs: []Job{{ID: "job-1", Status: "COMPLETED"}}}
 	var out bytes.Buffer
@@ -122,6 +306,23 @@ func TestRunCommandUsageErrors(t *testing.T) {
 	err := runCommandWithClient(context.Background(), &fakeClient{}, []string{"jobs"}, ioDiscard{}, false)
 	if err == nil || !isUsageError(err) {
 		t.Fatalf("expected usage error, got %v", err)
+	}
+}
+
+func TestRunCommandTemplateUsageErrors(t *testing.T) {
+	tests := [][]string{
+		{"templates"},
+		{"templates", "validate"},
+		{"submit", "template"},
+		{"submit", "template", "template.json", "unexpected"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := runCommandWithClient(context.Background(), &fakeClient{}, args, ioDiscard{}, false)
+			if err == nil || !isUsageError(err) {
+				t.Fatalf("expected usage error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -296,4 +497,25 @@ func writePMCTLTempConfig(t *testing.T, body string) string {
 		t.Fatalf("write temp config: %v", err)
 	}
 	return path
+}
+
+func writeTemplateFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "template.pmtemplate.json")
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(body)+"\n"), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	return path
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

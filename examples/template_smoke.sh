@@ -3,19 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-COORD_ADDR="${COORD_ADDR:-:19080}"
-COORD_URL="${COORD_URL:-http://localhost:19080}"
-AGENT_ADDR="${AGENT_ADDR:-:19081}"
-AGENT_URL="${AGENT_URL:-http://localhost:19081}"
-NODE_ID="${NODE_ID:-release-smoke-agent}"
+COORD_ADDR="${COORD_ADDR:-:18180}"
+COORD_URL="${COORD_URL:-http://localhost:18180}"
+AGENT_ADDR="${AGENT_ADDR:-:18181}"
+AGENT_URL="${AGENT_URL:-http://localhost:18181}"
+NODE_ID="${NODE_ID:-template-smoke-agent}"
 
-LOG_DIR="${LOG_DIR:-${TMPDIR:-/tmp}/planetary-mesh-release-smoke-$(date +%Y%m%d%H%M%S)}"
-DIST_DIR="${DIST_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/planetary-mesh-release-dist.XXXXXX")}"
-VERSION="${VERSION:-dev}"
+LOG_DIR="${LOG_DIR:-${TMPDIR:-/tmp}/planetary-mesh-template-$(date +%Y%m%d%H%M%S)}"
+BIN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/planetary-mesh-template-bin.XXXXXX")"
 
 COORD_LOG="${LOG_DIR}/coordinator.log"
 AGENT_LOG="${LOG_DIR}/agent.log"
 INPUT_PATH="${LOG_DIR}/input.txt"
+WORKLOAD_BIN="${BIN_DIR}/text-stats"
+TEMPLATE_PATH="${ROOT}/examples/templates/text-stats.pmtemplate.json"
 
 UNSET_ENV=(
   -u COORDINATOR_CONFIG_FILE
@@ -56,11 +57,7 @@ cleanup() {
       wait "${pid}" >/dev/null 2>&1 || true
     fi
   done
-  if [[ "${KEEP_RELEASE_SMOKE:-}" == "1" ]]; then
-    echo "Preserving release smoke dist directory: ${DIST_DIR}"
-  elif [[ "${DIST_DIR}" == "${TMPDIR:-/tmp}"/planetary-mesh-release-dist.* || "${DIST_DIR}" == /tmp/planetary-mesh-release-dist.* ]]; then
-    rm -rf "${DIST_DIR}"
-  fi
+  rm -rf "${BIN_DIR}"
 }
 trap cleanup EXIT
 
@@ -73,6 +70,10 @@ require_command() {
 
 run_clean() {
   env "${UNSET_ENV[@]}" "$@"
+}
+
+pmctl() {
+  run_clean "${BIN_DIR}/pmctl" --coordinator-url "${COORD_URL}" "$@"
 }
 
 wait_for_url() {
@@ -146,30 +147,10 @@ require_json_contains() {
   local expected="$2"
 
   if ! grep -Fq "${expected}" <<<"${json}"; then
-    echo "Expected job JSON to contain: ${expected}" >&2
+    echo "Expected JSON to contain: ${expected}" >&2
     echo "${json}" >&2
     return 1
   fi
-}
-
-require_executable() {
-  local path="$1"
-  if [[ ! -x "${path}" ]]; then
-    echo "Expected executable at ${path}" >&2
-    exit 1
-  fi
-}
-
-require_file() {
-  local path="$1"
-  if [[ ! -f "${path}" ]]; then
-    echo "Expected file at ${path}" >&2
-    exit 1
-  fi
-}
-
-pmctl() {
-  run_clean "${PMCTL_BIN}" --coordinator-url "${COORD_URL}" "$@"
 }
 
 require_command go
@@ -178,53 +159,29 @@ require_command awk
 require_command grep
 require_command sed
 
-HOST_GOOS="$(go env GOOS)"
-HOST_GOARCH="$(go env GOARCH)"
-EXE=""
-ARCHIVE_EXT=".tar.gz"
-if [[ "${HOST_GOOS}" == "windows" ]]; then
-  EXE=".exe"
-  ARCHIVE_EXT=".zip"
-fi
-
-INSTALL_DIR="${DIST_DIR}/planetary-mesh-${VERSION}-${HOST_GOOS}-${HOST_GOARCH}"
-ARCHIVE_PATH="${DIST_DIR}/planetary-mesh-${VERSION}-${HOST_GOOS}-${HOST_GOARCH}${ARCHIVE_EXT}"
-COORD_BIN="${INSTALL_DIR}/bin/coordinator${EXE}"
-AGENT_BIN="${INSTALL_DIR}/bin/agent${EXE}"
-PMCTL_BIN="${INSTALL_DIR}/bin/pmctl${EXE}"
-WORKLOAD_BIN="${INSTALL_DIR}/workloads/text-stats${EXE}"
-TEMPLATE_PATH="${INSTALL_DIR}/templates/text-stats.pmtemplate.json"
-
 mkdir -p "${LOG_DIR}"
 printf 'alpha\nbeta\ngamma\n' >"${INPUT_PATH}"
 
-echo "Building host release layout in ${DIST_DIR}"
-(cd "${ROOT}" && go run ./tools/releasebuild --out "${DIST_DIR}" --version "${VERSION}" --targets host)
+echo "Building template smoke binaries"
+(cd "${ROOT}" && go build -o "${BIN_DIR}/coordinator" ./cmd/coordinator)
+(cd "${ROOT}" && go build -o "${BIN_DIR}/agent" ./cmd/agent)
+(cd "${ROOT}" && go build -o "${BIN_DIR}/pmctl" ./cmd/pmctl)
+(cd "${ROOT}" && go build -o "${WORKLOAD_BIN}" ./examples/workloads/text-stats)
 
-require_executable "${COORD_BIN}"
-require_executable "${AGENT_BIN}"
-require_executable "${PMCTL_BIN}"
-require_executable "${WORKLOAD_BIN}"
-require_file "${TEMPLATE_PATH}"
-if [[ ! -f "${ARCHIVE_PATH}" ]]; then
-  echo "Expected archive at ${ARCHIVE_PATH}" >&2
-  exit 1
-fi
-
-echo "Starting installed coordinator at ${COORD_URL}"
-run_clean COORDINATOR_ADDR="${COORD_ADDR}" "${COORD_BIN}" >"${COORD_LOG}" 2>&1 &
+echo "Starting coordinator at ${COORD_URL}"
+run_clean COORDINATOR_ADDR="${COORD_ADDR}" "${BIN_DIR}/coordinator" >"${COORD_LOG}" 2>&1 &
 COORD_PID=$!
 wait_for_url "coordinator" "${COORD_URL}/healthz"
 
-echo "Starting installed agent ${NODE_ID} at ${AGENT_URL}"
+echo "Starting agent ${NODE_ID} at ${AGENT_URL}"
 run_clean \
   NODE_ID="${NODE_ID}" \
   AGENT_ADDR="${AGENT_ADDR}" \
   AGENT_ADVERTISE_ADDR="${AGENT_URL}" \
   COORDINATOR_URL="${COORD_URL}" \
   AGENT_COMMAND_ALLOWLIST="echo=builtin:echo,false=builtin:false,sleep=builtin:sleep,text-stats=${WORKLOAD_BIN}" \
-  AGENT_CAPABILITIES="profile:local-release,role:text-worker" \
-  "${AGENT_BIN}" >"${AGENT_LOG}" 2>&1 &
+  AGENT_CAPABILITIES="profile:local,role:text-worker" \
+  "${BIN_DIR}/agent" >"${AGENT_LOG}" 2>&1 &
 AGENT_PID=$!
 wait_for_url "agent" "${AGENT_URL}/healthz"
 
@@ -232,26 +189,22 @@ echo "Waiting for ${NODE_ID} to register"
 wait_for_node
 
 echo
-echo "Installed layout"
-echo "${INSTALL_DIR}"
+echo "Validating text-stats template"
+TEMPLATE_JSON="$(pmctl --json templates validate "${TEMPLATE_PATH}")"
+if ! require_json_contains "${TEMPLATE_JSON}" '"valid": true,' ||
+  ! require_json_contains "${TEMPLATE_JSON}" '"name": "text-stats",' ||
+  ! require_json_contains "${TEMPLATE_JSON}" '"command": "text-stats"'; then
+  echo "Unexpected template validation result" >&2
+  echo "Logs are in ${LOG_DIR}" >&2
+  exit 1
+fi
 
 echo
 echo "Registered nodes"
 pmctl nodes list
 
 echo
-echo "Validating installed text-stats template"
-TEMPLATE_JSON="$(pmctl --json templates validate "${TEMPLATE_PATH}")"
-if ! require_json_contains "${TEMPLATE_JSON}" '"valid": true,' ||
-  ! require_json_contains "${TEMPLATE_JSON}" '"name": "text-stats",' ||
-  ! require_json_contains "${TEMPLATE_JSON}" '"command": "text-stats"'; then
-  echo "Unexpected installed template validation result" >&2
-  echo "Logs are in ${LOG_DIR}" >&2
-  exit 1
-fi
-
-echo
-echo "Submitting installed text-stats template"
+echo "Submitting text-stats template"
 JOB_JSON="$(pmctl --json submit template "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
 JOB_ID="$(json_string_field "${JOB_JSON}" "id")"
 if [[ -z "${JOB_ID}" ]]; then
@@ -276,7 +229,7 @@ if ! require_json_contains "${FINAL_JOB_JSON}" '"status": "COMPLETED",' ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"stdout_truncated": false,' ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"stderr_truncated": false,' ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"last_error": ""'; then
-  echo "Unexpected release smoke workload result" >&2
+  echo "Unexpected template smoke workload result" >&2
   echo "Logs are in ${LOG_DIR}" >&2
   exit 1
 fi
@@ -286,6 +239,5 @@ echo "Job detail"
 pmctl jobs inspect "${JOB_ID}"
 
 echo
-echo "Release smoke completed successfully"
-echo "Archive: ${ARCHIVE_PATH}"
+echo "Template smoke completed successfully"
 echo "Logs are in ${LOG_DIR}"

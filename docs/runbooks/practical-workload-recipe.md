@@ -3,7 +3,8 @@
 This runbook documents the current real private workload pattern: build or
 install a trusted executable on the agent host, map a logical command key to
 that executable through `AGENT_COMMAND_ALLOWLIST`, submit the logical command
-with `pmctl`, and inspect the result through the coordinator.
+directly or through a `pmctl` template, and inspect the result through the
+coordinator.
 
 The tracked example workload is `text-stats`, a small cross-platform Go helper
 under `examples/workloads/text-stats/`. It reads one agent-local text file and
@@ -42,14 +43,13 @@ Command execution remains allowlisted direct process execution with
 as redirection, glob expansion, command substitution, and pipelines are not
 available inside the submitted job.
 
-The helper is an example wrapper-style executable, not an implemented workflow
-template system, file-transfer contract, or stronger isolation boundary.
+The helper is an example wrapper-style executable, not a file-transfer
+contract, artifact store, or stronger isolation boundary.
 
-ADR 0015 defines the accepted future template model: templates should expand
-operator parameters into existing logical command jobs, and wrappers such as
-`text-stats` remain the runtime execution unit. That template layer is not
-implemented yet, so this runbook still uses direct `pmctl submit command`
-examples.
+The tracked template `examples/templates/text-stats.pmtemplate.json` shows the
+current `pmctl` template layer. It expands an operator-supplied `input_path`
+parameter into the same existing command job shown in the direct examples.
+Wrappers such as `text-stats` remain the runtime execution unit.
 
 ## Automated Local Smoke
 
@@ -76,6 +76,15 @@ External workload smoke completed successfully
 
 The script prints its temporary log directory. Do not commit those logs, temp
 inputs, or generated binaries.
+
+To validate the template layer over the same workload:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh
+```
+
+That script validates `examples/templates/text-stats.pmtemplate.json`, submits
+it with `pmctl submit template`, and verifies the expanded command job result.
 
 ## Build the Helper Manually
 
@@ -146,10 +155,17 @@ go run ./cmd/agent
 
 On Windows, use the `.exe` helper path in the `text-stats=<path>` mapping.
 
-Submit the workload:
+Submit the workload directly:
 
 ```bash
 go run ./cmd/pmctl --config config/pmctl.env.example --json submit command text-stats /tmp/planetary-mesh-workloads/input.txt
+```
+
+Or validate and submit the tracked template:
+
+```bash
+go run ./cmd/pmctl --config config/pmctl.env.example templates validate examples/templates/text-stats.pmtemplate.json
+go run ./cmd/pmctl --config config/pmctl.env.example --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
 Record the returned job id, then inspect it:
@@ -207,6 +223,12 @@ go run ./cmd/pmctl nodes list
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl --json submit command text-stats <agent-local-input-path>
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+go run ./cmd/pmctl templates validate examples/templates/text-stats.pmtemplate.json
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+go run ./cmd/pmctl --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
 ```
 
 Inspect the returned `<job-id>` and expect the same completed result shape as
@@ -221,6 +243,7 @@ the local run.
 | Job fails with non-zero exit and `text-stats:` in stderr | Input path is missing or unreadable on the executing agent | Inspect job `stderr` and confirm the file exists on the agent host. |
 | Job runs on an unexpected node | Multiple healthy agents are available and scheduler is first-healthy-node | Use one eligible agent or install the helper and input path on every eligible agent. |
 | Unexpected counts | The selected agent read different host-local content than expected | Compare submitted args with the actual agent-local input path and file contents. |
+| Template validation fails | The template was edited outside the supported v1 schema | Run `pmctl templates validate <template-file>` and compare with `examples/templates/text-stats.pmtemplate.json`. |
 
 Non-zero helper exit is terminal and is not retried by the coordinator.
 Transport errors and agent `5xx` responses remain retryable under the current
@@ -260,6 +283,4 @@ local config files, generated binaries, raw logs, or real workload data.
 - Treat stdout and stderr as bounded result fields, not an artifact store.
 - This is allowlisted direct host process execution, not strong sandboxing.
 - Built-ins remain smoke/validation helpers; real private workflows should use
-  external commands or wrappers. ADR 0015 defines a future template layer over
-  those logical command keys, but that layer is not implemented in this
-  runbook.
+  external commands or wrappers, optionally exposed through `pmctl` templates.

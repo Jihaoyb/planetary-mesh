@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"planetary-mesh/internal/protocol"
+	"planetary-mesh/internal/workflowtemplate"
 )
 
 type clientAPI interface {
@@ -29,11 +30,23 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 }
 
 func RunE(ctx context.Context, args []string, stdout io.Writer) error {
+	localCfg := ConfigFromEnv()
+	jsonOut, remaining, err := parseGlobalFlags(args, &localCfg)
+	if err != nil {
+		return err
+	}
+	if len(remaining) == 0 {
+		return usageError("missing command")
+	}
+	if isLocalTemplateValidation(remaining) {
+		return runCommandWithClient(ctx, nil, remaining, stdout, jsonOut)
+	}
+
 	cfg, err := ConfigFromSources(args)
 	if err != nil {
 		return err
 	}
-	jsonOut, remaining, err := parseGlobalFlags(args, &cfg)
+	jsonOut, remaining, err = parseGlobalFlags(args, &cfg)
 	if err != nil {
 		return err
 	}
@@ -46,6 +59,10 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	return runCommand(ctx, client, remaining, stdout, jsonOut)
+}
+
+func isLocalTemplateValidation(args []string) bool {
+	return len(args) > 0 && args[0] == "templates"
 }
 
 func parseGlobalFlags(args []string, cfg *Config) (bool, []string, error) {
@@ -107,15 +124,48 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 			return writeValue(stdout, job, jsonOut, writeJobDetail)
 		}
 		return usageError("usage: pmctl jobs list | pmctl jobs inspect <job-id>")
-	case "submit":
-		if len(args) < 3 || args[1] != "command" {
-			return usageError("usage: pmctl submit command <command> [args...]")
+	case "templates":
+		if len(args) != 3 || args[1] != "validate" {
+			return usageError("usage: pmctl templates validate <template-file>")
 		}
-		job, err := client.CreateCommandJob(ctx, args[2], args[3:])
+		tmpl, err := loadTemplate(args[2])
 		if err != nil {
 			return err
 		}
-		return writeValue(stdout, job, jsonOut, writeJobDetail)
+		return writeValue(stdout, templateValidationOutput{
+			Valid:    true,
+			Path:     args[2],
+			Template: tmpl,
+		}, jsonOut, writeTemplateValidation)
+	case "submit":
+		switch {
+		case len(args) >= 3 && args[1] == "command":
+			job, err := client.CreateCommandJob(ctx, args[2], args[3:])
+			if err != nil {
+				return err
+			}
+			return writeValue(stdout, job, jsonOut, writeJobDetail)
+		case len(args) >= 3 && args[1] == "template":
+			submission, err := parseTemplateSubmission(args[2:])
+			if err != nil {
+				return err
+			}
+			tmpl, err := loadTemplate(submission.path)
+			if err != nil {
+				return err
+			}
+			expanded, err := workflowtemplate.Expand(tmpl, submission.values)
+			if err != nil {
+				return fmt.Errorf("invalid template parameters for %s: %w", submission.path, err)
+			}
+			job, err := client.CreateCommandJob(ctx, expanded.Command, expanded.Args)
+			if err != nil {
+				return err
+			}
+			return writeValue(stdout, job, jsonOut, writeJobDetail)
+		default:
+			return usageError("usage: pmctl submit command <command> [args...] | pmctl submit template <template-file> --set name=value [--set name=value...]")
+		}
 	default:
 		return usageError("unknown command " + args[0])
 	}
@@ -128,6 +178,70 @@ func writeValue[T any](w io.Writer, value T, jsonOut bool, writeHuman func(io.Wr
 		return enc.Encode(value)
 	}
 	return writeHuman(w, value)
+}
+
+type templateValidationOutput struct {
+	Valid    bool                      `json:"valid"`
+	Path     string                    `json:"path"`
+	Template workflowtemplate.Template `json:"template"`
+}
+
+type templateSubmission struct {
+	path   string
+	values map[string]string
+}
+
+type setFlags []string
+
+func (f *setFlags) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *setFlags) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
+func parseTemplateSubmission(args []string) (templateSubmission, error) {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return templateSubmission{}, usageError("usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+	}
+
+	fs := flag.NewFlagSet("pmctl submit template", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var raw setFlags
+	fs.Var(&raw, "set", "template parameter value name=value")
+	if err := fs.Parse(args[1:]); err != nil {
+		return templateSubmission{}, err
+	}
+	if fs.NArg() != 0 {
+		return templateSubmission{}, usageError("usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+	}
+
+	values := make(map[string]string, len(raw))
+	for _, entry := range raw {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || name == "" {
+			return templateSubmission{}, fmt.Errorf("invalid --set %q: expected name=value", entry)
+		}
+		if _, exists := values[name]; exists {
+			return templateSubmission{}, fmt.Errorf("duplicate --set value for parameter %q", name)
+		}
+		values[name] = value
+	}
+
+	return templateSubmission{
+		path:   args[0],
+		values: values,
+	}, nil
+}
+
+func loadTemplate(path string) (workflowtemplate.Template, error) {
+	tmpl, err := workflowtemplate.Load(path)
+	if err != nil {
+		return workflowtemplate.Template{}, fmt.Errorf("invalid template %s: %w", path, err)
+	}
+	return tmpl, nil
 }
 
 type usageError string

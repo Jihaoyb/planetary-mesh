@@ -37,6 +37,8 @@ var plannedCopies = []plannedCopy{
 	{Source: "config/agent-1.env.example", Destination: "config/agent-1.env.example"},
 	{Source: "config/agent-2.env.example", Destination: "config/agent-2.env.example"},
 	{Source: "config/pmctl.env.example", Destination: "config/pmctl.env.example"},
+	{Source: "examples/templates/text-stats.pmtemplate.json", Destination: "templates/text-stats.pmtemplate.json"},
+	{Source: "examples/templates/README.md", Destination: "templates/README.md"},
 	{Source: "README.md", Destination: "README.md"},
 	{Source: "docs/runbooks/local-release-install.md", Destination: "docs/runbooks/local-release-install.md", Optional: true},
 	{Source: "docs/runbooks/practical-workload-recipe.md", Destination: "docs/runbooks/practical-workload-recipe.md"},

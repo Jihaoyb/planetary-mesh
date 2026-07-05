@@ -98,16 +98,18 @@ Keep allowlists narrow and task-specific:
   such as Windows `echo`
 - use external commands or wrapper scripts for real private workflows; do not
   treat built-ins as a growing workflow catalog
+- use `pmctl` workflow templates to make approved wrapper invocations
+  repeatable without broadening the allowlist
 
 The tracked `examples/workloads/text-stats` helper and
 [Practical External Workload Recipe](practical-workload-recipe.md) show the
 current wrapper-style path without changing the runtime execution model.
 
-ADR 0015 defines a future workflow template model that expands operator
-parameters into existing logical command jobs. That model does not change the
-current safety boundary: templates must still submit logical allowlist keys, and
-agents still enforce allowlists before executing wrapper executables or explicit
-validation built-ins.
+Milestone 25 implements the ADR 0015 workflow template model in `pmctl`.
+Templates expand operator parameters into existing logical command jobs. That
+does not change the current safety boundary: templates must still submit
+logical allowlist keys, and agents still enforce allowlists before executing
+wrapper executables or explicit validation built-ins.
 
 Example narrow local allowlist:
 

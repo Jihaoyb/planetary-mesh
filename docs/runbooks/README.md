@@ -32,6 +32,8 @@ owns or controls:
   observation steps.
 - [Practical External Workload Recipe](practical-workload-recipe.md) - trusted
   host-local `text-stats` external executable/wrapper workload.
+- [Workflow Templates](workflow-templates.md) - `pmctl` JSON template
+  validation and submission for repeatable private command workflows.
 - [Troubleshooting](troubleshooting.md) - common failure symptoms and current
   inspection surfaces.
 
@@ -48,6 +50,8 @@ Current behavior:
   built-in validation targets when configured.
 - Tracked external workload examples under `examples/workloads/` for the
   current wrapper/executable path.
+- Tracked example workflow templates under `examples/templates/` for the
+  current `pmctl` client-side expansion path.
 - Pre-release local binary artifact generation and installed-binary smoke
   validation for development use.
 - `pmctl` as a thin client over the coordinator API.
@@ -103,6 +107,7 @@ Real LAN validation additionally expects:
 | Vet | `GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...` | DB-free. |
 | Local smoke | `./examples/demo.sh` | Starts local coordinator and two agents with in-memory storage. |
 | External workload smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh` | Builds and runs the tracked `text-stats` helper through the allowlisted external command path. |
+| Template smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh` | Validates and submits the tracked `text-stats` template through `pmctl`. |
 | Local release smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh` | Builds a host release layout and runs coordinator, agent, `pmctl`, and `text-stats` from installed binaries. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
 | First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |

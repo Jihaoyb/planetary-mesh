@@ -13,10 +13,11 @@ shared compute scenarios.
 
 - **Stage**: Phase 2 productized private mesh work has started with
   source-based onboarding, a practical external workload example, and a
-  pre-release local binary artifact/install-smoke workflow, plus an accepted
-  ADR for a future private workflow template model. Phase 1 closed after the
-  Milestone 20 readiness review, Milestone 18 real multi-device LAN validation,
-  and Milestone 19 portable agent validation built-ins.
+  pre-release local binary artifact/install-smoke workflow, plus implemented
+  `pmctl` workflow template validation/submission for repeatable private
+  wrapper invocations. Phase 1 closed after the Milestone 20 readiness review,
+  Milestone 18 real multi-device LAN validation, and Milestone 19 portable
+  agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -29,7 +30,8 @@ shared compute scenarios.
   built-ins when configured, and best-effort reports terminal command results
   from a bounded in-memory cache.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
-  inspection, and command job submission.
+  inspection, command job submission, and client-side workflow template
+  validation/submission.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
@@ -57,9 +59,11 @@ shared compute scenarios.
   and agent-local line counting when mapped through `AGENT_COMMAND_ALLOWLIST`.
 - Tracked external `text-stats` workload example and local smoke script for the
   current allowlisted wrapper/executable workflow path.
+- Tracked `text-stats` workflow template example, local template smoke script,
+  and `pmctl` template validation/submission commands.
 - Pre-release local release artifact builder and installed-binary smoke script
-  for coordinator, agent, `pmctl`, and `text-stats` across macOS, Linux, and
-  Windows artifact expectations.
+  for coordinator, agent, `pmctl`, `text-stats`, and selected templates across
+  macOS, Linux, and Windows artifact expectations.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -95,7 +99,8 @@ shared compute scenarios.
 - Durable agent result history after agent restart.
 - Full in-progress execution recovery after coordinator restart.
 - Automated certificate issuance, enrollment, or rotation.
-- Workflow template commands.
+- Coordinator-owned template registry, agent-side template registry, file
+  transfer, artifact storage, or workflow engine.
 - Remote private mesh, trusted shared pool, or overflow marketplace features.
 
 See [docs/current-limitations.md](docs/current-limitations.md) for the current
@@ -121,11 +126,12 @@ Milestone 20 reviewed that evidence and closed Phase 1. Milestone 21 added a
 source-based first-run onboarding path. Milestone 22 added a tracked external
 `text-stats` workload example to demonstrate the real allowlisted wrapper path.
 Milestone 23 added pre-release local artifact generation and an installed-binary
-smoke workflow. Milestone 24 accepted the private workflow template model for a
-future `pmctl` implementation without changing runtime behavior. Remaining gaps
-such as production packaging, scheduler policy, cancellation, generated API
-contracts, richer operator UX, workflow template commands, and stronger
-isolation are Phase 2 or later backlog unless explicitly reclassified.
+smoke workflow. Milestone 24 accepted the private workflow template model
+without changing runtime behavior. Milestone 25 implemented that model as
+`pmctl` client-side validation/submission to existing command jobs. Remaining
+gaps such as production packaging, scheduler policy, cancellation, generated API
+contracts, richer operator UX, coordinator-owned template registries, and
+stronger isolation are Phase 2 or later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -163,7 +169,7 @@ trust boundary but is not a strong sandbox:
   stronger isolation.
 - Built-ins are not a general workflow extension model. Real private workflows
   should continue to use explicit allowlisted external commands or wrapper
-  scripts.
+  scripts, optionally exposed through `pmctl` templates.
 - Stdout and stderr are captured separately and capped at `1 MiB` per stream.
 - mTLS and node allowlists are supported for trusted LAN operation, but
   certificate generation, distribution, enrollment, and rotation are manual.
@@ -193,7 +199,7 @@ planetary-mesh/
 
   config/              # Tracked example config files
   docs/                # Roadmap, architecture, product, ADRs, limitations
-  examples/            # Smoke workflows and tracked workload examples
+  examples/            # Smoke workflows, workload examples, and templates
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
 
@@ -253,6 +259,12 @@ To verify the current external wrapper workload path locally:
 
 ```bash
 GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh
+```
+
+To verify the current template path locally:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh
 ```
 
 To verify the pre-release installed-binary path locally:
@@ -407,6 +419,8 @@ pmctl status
 pmctl nodes list
 pmctl jobs list
 pmctl submit command echo hello mesh
+pmctl templates validate examples/templates/text-stats.pmtemplate.json
+pmctl submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 pmctl jobs inspect job-1
 ```
 
@@ -474,6 +488,7 @@ Current sources of truth:
 - [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
 - [Operator Runbooks](docs/runbooks/README.md)
 - [First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
+- [Workflow Templates](docs/runbooks/workflow-templates.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)
 - [Tech Choices](docs/tech-choices.md)

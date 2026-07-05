@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"planetary-mesh/internal/protocol"
+	"planetary-mesh/internal/workflowtemplate"
 )
 
 func writeStatus(w io.Writer, s protocol.CoordinatorStatusResponse) error {
@@ -95,6 +96,18 @@ func writeJobDetail(w io.Writer, job Job) error {
 	return tw.Flush()
 }
 
+func writeTemplateValidation(w io.Writer, out templateValidationOutput) error {
+	tw := newTabWriter(w)
+	fmt.Fprintf(tw, "Template:\t%s\n", out.Path)
+	fmt.Fprintln(tw, "Status:\tvalid")
+	fmt.Fprintf(tw, "Name:\t%s\n", out.Template.Name)
+	fmt.Fprintf(tw, "Version:\t%d\n", out.Template.Version)
+	fmt.Fprintf(tw, "Command:\t%s\n", out.Template.Command)
+	fmt.Fprintf(tw, "Parameters:\t%s\n", formatTemplateParameters(out.Template.Parameters))
+	fmt.Fprintf(tw, "Args:\t%d\n", len(out.Template.Args))
+	return tw.Flush()
+}
+
 func newTabWriter(w io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }
@@ -139,4 +152,23 @@ func formatReconciliation(reconciliation *protocol.ReconciliationStatus) string 
 
 func trimTrailingNewline(s string) string {
 	return strings.TrimRight(s, "\r\n")
+}
+
+func formatTemplateParameters(parameters []workflowtemplate.Parameter) string {
+	if len(parameters) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(parameters))
+	for _, param := range parameters {
+		if param.Required {
+			parts = append(parts, param.Name+"(required)")
+			continue
+		}
+		defaultValue := ""
+		if param.Default != nil {
+			defaultValue = *param.Default
+		}
+		parts = append(parts, fmt.Sprintf("%s(optional default=%q)", param.Name, defaultValue))
+	}
+	return strings.Join(parts, ",")
 }

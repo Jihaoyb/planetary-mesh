@@ -2,13 +2,13 @@
 
 This runbook covers the current pre-release local binary artifact workflow. It
 builds coordinator, agent, `pmctl`, and the tracked `text-stats` external
-workload into predictable install layouts, then validates that the mesh runs
-from those binaries instead of `go run`.
+workload plus example workflow templates into predictable install layouts, then
+validates that the mesh runs from those files instead of `go run`.
 
 This is Phase 2 install ergonomics work. It is not a production installer,
 signed binary distribution, package-manager release, GitHub Release, Docker
-image, remote private mesh, file-transfer layer, implemented workflow template
-system, or stronger execution sandbox.
+image, remote private mesh, coordinator-owned template registry, file-transfer
+layer, workflow engine, or stronger execution sandbox.
 
 ## Prerequisites
 
@@ -75,6 +75,9 @@ planetary-mesh-dev-<goos>-<goarch>/
     pmctl
   workloads/
     text-stats
+  templates/
+    text-stats.pmtemplate.json
+    README.md
   config/
     coordinator.env.example
     agent-1.env.example
@@ -117,7 +120,8 @@ The script:
 - starts installed `bin/agent`
 - maps installed `workloads/text-stats` through `AGENT_COMMAND_ALLOWLIST`
 - creates a temporary agent-local input file
-- submits `text-stats <agent-local-input-path>` with installed `bin/pmctl`
+- validates installed `templates/text-stats.pmtemplate.json`
+- submits the installed template with `bin/pmctl submit template`
 - verifies that the job reaches `COMPLETED`
 
 Expected final output includes:
@@ -210,10 +214,11 @@ $env:AGENT_CAPABILITIES = "profile:local-release,role:text-worker"
 .\bin\agent.exe
 ```
 
-Submit and inspect:
+Validate the installed template, submit it, and inspect the expanded job:
 
 ```bash
-./bin/pmctl --config config/pmctl.env.example --json submit command text-stats /tmp/planetary-mesh-release-input.txt
+./bin/pmctl --config config/pmctl.env.example templates validate templates/text-stats.pmtemplate.json
+./bin/pmctl --config config/pmctl.env.example --json submit template templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-release-input.txt
 ./bin/pmctl --config config/pmctl.env.example jobs inspect <job-id>
 ```
 
@@ -263,7 +268,10 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 ./bin/pmctl nodes list
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-./bin/pmctl --json submit command text-stats <agent-local-input-path>
+./bin/pmctl templates validate templates/text-stats.pmtemplate.json
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+./bin/pmctl --json submit template templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
 ```
 
 Scheduling is still first healthy node with retryable cross-node reassignment.
@@ -285,6 +293,7 @@ Record committed evidence only with placeholders such as
 | Job fails with command not allowlisted | `text-stats` logical key is missing or points at the wrong path | Check `AGENT_COMMAND_ALLOWLIST` on the selected agent. |
 | Job has retryable dispatch failures or agent `5xx` responses | Installed helper path is missing, not executable, or invalid for that OS | Confirm the helper exists under `workloads/` and has the expected `.exe` suffix on Windows. |
 | Job fails with `text-stats:` in stderr | Input file is missing or unreadable on the executing agent | Confirm the submitted path exists on that agent host. |
+| Template validation fails | The copied template was edited or the wrong file path was used | Validate `templates/text-stats.pmtemplate.json` from the install layout. |
 
 Non-zero helper exit is terminal and is not retried by the coordinator.
 Transport errors and agent `5xx` responses remain retryable under the current
