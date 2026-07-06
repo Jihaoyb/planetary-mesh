@@ -189,6 +189,49 @@ func TestParameterNamesReturnsSortedNames(t *testing.T) {
 	}
 }
 
+func TestDescribeArgs(t *testing.T) {
+	empty := ""
+	literal := "--input"
+	tmpl := Template{
+		Version: Version,
+		Name:    "describe",
+		Command: "helper",
+		Parameters: []Parameter{
+			{Name: "input_path", Required: true},
+		},
+		Args: []ArgToken{
+			{Literal: &literal},
+			{Param: stringPtr("input_path")},
+			{Literal: &empty},
+		},
+	}
+
+	got, err := DescribeArgs(tmpl)
+	if err != nil {
+		t.Fatalf("DescribeArgs returned error: %v", err)
+	}
+	want := []ArgDescription{
+		{Index: 1, Type: "literal", Value: "--input"},
+		{Index: 2, Type: "param", Value: "input_path"},
+		{Index: 3, Type: "literal", Value: ""},
+	}
+	if !equalArgDescriptions(got, want) {
+		t.Fatalf("expected args %+v, got %+v", want, got)
+	}
+}
+
+func TestDescribeArgsRejectsInvalidTemplate(t *testing.T) {
+	_, err := DescribeArgs(Template{
+		Version: Version,
+		Name:    "bad",
+		Command: "helper",
+		Args:    []ArgToken{{Param: stringPtr("missing")}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown parameter "missing"`) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
 func TestTextStatsExampleTemplateIsValid(t *testing.T) {
 	path := filepath.Join("..", "..", "examples", "templates", "text-stats.pmtemplate.json")
 	tmpl, err := Load(path)
@@ -219,6 +262,18 @@ func stringPtr(s string) *string {
 }
 
 func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalArgDescriptions(a, b []ArgDescription) bool {
 	if len(a) != len(b) {
 		return false
 	}
