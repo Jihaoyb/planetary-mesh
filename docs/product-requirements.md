@@ -41,7 +41,9 @@ not the long-term mechanism for adding every product workflow. Real private
 workflows use explicit allowlisted external commands or wrapper executables,
 with `examples/workloads/text-stats` as the first tracked example. Milestone 25
 implements the ADR 0015 client-side `pmctl` template layer over those logical
-command keys without changing coordinator or agent runtime behavior.
+command keys without changing coordinator or agent runtime behavior. Milestone
+26 adds local template inspection and preview before submission while preserving
+that runtime boundary.
 
 ## Non-goals
 
@@ -82,11 +84,13 @@ Practical MVP success means:
 - a user can build a tracked external `text-stats` helper, map it through
   `AGENT_COMMAND_ALLOWLIST`, submit it with `pmctl`, and inspect its result
   without relying on validation built-ins as the workflow model
-- a user can validate and submit a tracked `text-stats` JSON template through
-  `pmctl`, expanding it into the existing command-job request path
+- a user can validate, inspect, preview, and submit a tracked `text-stats` JSON
+  template through `pmctl`, expanding it into the existing command-job request
+  path only on submission
 - a user can build pre-release local binary artifacts for coordinator, agent,
   `pmctl`, `text-stats`, and selected templates, then run an installed-binary
-  smoke workflow that verifies `text-stats` template submission through the mesh
+  smoke workflow that verifies `text-stats` template preview and submission
+  through the mesh
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -108,8 +112,9 @@ first-run onboarding path. Milestone 22 added a tracked external workload helper
 and wrapper-pattern runbook. Milestone 23 added pre-release local binary
 artifacts and installed-binary smoke validation. Milestone 24 accepted the
 private workflow template model, and Milestone 25 implemented it in `pmctl`.
+Milestone 26 added local template inspection and preview before submission.
 These improve fresh-checkout usability, the real private workload path, local
-install confidence, and repeatable template submission, but they are not a
+install confidence, and repeatable template operation, but they are not a
 production installer, signed release, package-manager distribution, production
 image, dashboard, remote private mesh, file-transfer layer, coordinator-owned
 template registry, or workflow engine.

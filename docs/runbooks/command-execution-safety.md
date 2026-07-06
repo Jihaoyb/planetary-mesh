@@ -106,10 +106,12 @@ The tracked `examples/workloads/text-stats` helper and
 current wrapper-style path without changing the runtime execution model.
 
 Milestone 25 implements the ADR 0015 workflow template model in `pmctl`.
+Milestone 26 adds local template inspection and preview before submission.
 Templates expand operator parameters into existing logical command jobs. That
-does not change the current safety boundary: templates must still submit
-logical allowlist keys, and agents still enforce allowlists before executing
-wrapper executables or explicit validation built-ins.
+does not change the current safety boundary: previews do not prove agent
+allowlist coverage, templates must still submit logical allowlist keys, and
+agents still enforce allowlists before executing wrapper executables or explicit
+validation built-ins.
 
 Example narrow local allowlist:
 

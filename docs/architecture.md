@@ -148,6 +148,8 @@ Supported operations:
 - `pmctl jobs inspect <job-id>`
 - `pmctl submit command <command> [args...]`
 - `pmctl templates validate <template-file>`
+- `pmctl templates inspect <template-file>`
+- `pmctl templates preview <template-file> --set name=value`
 - `pmctl submit template <template-file> --set name=value`
 
 `pmctl` sends the protocol version header, supports JSON output, and can be
@@ -250,9 +252,12 @@ Templates:
 Template validation rejects unsupported JSON fields, unknown template versions,
 duplicate parameters, unknown parameter references, unsafe command keys, missing
 required `--set` values, unknown `--set` values, and duplicate `--set` values.
-Successful submission still creates an ordinary command job. The coordinator
-stores the expanded command and args; it does not store the template name or
-parameter map.
+Template inspection and preview are local-only `pmctl` ergonomics: inspection
+shows template metadata and argument token structure, and preview shows the
+expanded command-job vector without creating a job, contacting the coordinator,
+or checking agent allowlists. Successful submission still creates an ordinary
+command job. The coordinator stores the expanded command and args; it does not
+store the template name or parameter map.
 
 Templates do not transfer files, store artifacts, choose nodes, manage secrets,
 override timeouts, cancel jobs, or create multi-step workflows.
@@ -469,14 +474,11 @@ Private mesh hardening:
 - certificate/onboarding helper
 - follow-up reconciliation hardening if private mesh operations show the need
   for durable agent-side result history or richer recovery semantics
-- implementation of the ADR 0015 `pmctl` template layer for approved actions
-  over the allowlisted command model, not a growing catalog of hardcoded agent
-  built-ins
 
 Productized private mesh:
 
-- richer CLI or dashboard
-- `pmctl` template validation/submission
+- richer CLI beyond the current template inspect/preview workflow, or dashboard
+- additional approved template examples after their wrapper paths are explicit
 - logs UX
 - file/result handling for selected workflows
 - private AI/batch demo pipelines

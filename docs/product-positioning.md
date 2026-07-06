@@ -14,7 +14,8 @@ allowlisted direct command execution with explicit portable validation built-ins
 bounded output capture, a tracked external `text-stats` workload example,
 optional Postgres persistence, opt-in mTLS, node allowlists, metrics, local
 smoke workflows, pre-release local binary artifact/install-smoke tooling, and
-`pmctl` client-side workflow template validation/submission.
+`pmctl` client-side workflow template validation, inspection, preview, and
+submission.
 
 It is not a public marketplace, production multi-tenant compute platform,
 signed installer, or package-manager distributed product.
@@ -41,9 +42,10 @@ These are product directions, not all implemented features today:
 - developer automation jobs
 
 The current implemented workload is allowlisted command execution. `pmctl`
-templates can validate approved JSON files and expand operator parameters into
-one existing command job. File handling, richer job types, coordinator-owned
-template registries, and workflow engines are not implemented today.
+templates can validate and inspect approved JSON files, preview operator
+parameters as one command-job vector, and submit one existing command job. File
+handling, richer job types, coordinator-owned template registries, and workflow
+engines are not implemented today.
 
 Portable built-ins are smoke/validation helpers, not the intended product
 surface for adding every user workflow. Near-term real workflows should remain

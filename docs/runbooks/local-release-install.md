@@ -120,7 +120,7 @@ The script:
 - starts installed `bin/agent`
 - maps installed `workloads/text-stats` through `AGENT_COMMAND_ALLOWLIST`
 - creates a temporary agent-local input file
-- validates installed `templates/text-stats.pmtemplate.json`
+- validates and previews installed `templates/text-stats.pmtemplate.json`
 - submits the installed template with `bin/pmctl submit template`
 - verifies that the job reaches `COMPLETED`
 
@@ -214,10 +214,13 @@ $env:AGENT_CAPABILITIES = "profile:local-release,role:text-worker"
 .\bin\agent.exe
 ```
 
-Validate the installed template, submit it, and inspect the expanded job:
+Validate, inspect, preview, and submit the installed template, then inspect the
+expanded job:
 
 ```bash
 ./bin/pmctl --config config/pmctl.env.example templates validate templates/text-stats.pmtemplate.json
+./bin/pmctl --config config/pmctl.env.example templates inspect templates/text-stats.pmtemplate.json
+./bin/pmctl --config config/pmctl.env.example templates preview templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-release-input.txt
 ./bin/pmctl --config config/pmctl.env.example --json submit template templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-release-input.txt
 ./bin/pmctl --config config/pmctl.env.example jobs inspect <job-id>
 ```
@@ -271,6 +274,12 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 ./bin/pmctl templates validate templates/text-stats.pmtemplate.json
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+./bin/pmctl templates inspect templates/text-stats.pmtemplate.json
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+./bin/pmctl templates preview templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 ./bin/pmctl --json submit template templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
 ```
 
@@ -294,6 +303,7 @@ Record committed evidence only with placeholders such as
 | Job has retryable dispatch failures or agent `5xx` responses | Installed helper path is missing, not executable, or invalid for that OS | Confirm the helper exists under `workloads/` and has the expected `.exe` suffix on Windows. |
 | Job fails with `text-stats:` in stderr | Input file is missing or unreadable on the executing agent | Confirm the submitted path exists on that agent host. |
 | Template validation fails | The copied template was edited or the wrong file path was used | Validate `templates/text-stats.pmtemplate.json` from the install layout. |
+| Template preview looks correct but submit fails | Preview is local and does not check installed agent allowlists or agent-local files | Confirm `text-stats=<install-dir>/workloads/text-stats[.exe]` and the submitted input path on the selected agent. |
 
 Non-zero helper exit is terminal and is not retried by the coordinator.
 Transport errors and agent `5xx` responses remain retryable under the current

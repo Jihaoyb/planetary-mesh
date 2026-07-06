@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 25 `pmctl` template submission and example
-  templates
+- Baseline: `main` after Milestone 26 `pmctl` template preview and operator
+  workflow polish
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -49,7 +49,8 @@ Implemented capability and accepted planning baseline:
 - coordinator `/status` and `/metrics`
 - manual HTTP/JSON v0 API inventory and compatibility policy
 - accepted private workflow template model ADR and implemented `pmctl`
-  client-side expansion to existing command jobs
+  client-side expansion to existing command jobs with local validation,
+  inspection, preview, and submission
 - DB-free API drift tests for route, protocol, JSON-field, and metrics
   expectations
 - task-oriented operator runbooks for local private mesh operation, Postgres
@@ -61,20 +62,22 @@ Implemented capability and accepted planning baseline:
 - local in-memory smoke script
 - Postgres durability smoke script
 - external workload smoke script for the tracked `text-stats` helper
-- template smoke script for the tracked `text-stats` template
+- template smoke script for the tracked `text-stats` template, including
+  local preview before submission
 - pre-release local release artifact builder and installed-binary smoke script
   for coordinator, agent, `pmctl`, `text-stats`, and installed templates
 - source-based first-run onboarding runbook for local smoke, manual local
   startup, two-machine LAN operation, `pmctl` inspection, portable validation,
   cleanup, and failure handling
 - practical external workload recipe for building an allowlisted `text-stats`
-  helper on the agent host and submitting it directly or through a template
+  helper on the agent host and submitting it directly or through a previewed
+  template
 - local release install runbook for dev artifact names, install layout,
-  installed-binary startup, `text-stats` template validation/submission,
+  installed-binary startup, `text-stats` template validation/preview/submission,
   cleanup, and failure handling
 - thin CLI for status, node/job listing, job inspection, command submission,
-  and client-side template validation/submission, including human and JSON
-  output where supported
+  and client-side template validation/inspection/preview/submission, including
+  human and JSON output where supported
 - CI/build/test health with default DB-free tests across Ubuntu, macOS, and
   Windows expectations
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
@@ -82,7 +85,7 @@ Implemented capability and accepted planning baseline:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-25
+## Completed Baseline / Milestones 1-26
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
@@ -91,8 +94,9 @@ wrapper/executable workload path repeatable. Milestone 23 added pre-release
 local binary artifact generation and installed-binary smoke validation.
 Milestone 24 accepted the private workflow template model without changing
 runtime behavior. Milestone 25 implemented that model as `pmctl` client-side
-expansion to existing command jobs. This history remains useful because it
-explains why the current baseline is intentionally narrow.
+expansion to existing command jobs. Milestone 26 added local template inspection
+and preview before submission. This history remains useful because it explains
+why the current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -581,9 +585,10 @@ Status: started with Milestone 21 source-based first-run onboarding, continued
 with Milestone 22 practical external workload documentation, Milestone 23
 pre-release local release build/install smoke, and Milestone 24 private workflow
 template model planning. Milestone 25 implemented `pmctl` template
-validation/submission. Phase 2 work should still be selected as explicit,
-narrow milestones and should not imply remote mesh, shared pool, marketplace,
-payment, or arbitrary untrusted workload support.
+validation/submission, and Milestone 26 added local template inspection and
+preview. Phase 2 work should still be selected as explicit, narrow milestones
+and should not imply remote mesh, shared pool, marketplace, payment, or
+arbitrary untrusted workload support.
 
 ### Milestone 21: First-Run Private Mesh Onboarding
 
@@ -722,6 +727,38 @@ Completed outcomes:
 - coordinator, agent, HTTP/JSON v0, protocol version, job states, scheduling,
   storage, mTLS behavior, command execution semantics, and Postgres schema
   readiness version `2` are unchanged
+- no coordinator-owned registry, agent-side registry, file transfer, artifact
+  storage, workflow engine, new built-ins, stronger isolation, remote mesh,
+  shared pool, marketplace, production packaging, or new dependency was added
+
+Status: complete
+
+### Milestone 26: pmctl Template Preview and Operator Workflow Polish
+
+Goal: make the implemented client-side template workflow easier and safer for
+operators by adding local template inspection and preview ergonomics before job
+submission.
+
+Completed outcomes:
+
+- `pmctl templates inspect <template-file>` shows local template metadata,
+  parameters, and argument token structure with human and JSON output
+- `pmctl templates preview <template-file> --set name=value` expands local
+  operator inputs into the exact command-job vector without creating a job
+- preview output separates command and args, explicitly reports that it does
+  not create jobs, contact the coordinator, or check agent allowlists, and makes
+  empty values visible in human output
+- invalid templates, missing parameters, unknown parameters, duplicate `--set`
+  values, and invalid `--set` values fail locally before coordinator contact
+- existing `pmctl templates validate` and `pmctl submit template` behavior
+  remains compatible
+- template and release smoke workflows preview the tracked `text-stats`
+  template before submission
+- docs and examples now describe the validate, inspect, preview, submit
+  operator workflow
+- coordinator, agent, HTTP/JSON v0, protocol version, job states, scheduling,
+  storage, mTLS behavior, command execution semantics, release artifact layout,
+  and Postgres schema readiness version `2` are unchanged
 - no coordinator-owned registry, agent-side registry, file transfer, artifact
   storage, workflow engine, new built-ins, stronger isolation, remote mesh,
   shared pool, marketplace, production packaging, or new dependency was added

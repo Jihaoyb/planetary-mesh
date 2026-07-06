@@ -47,9 +47,11 @@ The helper is an example wrapper-style executable, not a file-transfer
 contract, artifact store, or stronger isolation boundary.
 
 The tracked template `examples/templates/text-stats.pmtemplate.json` shows the
-current `pmctl` template layer. It expands an operator-supplied `input_path`
-parameter into the same existing command job shown in the direct examples.
-Wrappers such as `text-stats` remain the runtime execution unit.
+current `pmctl` template layer. It can be validated, inspected, previewed, and
+then submitted. Preview expands an operator-supplied `input_path` parameter
+into the same existing command job shown in the direct examples without
+creating a job. Wrappers such as `text-stats` remain the runtime execution
+unit.
 
 ## Automated Local Smoke
 
@@ -83,8 +85,9 @@ To validate the template layer over the same workload:
 GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh
 ```
 
-That script validates `examples/templates/text-stats.pmtemplate.json`, submits
-it with `pmctl submit template`, and verifies the expanded command job result.
+That script validates and previews `examples/templates/text-stats.pmtemplate.json`,
+submits it with `pmctl submit template`, and verifies the expanded command job
+result.
 
 ## Build the Helper Manually
 
@@ -161,10 +164,12 @@ Submit the workload directly:
 go run ./cmd/pmctl --config config/pmctl.env.example --json submit command text-stats /tmp/planetary-mesh-workloads/input.txt
 ```
 
-Or validate and submit the tracked template:
+Or validate, preview, and submit the tracked template:
 
 ```bash
 go run ./cmd/pmctl --config config/pmctl.env.example templates validate examples/templates/text-stats.pmtemplate.json
+go run ./cmd/pmctl --config config/pmctl.env.example templates inspect examples/templates/text-stats.pmtemplate.json
+go run ./cmd/pmctl --config config/pmctl.env.example templates preview examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 go run ./cmd/pmctl --config config/pmctl.env.example --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
@@ -228,6 +233,12 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl templates validate examples/templates/text-stats.pmtemplate.json
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+go run ./cmd/pmctl templates inspect examples/templates/text-stats.pmtemplate.json
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
+go run ./cmd/pmctl templates preview examples/templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+
+PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
 ```
 
@@ -244,6 +255,7 @@ the local run.
 | Job runs on an unexpected node | Multiple healthy agents are available and scheduler is first-healthy-node | Use one eligible agent or install the helper and input path on every eligible agent. |
 | Unexpected counts | The selected agent read different host-local content than expected | Compare submitted args with the actual agent-local input path and file contents. |
 | Template validation fails | The template was edited outside the supported v1 schema | Run `pmctl templates validate <template-file>` and compare with `examples/templates/text-stats.pmtemplate.json`. |
+| Template preview looks correct but submit fails with allowlist or file errors | Preview is local and does not check agent allowlists or agent-local files | Inspect the selected agent's allowlist and confirm the input path exists on that host. |
 
 Non-zero helper exit is terminal and is not retried by the coordinator.
 Transport errors and agent `5xx` responses remain retryable under the current
