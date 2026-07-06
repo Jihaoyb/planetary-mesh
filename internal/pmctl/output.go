@@ -3,6 +3,7 @@ package pmctl
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -108,6 +109,53 @@ func writeTemplateValidation(w io.Writer, out templateValidationOutput) error {
 	return tw.Flush()
 }
 
+func writeTemplateInspection(w io.Writer, out templateInspectionOutput) error {
+	tw := newTabWriter(w)
+	fmt.Fprintf(tw, "Template:\t%s\n", out.Path)
+	fmt.Fprintln(tw, "Status:\tvalid")
+	fmt.Fprintf(tw, "Name:\t%s\n", out.Name)
+	fmt.Fprintf(tw, "Description:\t%s\n", out.Description)
+	fmt.Fprintf(tw, "Version:\t%d\n", out.Version)
+	fmt.Fprintf(tw, "Command:\t%s\n", out.Command)
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Parameters:")
+	fmt.Fprintln(tw, "NAME\tREQUIRED\tDEFAULT\tDESCRIPTION")
+	for _, param := range out.Parameters {
+		fmt.Fprintf(tw, "%s\t%t\t%s\t%s\n",
+			param.Name,
+			param.Required,
+			formatTemplateDefault(param.Default),
+			param.Description,
+		)
+	}
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Args:")
+	fmt.Fprintln(tw, "INDEX\tTYPE\tVALUE")
+	for _, arg := range out.Args {
+		fmt.Fprintf(tw, "%d\t%s\t%s\n", arg.Index, arg.Type, formatTemplateArgDescription(arg))
+	}
+	return tw.Flush()
+}
+
+func writeTemplatePreview(w io.Writer, out templatePreviewOutput) error {
+	tw := newTabWriter(w)
+	fmt.Fprintf(tw, "Template:\t%s\n", out.Path)
+	fmt.Fprintln(tw, "Status:\tpreview")
+	fmt.Fprintf(tw, "Name:\t%s\n", out.Name)
+	fmt.Fprintf(tw, "Expanded Job Type:\t%s\n", out.ExpandedJob.Type)
+	fmt.Fprintf(tw, "Expanded Command:\t%s\n", out.ExpandedJob.Command)
+	fmt.Fprintf(tw, "Creates Job:\t%t\n", out.CreatesJob)
+	fmt.Fprintf(tw, "Contacts Coordinator:\t%t\n", out.ContactsCoordinator)
+	fmt.Fprintf(tw, "Checks Agent Allowlist:\t%t\n", out.ChecksAgentAllowlist)
+	fmt.Fprintln(tw)
+	fmt.Fprintln(tw, "Args:")
+	fmt.Fprintln(tw, "INDEX\tVALUE")
+	for i, arg := range out.ExpandedJob.Args {
+		fmt.Fprintf(tw, "%d\t%s\n", i+1, strconv.Quote(arg))
+	}
+	return tw.Flush()
+}
+
 func newTabWriter(w io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }
@@ -171,4 +219,18 @@ func formatTemplateParameters(parameters []workflowtemplate.Parameter) string {
 		parts = append(parts, fmt.Sprintf("%s(optional default=%q)", param.Name, defaultValue))
 	}
 	return strings.Join(parts, ",")
+}
+
+func formatTemplateDefault(defaultValue *string) string {
+	if defaultValue == nil {
+		return "-"
+	}
+	return strconv.Quote(*defaultValue)
+}
+
+func formatTemplateArgDescription(arg workflowtemplate.ArgDescription) string {
+	if arg.Type == "literal" {
+		return strconv.Quote(arg.Value)
+	}
+	return arg.Value
 }

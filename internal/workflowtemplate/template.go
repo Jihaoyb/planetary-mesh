@@ -46,9 +46,9 @@ type ExpandedCommand struct {
 }
 
 type ArgDescription struct {
-	Index int
-	Type  string
-	Value string
+	Index int    `json:"index"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
 }
 
 func Load(path string) (Template, error) {
