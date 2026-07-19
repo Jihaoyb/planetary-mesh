@@ -22,23 +22,28 @@ type fakeClient struct {
 
 	command string
 	args    []string
+	calls   int
 	creates int
 	err     error
 }
 
 func (f *fakeClient) Status(context.Context) (protocol.CoordinatorStatusResponse, error) {
+	f.calls++
 	return f.status, f.err
 }
 
 func (f *fakeClient) ListNodes(context.Context) ([]Node, error) {
+	f.calls++
 	return f.nodes, f.err
 }
 
 func (f *fakeClient) ListJobs(context.Context) ([]Job, error) {
+	f.calls++
 	return f.jobs, f.err
 }
 
 func (f *fakeClient) GetJob(_ context.Context, id string) (Job, error) {
+	f.calls++
 	if f.err != nil {
 		return Job{}, f.err
 	}
@@ -49,6 +54,7 @@ func (f *fakeClient) GetJob(_ context.Context, id string) (Job, error) {
 }
 
 func (f *fakeClient) CreateCommandJob(_ context.Context, command string, args []string) (Job, error) {
+	f.calls++
 	f.creates++
 	f.command = command
 	f.args = append([]string(nil), args...)
@@ -160,6 +166,207 @@ func TestRunCommandTemplatesValidateJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRunCommandTemplatesInspectHumanOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "description": "Count text statistics for one agent-local file.",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "description": "Agent-local text file path.", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), client, []string{"templates", "inspect", path}, &out, false); err != nil {
+		t.Fatalf("templates inspect: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"Template:", path, "Status:", "valid", "Name:", "text-stats", "Description:", "Count text statistics for one agent-local file.", "Parameters:", "NAME", "REQUIRED", "DEFAULT", "DESCRIPTION", "input_path", "true", "Agent-local text file path.", "Args:", "INDEX", "TYPE", "VALUE", "1", "param"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, text)
+		}
+	}
+	if client.calls != 0 {
+		t.Fatalf("templates inspect should not contact coordinator, got %d calls", client.calls)
+	}
+}
+
+func TestRunCommandTemplatesInspectJSONOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "description": "Count text statistics for one agent-local file.",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "description": "Agent-local text file path.", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), client, []string{"templates", "inspect", path}, &out, true); err != nil {
+		t.Fatalf("templates inspect JSON: %v", err)
+	}
+
+	var got struct {
+		Valid       bool   `json:"valid"`
+		Path        string `json:"path"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Version     int    `json:"version"`
+		Command     string `json:"command"`
+		Parameters  []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Required    bool   `json:"required"`
+		} `json:"parameters"`
+		Args []struct {
+			Index int    `json:"index"`
+			Type  string `json:"type"`
+			Value string `json:"value"`
+		} `json:"args"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out.String())
+	}
+	if !got.Valid || got.Path != path || got.Name != "text-stats" || got.Description == "" || got.Version != 1 || got.Command != "text-stats" {
+		t.Fatalf("unexpected inspect JSON: %+v", got)
+	}
+	if len(got.Parameters) != 1 || got.Parameters[0].Name != "input_path" || !got.Parameters[0].Required {
+		t.Fatalf("unexpected inspect parameters JSON: %+v", got.Parameters)
+	}
+	if len(got.Args) != 1 || got.Args[0].Index != 1 || got.Args[0].Type != "param" || got.Args[0].Value != "input_path" {
+		t.Fatalf("unexpected inspect args JSON: %+v", got.Args)
+	}
+	if client.calls != 0 {
+		t.Fatalf("templates inspect JSON should not contact coordinator, got %d calls", client.calls)
+	}
+}
+
+func TestRunCommandTemplatesPreviewHumanOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true},
+    {"name": "suffix", "required": false, "default": ""}
+  ],
+  "args": [
+    {"literal": "--suffix"},
+    {"param": "suffix"},
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{"templates", "preview", path, "--set", "input_path=/tmp/input.txt"}, &out, false)
+	if err != nil {
+		t.Fatalf("templates preview: %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"Template:", path, "Status:", "preview", "Name:", "text-stats", "Expanded Job Type:", "command", "Expanded Command:", "text-stats", "Creates Job:", "false", "Contacts Coordinator:", "false", "Checks Agent Allowlist:", "false", "Args:", `"--suffix"`, `""`, `"/tmp/input.txt"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, text)
+		}
+	}
+	if client.calls != 0 || client.creates != 0 {
+		t.Fatalf("templates preview should not contact coordinator or create jobs, calls=%d creates=%d", client.calls, client.creates)
+	}
+}
+
+func TestRunCommandTemplatesPreviewJSONOutput(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true},
+    {"name": "format", "required": false, "default": "plain"}
+  ],
+  "args": [
+    {"literal": "--format"},
+    {"param": "format"},
+    {"param": "input_path"}
+  ]
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{"templates", "preview", path, "--set", "input_path=/tmp/input.txt", "--set", "format=json"}, &out, true)
+	if err != nil {
+		t.Fatalf("templates preview JSON: %v", err)
+	}
+
+	var got struct {
+		Valid       bool   `json:"valid"`
+		Path        string `json:"path"`
+		Name        string `json:"name"`
+		ExpandedJob struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"expanded_job"`
+		CreatesJob           bool `json:"creates_job"`
+		ContactsCoordinator  bool `json:"contacts_coordinator"`
+		ChecksAgentAllowlist bool `json:"checks_agent_allowlist"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out.String())
+	}
+	if !got.Valid || got.Path != path || got.Name != "text-stats" {
+		t.Fatalf("unexpected preview JSON: %+v", got)
+	}
+	if got.ExpandedJob.Type != "command" || got.ExpandedJob.Command != "text-stats" || !equalStringSlices(got.ExpandedJob.Args, []string{"--format", "json", "/tmp/input.txt"}) {
+		t.Fatalf("unexpected expanded job JSON: %+v", got.ExpandedJob)
+	}
+	if got.CreatesJob || got.ContactsCoordinator || got.ChecksAgentAllowlist {
+		t.Fatalf("unexpected preview booleans: %+v", got)
+	}
+	if client.calls != 0 || client.creates != 0 {
+		t.Fatalf("templates preview JSON should not contact coordinator or create jobs, calls=%d creates=%d", client.calls, client.creates)
+	}
+}
+
+func TestRunCommandTemplatesPreviewJSONOutputUsesEmptyArgsArray(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "no-args",
+  "command": "health-check",
+  "args": []
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), client, []string{"templates", "preview", path}, &out, true); err != nil {
+		t.Fatalf("templates preview JSON: %v", err)
+	}
+
+	var got struct {
+		ExpandedJob struct {
+			Args []string `json:"args"`
+		} `json:"expanded_job"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out.String())
+	}
+	if got.ExpandedJob.Args == nil || len(got.ExpandedJob.Args) != 0 {
+		t.Fatalf("expected empty args array, got %s", out.String())
+	}
+	if client.calls != 0 {
+		t.Fatalf("templates preview JSON should not contact coordinator, got %d calls", client.calls)
+	}
+}
+
 func TestRunCommandSubmitTemplate(t *testing.T) {
 	path := writeTemplateFile(t, `{
   "version": 1,
@@ -249,6 +456,61 @@ func TestRunCommandSubmitTemplateValidationErrorsDoNotCreateJobs(t *testing.T) {
 	}
 }
 
+func TestRunCommandTemplatesPreviewValidationErrorsDoNotContactCoordinator(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		args []string
+		want string
+	}{
+		{
+			name: "invalid template",
+			body: `{"version":1,"name":"bad","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path","extra":true}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt"},
+			want: "invalid template",
+		},
+		{
+			name: "missing required parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: nil,
+			want: `missing required parameter "input_path"`,
+		},
+		{
+			name: "unknown set parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt", "--set", "other=x"},
+			want: `unknown parameter "other"`,
+		},
+		{
+			name: "duplicate set parameter",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path=/agent/input.txt", "--set", "input_path=/other.txt"},
+			want: `duplicate --set value for parameter "input_path"`,
+		},
+		{
+			name: "invalid set",
+			body: `{"version":1,"name":"text-stats","command":"text-stats","parameters":[{"name":"input_path","required":true}],"args":[{"param":"input_path"}]}`,
+			args: []string{"--set", "input_path"},
+			want: `invalid --set "input_path": expected name=value`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTemplateFile(t, tc.body)
+			client := &fakeClient{}
+			args := append([]string{"templates", "preview", path}, tc.args...)
+			err := runCommandWithClient(context.Background(), client, args, ioDiscard{}, false)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if client.calls != 0 || client.creates != 0 {
+				t.Fatalf("preview validation error should not contact coordinator or create jobs, calls=%d creates=%d", client.calls, client.creates)
+			}
+		})
+	}
+}
+
 func TestRunETemplatesValidateDoesNotRequireClientConfig(t *testing.T) {
 	clearPMCTLEnv(t)
 	t.Setenv("PMCTL_TLS_CA_FILE", filepath.Join(t.TempDir(), "missing-ca.pem"))
@@ -270,6 +532,38 @@ func TestRunETemplatesValidateDoesNotRequireClientConfig(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"valid": true`) {
 		t.Fatalf("expected validation JSON, got:\n%s", out.String())
+	}
+}
+
+func TestRunETemplatesInspectAndPreviewDoNotRequireClientConfig(t *testing.T) {
+	clearPMCTLEnv(t)
+	t.Setenv("PMCTL_TLS_CA_FILE", filepath.Join(t.TempDir(), "missing-ca.pem"))
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "parameters": [
+    {"name": "input_path", "required": true}
+  ],
+  "args": [
+    {"param": "input_path"}
+  ]
+}`)
+
+	var out bytes.Buffer
+	if err := RunE(context.Background(), []string{"--json", "templates", "inspect", path}, &out); err != nil {
+		t.Fatalf("RunE templates inspect returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"name": "text-stats"`) {
+		t.Fatalf("expected inspect JSON, got:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := RunE(context.Background(), []string{"--json", "templates", "preview", path, "--set", "input_path=/agent/input.txt"}, &out); err != nil {
+		t.Fatalf("RunE templates preview returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"creates_job": false`) || !strings.Contains(out.String(), `"/agent/input.txt"`) {
+		t.Fatalf("expected preview JSON, got:\n%s", out.String())
 	}
 }
 
@@ -313,6 +607,9 @@ func TestRunCommandTemplateUsageErrors(t *testing.T) {
 	tests := [][]string{
 		{"templates"},
 		{"templates", "validate"},
+		{"templates", "inspect"},
+		{"templates", "preview"},
+		{"templates", "preview", "template.json", "unexpected"},
 		{"submit", "template"},
 		{"submit", "template", "template.json", "unexpected"},
 	}

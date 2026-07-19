@@ -134,7 +134,7 @@ Current shape:
 - `examples/demo.sh` for in-memory smoke workflow
 - `examples/postgres_smoke.sh` for opt-in durable Postgres smoke workflow
 - `examples/external_workload_smoke.sh` for the tracked external workload path
-- `examples/template_smoke.sh` for the tracked template submission path
+- `examples/template_smoke.sh` for the tracked template preview/submission path
 - `tools/releasebuild` for pre-release local binary artifact generation
 - `examples/release_smoke.sh` for installed-binary validation of coordinator,
   agent, `pmctl`, `text-stats`, and selected templates
@@ -194,8 +194,8 @@ Current rules:
   wrapper executables; `examples/workloads/text-stats` is the tracked example
   of this pattern
 - ADR 0015's JSON template model is implemented in `pmctl`: templates validate
-  local JSON files and expand operator parameters into existing logical command
-  jobs
+  and inspect local JSON files, preview operator parameters as existing logical
+  command jobs, and submit through the existing command-job path
 - timeout is fixed by agent config, default `30s`
 - stdout/stderr are captured separately and capped at `1 MiB` each
 - non-zero command exit is terminal
@@ -420,13 +420,16 @@ Current commands:
 - `pmctl jobs inspect <job-id>`
 - `pmctl submit command <command> [args...]`
 - `pmctl templates validate <template-file>`
+- `pmctl templates inspect <template-file>`
+- `pmctl templates preview <template-file> --set name=value`
 - `pmctl submit template <template-file> --set name=value`
 
 `pmctl nodes list` includes node state, active execution count, capabilities,
 address, last seen time, and certificate fingerprint. JSON output includes the
-same node metadata for automation. Template validation also supports human and
-JSON output. Template submission returns the same job output as direct command
-submission.
+same node metadata for automation. Template validation, inspection, and preview
+support human and JSON output. Template preview is local-only and does not
+create jobs, contact the coordinator, or check agent allowlists. Template
+submission returns the same job output as direct command submission.
 
 Future decisions:
 

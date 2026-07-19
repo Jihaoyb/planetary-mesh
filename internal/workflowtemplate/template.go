@@ -45,6 +45,12 @@ type ExpandedCommand struct {
 	Args    []string
 }
 
+type ArgDescription struct {
+	Index int    `json:"index"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
 func Load(path string) (Template, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -173,6 +179,26 @@ func ParameterNames(tmpl Template) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func DescribeArgs(tmpl Template) ([]ArgDescription, error) {
+	if err := Validate(tmpl); err != nil {
+		return nil, err
+	}
+
+	args := make([]ArgDescription, 0, len(tmpl.Args))
+	for i, token := range tmpl.Args {
+		desc := ArgDescription{Index: i + 1}
+		if token.Literal != nil {
+			desc.Type = "literal"
+			desc.Value = *token.Literal
+		} else {
+			desc.Type = "param"
+			desc.Value = *token.Param
+		}
+		args = append(args, desc)
+	}
+	return args, nil
 }
 
 func validateCommandKey(command string) error {

@@ -251,6 +251,21 @@ if ! require_json_contains "${TEMPLATE_JSON}" '"valid": true,' ||
 fi
 
 echo
+echo "Previewing installed text-stats template"
+PREVIEW_JSON="$(pmctl --json templates preview "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
+if ! require_json_contains "${PREVIEW_JSON}" '"valid": true,' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"type": "command",' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"command": "text-stats",' ||
+  ! require_json_contains "${PREVIEW_JSON}" "\"${INPUT_PATH}\"" ||
+  ! require_json_contains "${PREVIEW_JSON}" '"creates_job": false,' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"contacts_coordinator": false,' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"checks_agent_allowlist": false'; then
+  echo "Unexpected installed template preview result" >&2
+  echo "Logs are in ${LOG_DIR}" >&2
+  exit 1
+fi
+
+echo
 echo "Submitting installed text-stats template"
 JOB_JSON="$(pmctl --json submit template "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
 JOB_ID="$(json_string_field "${JOB_JSON}" "id")"

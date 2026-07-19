@@ -38,7 +38,7 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(remaining) == 0 {
 		return usageError("missing command")
 	}
-	if isLocalTemplateValidation(remaining) {
+	if isLocalTemplateCommand(remaining) {
 		return runCommandWithClient(ctx, nil, remaining, stdout, jsonOut)
 	}
 
@@ -61,7 +61,7 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 	return runCommand(ctx, client, remaining, stdout, jsonOut)
 }
 
-func isLocalTemplateValidation(args []string) bool {
+func isLocalTemplateCommand(args []string) bool {
 	return len(args) > 0 && args[0] == "templates"
 }
 
@@ -125,18 +125,7 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 		}
 		return usageError("usage: pmctl jobs list | pmctl jobs inspect <job-id>")
 	case "templates":
-		if len(args) != 3 || args[1] != "validate" {
-			return usageError("usage: pmctl templates validate <template-file>")
-		}
-		tmpl, err := loadTemplate(args[2])
-		if err != nil {
-			return err
-		}
-		return writeValue(stdout, templateValidationOutput{
-			Valid:    true,
-			Path:     args[2],
-			Template: tmpl,
-		}, jsonOut, writeTemplateValidation)
+		return runTemplateCommand(args[1:], stdout, jsonOut)
 	case "submit":
 		switch {
 		case len(args) >= 3 && args[1] == "command":
@@ -171,6 +160,57 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 	}
 }
 
+func runTemplateCommand(args []string, stdout io.Writer, jsonOut bool) error {
+	if len(args) == 0 {
+		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> --set name=value [--set name=value...]")
+	}
+
+	switch args[0] {
+	case "validate":
+		if len(args) != 2 {
+			return usageError("usage: pmctl templates validate <template-file>")
+		}
+		tmpl, err := loadTemplate(args[1])
+		if err != nil {
+			return err
+		}
+		return writeValue(stdout, templateValidationOutput{
+			Valid:    true,
+			Path:     args[1],
+			Template: tmpl,
+		}, jsonOut, writeTemplateValidation)
+	case "inspect":
+		if len(args) != 2 {
+			return usageError("usage: pmctl templates inspect <template-file>")
+		}
+		tmpl, err := loadTemplate(args[1])
+		if err != nil {
+			return err
+		}
+		describedArgs, err := workflowtemplate.DescribeArgs(tmpl)
+		if err != nil {
+			return fmt.Errorf("invalid template %s: %w", args[1], err)
+		}
+		return writeValue(stdout, newTemplateInspectionOutput(args[1], tmpl, describedArgs), jsonOut, writeTemplateInspection)
+	case "preview":
+		preview, err := parseTemplatePreview(args[1:])
+		if err != nil {
+			return err
+		}
+		tmpl, err := loadTemplate(preview.path)
+		if err != nil {
+			return err
+		}
+		expanded, err := workflowtemplate.Expand(tmpl, preview.values)
+		if err != nil {
+			return fmt.Errorf("invalid template parameters for %s: %w", preview.path, err)
+		}
+		return writeValue(stdout, newTemplatePreviewOutput(preview.path, tmpl, expanded), jsonOut, writeTemplatePreview)
+	default:
+		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> --set name=value [--set name=value...]")
+	}
+}
+
 func writeValue[T any](w io.Writer, value T, jsonOut bool, writeHuman func(io.Writer, T) error) error {
 	if jsonOut {
 		enc := json.NewEncoder(w)
@@ -186,7 +226,34 @@ type templateValidationOutput struct {
 	Template workflowtemplate.Template `json:"template"`
 }
 
-type templateSubmission struct {
+type templateInspectionOutput struct {
+	Valid       bool                              `json:"valid"`
+	Path        string                            `json:"path"`
+	Name        string                            `json:"name"`
+	Description string                            `json:"description"`
+	Version     int                               `json:"version"`
+	Command     string                            `json:"command"`
+	Parameters  []workflowtemplate.Parameter      `json:"parameters"`
+	Args        []workflowtemplate.ArgDescription `json:"args"`
+}
+
+type templatePreviewOutput struct {
+	Valid                bool               `json:"valid"`
+	Path                 string             `json:"path"`
+	Name                 string             `json:"name"`
+	ExpandedJob          expandedCommandJob `json:"expanded_job"`
+	CreatesJob           bool               `json:"creates_job"`
+	ContactsCoordinator  bool               `json:"contacts_coordinator"`
+	ChecksAgentAllowlist bool               `json:"checks_agent_allowlist"`
+}
+
+type expandedCommandJob struct {
+	Type    string   `json:"type"`
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+type templateParameters struct {
 	path   string
 	values map[string]string
 }
@@ -202,38 +269,83 @@ func (f *setFlags) Set(value string) error {
 	return nil
 }
 
-func parseTemplateSubmission(args []string) (templateSubmission, error) {
+func parseTemplateSubmission(args []string) (templateParameters, error) {
+	return parseTemplateParameters(args, "usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+}
+
+func parseTemplatePreview(args []string) (templateParameters, error) {
+	return parseTemplateParameters(args, "usage: pmctl templates preview <template-file> --set name=value [--set name=value...]")
+}
+
+func parseTemplateParameters(args []string, usage string) (templateParameters, error) {
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
-		return templateSubmission{}, usageError("usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+		return templateParameters{}, usageError(usage)
 	}
 
-	fs := flag.NewFlagSet("pmctl submit template", flag.ContinueOnError)
+	fs := flag.NewFlagSet("pmctl template parameters", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var raw setFlags
 	fs.Var(&raw, "set", "template parameter value name=value")
 	if err := fs.Parse(args[1:]); err != nil {
-		return templateSubmission{}, err
+		return templateParameters{}, err
 	}
 	if fs.NArg() != 0 {
-		return templateSubmission{}, usageError("usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+		return templateParameters{}, usageError(usage)
 	}
 
 	values := make(map[string]string, len(raw))
 	for _, entry := range raw {
 		name, value, ok := strings.Cut(entry, "=")
 		if !ok || name == "" {
-			return templateSubmission{}, fmt.Errorf("invalid --set %q: expected name=value", entry)
+			return templateParameters{}, fmt.Errorf("invalid --set %q: expected name=value", entry)
 		}
 		if _, exists := values[name]; exists {
-			return templateSubmission{}, fmt.Errorf("duplicate --set value for parameter %q", name)
+			return templateParameters{}, fmt.Errorf("duplicate --set value for parameter %q", name)
 		}
 		values[name] = value
 	}
 
-	return templateSubmission{
+	return templateParameters{
 		path:   args[0],
 		values: values,
 	}, nil
+}
+
+func newTemplateInspectionOutput(path string, tmpl workflowtemplate.Template, args []workflowtemplate.ArgDescription) templateInspectionOutput {
+	parameters := append([]workflowtemplate.Parameter(nil), tmpl.Parameters...)
+	if parameters == nil {
+		parameters = []workflowtemplate.Parameter{}
+	}
+	describedArgs := append([]workflowtemplate.ArgDescription(nil), args...)
+	if describedArgs == nil {
+		describedArgs = []workflowtemplate.ArgDescription{}
+	}
+	return templateInspectionOutput{
+		Valid:       true,
+		Path:        path,
+		Name:        tmpl.Name,
+		Description: tmpl.Description,
+		Version:     tmpl.Version,
+		Command:     tmpl.Command,
+		Parameters:  parameters,
+		Args:        describedArgs,
+	}
+}
+
+func newTemplatePreviewOutput(path string, tmpl workflowtemplate.Template, expanded workflowtemplate.ExpandedCommand) templatePreviewOutput {
+	return templatePreviewOutput{
+		Valid: true,
+		Path:  path,
+		Name:  tmpl.Name,
+		ExpandedJob: expandedCommandJob{
+			Type:    "command",
+			Command: expanded.Command,
+			Args:    append([]string{}, expanded.Args...),
+		},
+		CreatesJob:           false,
+		ContactsCoordinator:  false,
+		ChecksAgentAllowlist: false,
+	}
 }
 
 func loadTemplate(path string) (workflowtemplate.Template, error) {

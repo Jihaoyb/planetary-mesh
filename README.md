@@ -14,10 +14,10 @@ shared compute scenarios.
 - **Stage**: Phase 2 productized private mesh work has started with
   source-based onboarding, a practical external workload example, and a
   pre-release local binary artifact/install-smoke workflow, plus implemented
-  `pmctl` workflow template validation/submission for repeatable private
-  wrapper invocations. Phase 1 closed after the Milestone 20 readiness review,
-  Milestone 18 real multi-device LAN validation, and Milestone 19 portable
-  agent validation built-ins.
+  `pmctl` workflow template validation, inspection, preview, and submission for
+  repeatable private wrapper invocations. Phase 1 closed after the Milestone 20
+  readiness review, Milestone 18 real multi-device LAN validation, and
+  Milestone 19 portable agent validation built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -31,7 +31,7 @@ shared compute scenarios.
   from a bounded in-memory cache.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
   inspection, command job submission, and client-side workflow template
-  validation/submission.
+  validation/inspection/preview/submission.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
@@ -60,7 +60,7 @@ shared compute scenarios.
 - Tracked external `text-stats` workload example and local smoke script for the
   current allowlisted wrapper/executable workflow path.
 - Tracked `text-stats` workflow template example, local template smoke script,
-  and `pmctl` template validation/submission commands.
+  and `pmctl` template validation/inspection/preview/submission commands.
 - Pre-release local release artifact builder and installed-binary smoke script
   for coordinator, agent, `pmctl`, `text-stats`, and selected templates across
   macOS, Linux, and Windows artifact expectations.
@@ -128,10 +128,12 @@ source-based first-run onboarding path. Milestone 22 added a tracked external
 Milestone 23 added pre-release local artifact generation and an installed-binary
 smoke workflow. Milestone 24 accepted the private workflow template model
 without changing runtime behavior. Milestone 25 implemented that model as
-`pmctl` client-side validation/submission to existing command jobs. Remaining
-gaps such as production packaging, scheduler policy, cancellation, generated API
-contracts, richer operator UX, coordinator-owned template registries, and
-stronger isolation are Phase 2 or later backlog unless explicitly reclassified.
+`pmctl` client-side validation/submission to existing command jobs. Milestone 26
+added local template inspection and preview before submission. Remaining gaps
+such as production packaging, scheduler policy, cancellation, generated API
+contracts, richer operator UX beyond the current CLI, coordinator-owned template
+registries, and stronger isolation are Phase 2 or later backlog unless
+explicitly reclassified.
 
 ## Architecture Summary
 
@@ -420,6 +422,8 @@ pmctl nodes list
 pmctl jobs list
 pmctl submit command echo hello mesh
 pmctl templates validate examples/templates/text-stats.pmtemplate.json
+pmctl templates inspect examples/templates/text-stats.pmtemplate.json
+pmctl templates preview examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 pmctl submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
 pmctl jobs inspect job-1
 ```
