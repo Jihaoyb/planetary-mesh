@@ -340,7 +340,7 @@ func newTemplatePreviewOutput(path string, tmpl workflowtemplate.Template, expan
 		ExpandedJob: expandedCommandJob{
 			Type:    "command",
 			Command: expanded.Command,
-			Args:    append([]string(nil), expanded.Args...),
+			Args:    append([]string{}, expanded.Args...),
 		},
 		CreatesJob:           false,
 		ContactsCoordinator:  false,

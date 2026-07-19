@@ -337,6 +337,36 @@ func TestRunCommandTemplatesPreviewJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRunCommandTemplatesPreviewJSONOutputUsesEmptyArgsArray(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "no-args",
+  "command": "health-check",
+  "args": []
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	if err := runCommandWithClient(context.Background(), client, []string{"templates", "preview", path}, &out, true); err != nil {
+		t.Fatalf("templates preview JSON: %v", err)
+	}
+
+	var got struct {
+		ExpandedJob struct {
+			Args []string `json:"args"`
+		} `json:"expanded_job"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out.String())
+	}
+	if got.ExpandedJob.Args == nil || len(got.ExpandedJob.Args) != 0 {
+		t.Fatalf("expected empty args array, got %s", out.String())
+	}
+	if client.calls != 0 {
+		t.Fatalf("templates preview JSON should not contact coordinator, got %d calls", client.calls)
+	}
+}
+
 func TestRunCommandSubmitTemplate(t *testing.T) {
 	path := writeTemplateFile(t, `{
   "version": 1,
