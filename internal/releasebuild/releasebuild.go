@@ -43,6 +43,10 @@ var plannedCopies = []plannedCopy{
 	{Source: "docs/runbooks/local-release-install.md", Destination: "docs/runbooks/local-release-install.md", Optional: true},
 	{Source: "docs/runbooks/practical-workload-recipe.md", Destination: "docs/runbooks/practical-workload-recipe.md"},
 	{Source: "docs/runbooks/command-execution-safety.md", Destination: "docs/runbooks/command-execution-safety.md"},
+	{Source: "packaging/linux/install-linux.sh", Destination: "install/install-linux.sh", GOOS: "linux"},
+	{Source: "packaging/linux/uninstall-linux.sh", Destination: "install/uninstall-linux.sh", GOOS: "linux"},
+	{Source: "packaging/linux/systemd/planetary-mesh-coordinator.service", Destination: "install/systemd/planetary-mesh-coordinator.service", GOOS: "linux"},
+	{Source: "packaging/linux/systemd/planetary-mesh-agent.service", Destination: "install/systemd/planetary-mesh-agent.service", GOOS: "linux"},
 }
 
 type Target struct {
@@ -100,6 +104,7 @@ type plannedCopy struct {
 	Source      string
 	Destination string
 	Optional    bool
+	GOOS        string
 }
 
 func DefaultTargets() []Target {
@@ -170,6 +175,9 @@ func Plan(opts Options) ([]PlanArtifact, error) {
 			})
 		}
 		for _, copySpec := range plannedCopies {
+			if copySpec.GOOS != "" && copySpec.GOOS != target.GOOS {
+				continue
+			}
 			artifact.Copies = append(artifact.Copies, PlannedCopy{
 				Source:      filepath.Join(opts.RootDir, filepath.FromSlash(copySpec.Source)),
 				Destination: filepath.Join(artifact.Directory, filepath.FromSlash(copySpec.Destination)),

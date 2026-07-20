@@ -65,6 +65,10 @@ func TestPlanArtifactNamesAndBinaryLayout(t *testing.T) {
 	requirePlannedBinary(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "bin", "coordinator"))
 	requirePlannedBinary(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "workloads", "text-stats"))
 	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "templates", "text-stats.pmtemplate.json"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "install-linux.sh"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "uninstall-linux.sh"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "systemd", "planetary-mesh-coordinator.service"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "systemd", "planetary-mesh-agent.service"))
 
 	windows := artifacts[1]
 	if windows.DirectoryName != "planetary-mesh-dev-windows-amd64" || windows.ArchiveName != "planetary-mesh-dev-windows-amd64.zip" {
@@ -74,6 +78,7 @@ func TestPlanArtifactNamesAndBinaryLayout(t *testing.T) {
 	requirePlannedBinary(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "workloads", "text-stats.exe"))
 	requirePlannedCopy(t, windows, filepath.Join(root, "config", "agent-1.env.example"))
 	requirePlannedCopyDestination(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "templates", "README.md"))
+	requireNoPlannedCopyDestination(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "install", "install-linux.sh"))
 }
 
 func TestPlanRejectsUnsafeVersion(t *testing.T) {
@@ -125,4 +130,13 @@ func requirePlannedCopyDestination(t *testing.T, artifact PlanArtifact, destinat
 		}
 	}
 	t.Fatalf("missing planned copy destination %q in %+v", destination, artifact.Copies)
+}
+
+func requireNoPlannedCopyDestination(t *testing.T, artifact PlanArtifact, destination string) {
+	t.Helper()
+	for _, copySpec := range artifact.Copies {
+		if copySpec.Destination == destination {
+			t.Fatalf("unexpected planned copy destination %q in %+v", destination, artifact.Copies)
+		}
+	}
 }
