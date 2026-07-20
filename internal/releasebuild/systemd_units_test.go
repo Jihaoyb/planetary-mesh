@@ -69,7 +69,7 @@ func TestLinuxSystemdUnits(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", path, err)
 			}
-			text := string(contents)
+			text := strings.ReplaceAll(string(contents), "\r\n", "\n")
 			for _, line := range append(sharedRequired, tt.required...) {
 				if !strings.Contains(text, line+"\n") {
 					t.Errorf("%s is missing %q", path, line)
