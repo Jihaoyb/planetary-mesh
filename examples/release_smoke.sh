@@ -206,6 +206,12 @@ require_executable "${AGENT_BIN}"
 require_executable "${PMCTL_BIN}"
 require_executable "${WORKLOAD_BIN}"
 require_file "${TEMPLATE_PATH}"
+if [[ "${HOST_GOOS}" == "linux" ]]; then
+  require_executable "${INSTALL_DIR}/install/install-linux.sh"
+  require_executable "${INSTALL_DIR}/install/uninstall-linux.sh"
+  require_file "${INSTALL_DIR}/install/systemd/planetary-mesh-coordinator.service"
+  require_file "${INSTALL_DIR}/install/systemd/planetary-mesh-agent.service"
+fi
 if [[ ! -f "${ARCHIVE_PATH}" ]]; then
   echo "Expected archive at ${ARCHIVE_PATH}" >&2
   exit 1

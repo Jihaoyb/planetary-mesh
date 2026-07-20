@@ -59,6 +59,12 @@ jobs:
       - name: Run vet
         run: go vet ./...
 
+      - name: Check Linux packaging shell syntax
+        if: runner.os == 'Linux'
+        run: |
+          bash -n packaging/linux/*.sh
+          bash -n examples/*.sh
+
       - name: Build local release artifacts
         if: runner.os == 'Linux'
         run: go run ./tools/releasebuild --out "${RUNNER_TEMP}/planetary-mesh-dist" --version dev
@@ -66,3 +72,7 @@ jobs:
       - name: Run release smoke
         if: runner.os == 'Linux'
         run: GOCACHE="${RUNNER_TEMP}/planetary-mesh-gocache-release" ./examples/release_smoke.sh
+
+      - name: Run Linux service install and systemd smoke
+        if: runner.os == 'Linux'
+        run: GOCACHE="${RUNNER_TEMP}/planetary-mesh-gocache-linux-service" ./examples/linux_service_install_smoke.sh
