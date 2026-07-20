@@ -1,0 +1,34 @@
+[Unit]
+Description=Planetary Mesh Coordinator
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=planetary-mesh-coordinator
+Group=planetary-mesh-coordinator
+WorkingDirectory=/var/lib/planetary-mesh/coordinator
+ExecStart=/opt/planetary-mesh/bin/coordinator --config /etc/planetary-mesh/coordinator.env
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+KillMode=control-group
+SendSIGKILL=yes
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
