@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 26 `pmctl` template preview and operator
-workflow polish.
+Current `main` is after Milestone 27 Linux managed-service installation and
+lifecycle validation.
 
-Milestones 1 through 26 are complete:
+Milestones 1 through 27 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -72,19 +72,24 @@ Milestones 1 through 26 are complete:
   inspection, preview, and submission to existing command jobs, plus tracked
   `text-stats` example template, template smoke, and release-layout template
   copy
+- pre-release Linux/systemd coordinator and agent installation from release
+  archives with stable service identities, fixed managed paths, safe
+  config-preserving removal, temporary-root smoke coverage, and Linux-only
+  service assets
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
 uses a bounded grace window before failing unreconciled startup-running jobs.
 Phase 1 is closed and Phase 2 has started with source-based first-run
-onboarding, a practical external workload pattern, and a pre-release local
-binary artifact/install-smoke path, and `pmctl` templates with local inspection
-and preview for repeatable private wrapper invocations. The next work should be
-explicitly planned Phase 2 productized private mesh work such as production
-packaging, richer operator UX beyond the current CLI, security hardening,
-scheduler policy, generated API contract planning, or certificate helper
-planning. Do not jump to marketplace, payment, public-node, shared-pool, or
-remote-node product work without explicit planning and an accepted direction.
+onboarding, a practical external workload pattern, a pre-release local binary
+artifact/install-smoke path, `pmctl` templates with local inspection and
+preview, and pre-release Linux/systemd service installation. The next work
+should be explicitly planned Phase 2 productized private mesh work such as
+signed or package-managed distribution, richer operator UX beyond the current
+CLI, security hardening, scheduler policy, generated API contract planning, or
+certificate helper planning. Do not jump to marketplace, payment, public-node,
+shared-pool, or remote-node product work without explicit planning and an
+accepted direction.
 
 ## Canonical Context
 
@@ -106,6 +111,8 @@ changes:
   from local smoke to two-machine LAN operation
 - `docs/runbooks/local-release-install.md` - pre-release local binary artifact
   layout and installed-binary smoke workflow
+- `docs/runbooks/linux-service-install.md` - pre-release Linux/systemd service
+  installation, operation, removal, and manual upgrade/rollback workflow
 - `docs/runbooks/practical-workload-recipe.md` - current external
   executable/wrapper workload pattern
 - `docs/runbooks/workflow-templates.md` - current `pmctl` client-side template
@@ -156,6 +163,7 @@ planetary-mesh/
   config/              # Tracked example env-style config files
   docs/                # Roadmap, architecture, product docs, runbooks, ADRs
   examples/            # Smoke demos and tracked workload examples
+  packaging/linux/     # Linux service units and install/uninstall scripts
   tools/               # Development/release helper commands
   compose.yaml         # Local coordinator + Postgres + agents demo
 ```
@@ -199,10 +207,13 @@ GOCACHE=/private/tmp/planetary-mesh-gocache-test go test ./...
 GOCACHE=/private/tmp/planetary-mesh-gocache-vet go vet ./...
 ```
 
-Release/install smoke gate:
+Release/install smoke gates:
 
 ```bash
 GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh
+GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service ./examples/linux_service_install_smoke.sh
+bash -n packaging/linux/*.sh
+bash -n examples/*.sh
 ```
 
 Do not commit `.gocache/`.
@@ -381,8 +392,8 @@ Allowed near-term direction after Phase 1 closure is explicitly scoped
 productized private mesh work:
 
 - improved install/onboarding workflow
-- production packaging or service-install follow-up beyond the current
-  pre-release local artifacts
+- signed or package-managed distribution beyond the current pre-release local
+  artifacts and Linux/systemd installer
 - richer CLI/operator UX or scoped dashboard planning
 - certificate/onboarding helper planning
 - workflow/job template planning for approved private actions layered on

@@ -15,10 +15,13 @@ bounded output capture, a tracked external `text-stats` workload example,
 optional Postgres persistence, opt-in mTLS, node allowlists, metrics, local
 smoke workflows, pre-release local binary artifact/install-smoke tooling, and
 `pmctl` client-side workflow template validation, inspection, preview, and
-submission.
+submission. Linux release archives also provide a pre-release systemd path for
+installing coordinator and agent independently under stable unprivileged
+service identities.
 
 It is not a public marketplace, production multi-tenant compute platform,
-signed installer, or package-manager distributed product.
+signed distribution, package-manager distributed product, automatic-update
+system, or production-certified installer.
 
 ## Target Early Users
 
@@ -131,6 +134,7 @@ Planetary Mesh is not currently:
 - a GPU/storage/bandwidth marketplace
 - production-ready secure multi-tenant infrastructure
 - a signed/package-manager distributed application
+- an automatically upgraded or cross-platform managed-service product
 
 ## Monetization Hypothesis
 

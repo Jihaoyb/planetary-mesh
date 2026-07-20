@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 26 `pmctl` template preview and operator
-  workflow polish
+- Baseline: `main` after Milestone 27 Linux managed-service installation and
+  lifecycle validation
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -75,6 +75,9 @@ Implemented capability and accepted planning baseline:
 - local release install runbook for dev artifact names, install layout,
   installed-binary startup, `text-stats` template validation/preview/submission,
   cleanup, and failure handling
+- Linux release-only systemd assets, role-specific managed-service installers,
+  stable unprivileged service identities, config-preserving uninstall, and
+  non-mutating temporary-root lifecycle validation
 - thin CLI for status, node/job listing, job inspection, command submission,
   and client-side template validation/inspection/preview/submission, including
   human and JSON output where supported
@@ -85,7 +88,7 @@ Implemented capability and accepted planning baseline:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-26
+## Completed Baseline / Milestones 1-27
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
@@ -94,9 +97,11 @@ wrapper/executable workload path repeatable. Milestone 23 added pre-release
 local binary artifact generation and installed-binary smoke validation.
 Milestone 24 accepted the private workflow template model without changing
 runtime behavior. Milestone 25 implemented that model as `pmctl` client-side
-expansion to existing command jobs. Milestone 26 added local template inspection
-and preview before submission. This history remains useful because it explains
-why the current baseline is intentionally narrow.
+expansion to existing command jobs. Milestone 26 added local template
+inspection and preview before submission. Milestone 27 added pre-release
+Linux/systemd managed-service installation and lifecycle validation without
+changing runtime behavior. This history remains useful because it explains why
+the current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -585,10 +590,11 @@ Status: started with Milestone 21 source-based first-run onboarding, continued
 with Milestone 22 practical external workload documentation, Milestone 23
 pre-release local release build/install smoke, and Milestone 24 private workflow
 template model planning. Milestone 25 implemented `pmctl` template
-validation/submission, and Milestone 26 added local template inspection and
-preview. Phase 2 work should still be selected as explicit, narrow milestones
-and should not imply remote mesh, shared pool, marketplace, payment, or
-arbitrary untrusted workload support.
+validation/submission, Milestone 26 added local template inspection and
+preview, and Milestone 27 added pre-release Linux/systemd coordinator and agent
+installation. Phase 2 work should still be selected as explicit, narrow
+milestones and should not imply remote mesh, shared pool, marketplace, payment,
+or arbitrary untrusted workload support.
 
 ### Milestone 21: First-Run Private Mesh Onboarding
 
@@ -765,6 +771,41 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 27: Linux Managed Service Installation and Lifecycle Validation
+
+Goal: let operators install and run coordinator and agent independently as
+always-on Linux/systemd services from existing pre-release Linux archives.
+
+Completed outcomes:
+
+- Linux archives include role-specific installer and uninstaller scripts plus
+  coordinator and agent systemd units; macOS and Windows layouts remain
+  manual-start and exclude those assets
+- fixed managed host paths, separate stable system users/groups, copied
+  `0640` role configuration, role TLS and state directories, and journald logs
+- fresh installation enables, starts, and health-checks by default, while
+  `--no-start` and temporary-root modes support staging and non-mutating tests
+- existing installation/config conflicts refuse safely, default uninstall
+  preserves config/data/identity, and conservative purge removes only empty,
+  installer-managed state
+- automatic in-place upgrade and rollback are intentionally absent; operators
+  use uninstall with preserved configuration and `--reuse-config`
+- service-install smoke covers Linux archive assets, independent role layout,
+  permissions, config safety, reuse, rollback injection, uninstall, and purge
+  without mutating real users, systemd, `/etc`, `/opt`, or `/usr`
+- systemd units receive static verification where tooling is available; real
+  systemd activation remains explicitly Not run until a disposable Linux host
+  or VM is available
+- HTTP/JSON v0, `X-Planetary-Protocol-Version: 1`, endpoints, public Go
+  packages, job states, execution semantics, scheduling, nodes/jobs-only
+  storage, Postgres schema readiness version `2`, and manual mTLS lifecycle are
+  unchanged
+- service hardening reduces daemon privileges but is not strong workload
+  sandboxing; trusted-host allowlisted direct execution without a shell remains
+  authoritative
+
+Status: complete
+
 Potential work:
 
 - richer CLI/operator UX or dashboard
@@ -772,7 +813,8 @@ Potential work:
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
 - logs UX
-- production packaging, signing, service install examples, or production image
+- signed or package-manager distribution, automatic upgrade, non-Linux service
+  installers, or production image
 - demo pipeline such as OCR, transcription, embeddings, image conversion, or
   developer batch jobs
 - private deployment runbooks

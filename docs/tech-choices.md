@@ -138,6 +138,14 @@ Current shape:
 - `tools/releasebuild` for pre-release local binary artifact generation
 - `examples/release_smoke.sh` for installed-binary validation of coordinator,
   agent, `pmctl`, `text-stats`, and selected templates
+- Linux release archives carry fixed-path systemd units and role-specific
+  install/uninstall scripts; install copies configuration into managed `/etc`
+  paths and uses separate stable unprivileged service identities
+- `examples/linux_service_install_smoke.sh` validates Linux service assets,
+  config safety, rollback, reuse, and removal through a temporary filesystem
+  root without mutating host users or systemd
+- coordinator and agent service logs use existing JSON stdout/stderr through
+  journald; macOS and Windows release archives remain manual-start
 - `examples/workloads/text-stats` as a small cross-platform external helper
 - `examples/templates/text-stats.pmtemplate.json` as a client-side `pmctl`
   template over the `text-stats` logical command key
@@ -153,8 +161,8 @@ Future decisions:
 - production Dockerfile/image
 - signed release packaging
 - package-manager distribution
-- service install scripts
-- systemd or launchd service examples
+- automatic upgrade and release rollback
+- launchd and Windows service installation
 - Kubernetes-style orchestration, if ever needed
 
 Kubernetes is not a current product dependency or target. The current wedge is

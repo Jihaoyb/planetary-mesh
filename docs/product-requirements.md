@@ -43,7 +43,9 @@ with `examples/workloads/text-stats` as the first tracked example. Milestone 25
 implements the ADR 0015 client-side `pmctl` template layer over those logical
 command keys without changing coordinator or agent runtime behavior. Milestone
 26 adds local template inspection and preview before submission while preserving
-that runtime boundary.
+that runtime boundary. Milestone 27 adds independent Linux/systemd coordinator
+and agent installation from pre-release archives while preserving protocol,
+storage, execution, and job-lifecycle behavior.
 
 ## Non-goals
 
@@ -91,6 +93,10 @@ Practical MVP success means:
   `pmctl`, `text-stats`, and selected templates, then run an installed-binary
   smoke workflow that verifies `text-stats` template preview and submission
   through the mesh
+- a Linux user can install coordinator and agent independently from an
+  extracted archive, operate them with systemd/journald, preserve managed
+  configuration during normal removal, and validate installer behavior without
+  mutating the developer machine
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -113,9 +119,11 @@ and wrapper-pattern runbook. Milestone 23 added pre-release local binary
 artifacts and installed-binary smoke validation. Milestone 24 accepted the
 private workflow template model, and Milestone 25 implemented it in `pmctl`.
 Milestone 26 added local template inspection and preview before submission.
-These improve fresh-checkout usability, the real private workload path, local
-install confidence, and repeatable template operation, but they are not a
-production installer, signed release, package-manager distribution, production
+Milestone 27 added pre-release Linux/systemd managed-service installation and
+lifecycle validation. These improve fresh-checkout usability, the real private
+workload path, local install confidence, repeatable template operation, and
+always-on Linux operation, but they are not signed or package-manager
+distribution, automatic upgrade, non-Linux service installers, a production
 image, dashboard, remote private mesh, file-transfer layer, coordinator-owned
 template registry, or workflow engine.
 

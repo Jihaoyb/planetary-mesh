@@ -13,11 +13,12 @@ shared compute scenarios.
 
 - **Stage**: Phase 2 productized private mesh work has started with
   source-based onboarding, a practical external workload example, and a
-  pre-release local binary artifact/install-smoke workflow, plus implemented
-  `pmctl` workflow template validation, inspection, preview, and submission for
-  repeatable private wrapper invocations. Phase 1 closed after the Milestone 20
-  readiness review, Milestone 18 real multi-device LAN validation, and
-  Milestone 19 portable agent validation built-ins.
+  pre-release local binary artifact/install-smoke workflow, implemented
+  `pmctl` workflow template validation, inspection, preview, and submission,
+  and a pre-release Linux/systemd managed-service path for coordinator and
+  agent. Phase 1 closed after the Milestone 20 readiness review, Milestone 18
+  real multi-device LAN validation, and Milestone 19 portable agent validation
+  built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
   first to the first healthy node, reassigns after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
@@ -64,6 +65,9 @@ shared compute scenarios.
 - Pre-release local release artifact builder and installed-binary smoke script
   for coordinator, agent, `pmctl`, `text-stats`, and selected templates across
   macOS, Linux, and Windows artifact expectations.
+- Linux release archives include independent coordinator and agent installers,
+  fixed-path systemd units, stable unprivileged service identities, journald
+  operation, config-preserving removal, and non-mutating install smoke coverage.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -92,8 +96,9 @@ shared compute scenarios.
 - GPU, storage, or bandwidth pooling as implemented product capabilities.
 - Dashboard or rich operator UI.
 - OpenAPI, protobuf, or generated API contracts.
-- Production Docker image, signed installer, package-manager distribution, or
-  GitHub Release artifact.
+- Production Docker image, signed distribution, package-manager delivery,
+  GitHub Release artifact, automatic upgrade, macOS launchd installer, or
+  Windows service installer.
 - Load-aware, capability-aware, or queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
 - Durable agent result history after agent restart.
@@ -117,6 +122,8 @@ with the practical external workload recipe in
 [docs/runbooks/practical-workload-recipe.md](docs/runbooks/practical-workload-recipe.md).
 The pre-release local binary artifact and installed-binary smoke workflow is in
 [docs/runbooks/local-release-install.md](docs/runbooks/local-release-install.md).
+The Linux/systemd managed-service path is in
+[docs/runbooks/linux-service-install.md](docs/runbooks/linux-service-install.md).
 A partial macOS-to-Windows LAN validation reached remote dispatch but exposed a
 portable command-example gap: no-shell agents need real platform executables,
 not shell built-ins such as Windows `echo`. Milestone 19 added explicit
@@ -129,11 +136,13 @@ Milestone 23 added pre-release local artifact generation and an installed-binary
 smoke workflow. Milestone 24 accepted the private workflow template model
 without changing runtime behavior. Milestone 25 implemented that model as
 `pmctl` client-side validation/submission to existing command jobs. Milestone 26
-added local template inspection and preview before submission. Remaining gaps
-such as production packaging, scheduler policy, cancellation, generated API
-contracts, richer operator UX beyond the current CLI, coordinator-owned template
-registries, and stronger isolation are Phase 2 or later backlog unless
-explicitly reclassified.
+added local template inspection and preview before submission. Milestone 27
+added pre-release Linux/systemd installation and lifecycle validation for the
+coordinator and agent without changing runtime behavior. Remaining gaps such as
+signed or package-managed distribution, non-Linux service installers, automatic
+upgrade, scheduler policy, cancellation, generated API contracts, richer
+operator UX beyond the current CLI, coordinator-owned template registries, and
+stronger isolation are Phase 2 or later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -277,6 +286,13 @@ GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh
 
 The release smoke builds a temporary host install layout and runs coordinator,
 agent, `pmctl`, and `text-stats` from that layout.
+
+To verify Linux service assets and safe temporary-root installation without
+mutating host accounts, systemd, `/etc`, `/opt`, or `/usr`:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service ./examples/linux_service_install_smoke.sh
+```
 
 For durable-state verification with Docker Compose:
 
@@ -492,6 +508,7 @@ Current sources of truth:
 - [HTTP/JSON v0 API Inventory](docs/api-http-json-v0.md)
 - [Operator Runbooks](docs/runbooks/README.md)
 - [First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
+- [Linux Managed Service Installation](docs/runbooks/linux-service-install.md)
 - [Workflow Templates](docs/runbooks/workflow-templates.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)
