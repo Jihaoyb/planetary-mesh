@@ -12,6 +12,16 @@ path_exists() {
   [[ -e "$1" || -L "$1" ]]
 }
 
+validate_marker() {
+  local path="$1"
+  local expected_role="$2"
+  local marker_value
+
+  [[ -f "${path}" && ! -L "${path}" ]] || return 1
+  marker_value="$(<"${path}")" || return 1
+  [[ "${marker_value}" == "role=${expected_role}" ]]
+}
+
 is_absolute() {
   [[ "$1" == /* ]]
 }
@@ -97,11 +107,11 @@ else
   path_exists "${WORKLOAD_DEST}" && HAS_ASSETS=1
 fi
 
-if [[ "${HAS_ASSETS}" -eq 1 && ( ! -f "${MARKER}" || -L "${MARKER}" ) ]]; then
-  die 4 "managed marker is missing or unsafe: ${MARKER}; refusing to remove unowned assets"
+if [[ "${HAS_ASSETS}" -eq 1 ]] && ! validate_marker "${MARKER}" "${ROLE}"; then
+  die 4 "managed marker is missing or invalid: ${MARKER}; refusing to remove unowned assets"
 fi
-if [[ "${PURGE}" -eq 1 && ( ! -f "${MARKER}" || -L "${MARKER}" ) ]]; then
-  die 4 "managed marker is missing or unsafe: ${MARKER}; refusing to purge unowned state"
+if [[ "${PURGE}" -eq 1 ]] && ! validate_marker "${MARKER}" "${ROLE}"; then
+  die 4 "managed marker is missing or invalid: ${MARKER}; refusing to purge unowned state"
 fi
 
 for managed_file in "${BINARY_DEST}" "${UNIT_DEST}"; do
@@ -135,12 +145,18 @@ directory_empty() {
 }
 
 if [[ "${PURGE}" -eq 1 ]]; then
-  for purge_path in "${CONFIG_DEST}" "${TLS_DIR}" "${STATE_DIR}"; do
-    if path_exists "${purge_path}" && [[ -L "${purge_path}" ]]; then
-      die 4 "managed purge path is a symlink; refusing purge: ${purge_path}"
+  if path_exists "${CONFIG_DEST}" && [[ ! -f "${CONFIG_DEST}" || -L "${CONFIG_DEST}" ]]; then
+    die 4 "managed config is not a regular file; refusing purge: ${CONFIG_DEST}"
+  fi
+  for purge_path in "${TLS_DIR}" "${STATE_DIR}"; do
+    if path_exists "${purge_path}" && [[ ! -d "${purge_path}" || -L "${purge_path}" ]]; then
+      die 4 "managed purge path is not a regular directory; refusing purge: ${purge_path}"
     fi
   done
   if [[ "${ROLE}" == "agent" ]]; then
+    if path_exists "${WORK_DIR}" && [[ ! -d "${WORK_DIR}" || -L "${WORK_DIR}" ]]; then
+      die 4 "agent work path is not a regular directory; refusing purge: ${WORK_DIR}"
+    fi
     directory_empty "${WORK_DIR}" || die 4 "agent work directory is not empty; refusing purge: ${WORK_DIR}"
     if [[ -d "${STATE_DIR}" ]]; then
       for state_item in "${STATE_DIR}"/* "${STATE_DIR}"/.[!.]* "${STATE_DIR}"/..?*; do
@@ -167,7 +183,7 @@ if [[ "${PURGE}" -eq 1 ]]; then
   fi
 fi
 
-if [[ "${STAGING}" -eq 0 && -f "${UNIT_DEST}" ]]; then
+if [[ "${STAGING}" -eq 0 ]]; then
   if systemctl is-active --quiet "${UNIT}"; then
     systemctl stop "${UNIT}" || die 6 "systemctl stop failed; no service files were removed; inspect journalctl -u ${UNIT}"
   fi
@@ -193,11 +209,15 @@ fi
 
 if [[ "${PURGE}" -eq 1 ]]; then
   rm -f "${CONFIG_DEST}" || CLEANUP_FAILED=1
-  if [[ "${ROLE}" == "agent" ]]; then
+  if [[ "${ROLE}" == "agent" ]] && path_exists "${WORK_DIR}"; then
     rmdir "${WORK_DIR}" >/dev/null 2>&1 || CLEANUP_FAILED=1
   fi
-  rmdir "${STATE_DIR}" >/dev/null 2>&1 || CLEANUP_FAILED=1
-  rmdir "${TLS_DIR}" >/dev/null 2>&1 || CLEANUP_FAILED=1
+  if path_exists "${STATE_DIR}"; then
+    rmdir "${STATE_DIR}" >/dev/null 2>&1 || CLEANUP_FAILED=1
+  fi
+  if path_exists "${TLS_DIR}"; then
+    rmdir "${TLS_DIR}" >/dev/null 2>&1 || CLEANUP_FAILED=1
+  fi
   rm -f "${MARKER}" || CLEANUP_FAILED=1
   if [[ "${STAGING}" -eq 0 ]]; then
     userdel "${SERVICE_USER}" || CLEANUP_FAILED=1

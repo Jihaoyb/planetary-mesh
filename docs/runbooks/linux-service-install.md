@@ -12,7 +12,7 @@ installed on different machines or together on one machine.
 
 ## Prerequisites
 
-- Linux with systemd 235 or newer
+- Linux with systemd 240 or newer (`Type=exec` requires systemd 240)
 - a matching extracted `linux/amd64` or `linux/arm64` release archive
 - root privileges for a real installation
 - `systemctl`, `useradd`, `groupadd`, `getent`, and `install`

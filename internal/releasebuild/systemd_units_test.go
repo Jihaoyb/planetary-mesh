@@ -37,6 +37,8 @@ func TestLinuxSystemdUnits(t *testing.T) {
 	sharedRequired := []string{
 		"Wants=network-online.target",
 		"After=network-online.target",
+		"StartLimitIntervalSec=60s",
+		"StartLimitBurst=3",
 		"Type=exec",
 		"Restart=on-failure",
 		"RestartSec=5s",
@@ -44,10 +46,18 @@ func TestLinuxSystemdUnits(t *testing.T) {
 		"TimeoutStopSec=15s",
 		"KillSignal=SIGTERM",
 		"KillMode=control-group",
+		"SendSIGKILL=yes",
+		"UMask=0027",
 		"StandardOutput=journal",
 		"StandardError=journal",
 		"NoNewPrivileges=true",
 		"ProtectSystem=full",
+		"ProtectControlGroups=true",
+		"ProtectKernelTunables=true",
+		"ProtectKernelModules=true",
+		"LockPersonality=true",
+		"RestrictRealtime=true",
+		"RestrictSUIDSGID=true",
 		"WantedBy=multi-user.target",
 	}
 	forbidden := []string{
@@ -57,9 +67,13 @@ func TestLinuxSystemdUnits(t *testing.T) {
 		"PrivateNetwork=",
 		"PrivateTmp=",
 		"ProtectHome=",
+		"MemoryDenyWriteExecute=",
 		"RestrictAddressFamilies=",
 		"RestrictNamespaces=",
 		"SystemCallFilter=",
+		"ReadWritePaths=",
+		"ReadOnlyPaths=",
+		"InaccessiblePaths=",
 	}
 
 	for _, tt := range tests {

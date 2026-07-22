@@ -16,7 +16,7 @@ Options:
   --health-ca-file PATH      CA file for an HTTPS health check.
   --health-cert-file PATH    Client certificate for an HTTPS health check.
   --health-key-file PATH     Client key for an HTTPS health check.
-  --root PATH                Non-/ staging root; requires --no-start.
+  --root PATH                Filesystem staging root; requires --no-start.
 USAGE
 }
 
@@ -29,6 +29,16 @@ die() {
 
 path_exists() {
   [[ -e "$1" || -L "$1" ]]
+}
+
+validate_marker() {
+  local path="$1"
+  local expected_role="$2"
+  local marker_value
+
+  [[ -f "${path}" && ! -L "${path}" ]] || return 1
+  marker_value="$(<"${path}")" || return 1
+  [[ "${marker_value}" == "role=${expected_role}" ]]
 }
 
 is_absolute() {
@@ -152,7 +162,8 @@ if [[ "${DEST_ROOT}" != "/" ]]; then
   DEST_ROOT="$(cd "${DEST_ROOT}" && pwd -P)"
   [[ "${DEST_ROOT}" != "/" ]] || die 2 "--root must not resolve to /"
   STAGING=1
-elif [[ "${NO_START}" -eq 1 && -n "${HEALTH_URL}${HEALTH_CA_FILE}${HEALTH_CERT_FILE}${HEALTH_KEY_FILE}" ]]; then
+fi
+if [[ "${NO_START}" -eq 1 && -n "${HEALTH_URL}${HEALTH_CA_FILE}${HEALTH_CERT_FILE}${HEALTH_KEY_FILE}" ]]; then
   die 2 "health-check options cannot be used with --no-start"
 fi
 
@@ -196,6 +207,12 @@ if [[ -z "${HEALTH_URL}" ]]; then
     HEALTH_URL="http://127.0.0.1:8081/healthz"
   fi
 fi
+case "${HEALTH_URL}" in
+  http://* | https://*) ;;
+  *) die 2 "--health-url must use http:// or https://" ;;
+esac
+[[ "${HEALTH_URL}" != *"@"* ]] || die 2 "--health-url must not contain user credentials"
+[[ "${HEALTH_URL}" != *"?"* && "${HEALTH_URL}" != *"#"* ]] || die 2 "--health-url must not contain a query or fragment"
 
 for command_name in install mv rm rmdir; do
   command -v "${command_name}" >/dev/null 2>&1 || die 3 "missing required command: ${command_name}"
@@ -206,14 +223,18 @@ if [[ "${STAGING}" -eq 0 ]]; then
   for command_name in systemctl useradd userdel groupadd groupdel getent; do
     command -v "${command_name}" >/dev/null 2>&1 || die 3 "missing required command: ${command_name}"
   done
+  systemctl_version_output="$(systemctl --version 2>/dev/null)" || die 3 "unable to determine systemd version; systemd 240 or newer is required"
+  systemctl_version_line="${systemctl_version_output%%$'\n'*}"
+  read -r systemctl_name systemctl_version _ <<<"${systemctl_version_line}"
+  [[ "${systemctl_name}" == "systemd" && "${systemctl_version}" =~ ^[0-9]+$ ]] || die 3 "unable to determine systemd version; systemd 240 or newer is required"
+  ((systemctl_version >= 240)) || die 3 "systemd 240 or newer is required; found ${systemctl_version}"
   if [[ "${NO_START}" -eq 0 ]]; then
     command -v curl >/dev/null 2>&1 || die 3 "missing required command: curl"
   fi
 fi
 
-for source_path in "${BINARY_SOURCE}" "${UNIT_SOURCE}"; do
-  [[ -f "${source_path}" && ! -L "${source_path}" ]] || die 3 "missing release binary: ${source_path}; run this installer from an extracted Linux release archive"
-done
+[[ -f "${BINARY_SOURCE}" && ! -L "${BINARY_SOURCE}" ]] || die 3 "missing release binary: ${BINARY_SOURCE}; run this installer from an extracted Linux release archive"
+[[ -f "${UNIT_SOURCE}" && ! -L "${UNIT_SOURCE}" ]] || die 3 "missing release unit: ${UNIT_SOURCE}; run this installer from an extracted Linux release archive"
 if [[ "${ROLE}" == "coordinator" ]]; then
   for source_path in "${RELEASE_ROOT}/bin/pmctl" "${RELEASE_ROOT}/templates/text-stats.pmtemplate.json" "${RELEASE_ROOT}/templates/README.md"; do
     [[ -f "${source_path}" && ! -L "${source_path}" ]] || die 3 "missing release asset: ${source_path}; run this installer from an extracted Linux release archive"
@@ -223,7 +244,7 @@ else
 fi
 
 if [[ "${REUSE_CONFIG}" -eq 1 ]]; then
-  [[ -f "${MARKER}" && ! -L "${MARKER}" ]] || die 4 "managed marker is missing or unsafe: ${MARKER}; refusing to reuse unowned configuration"
+  validate_marker "${MARKER}" "${ROLE}" || die 4 "managed marker is missing or invalid: ${MARKER}; refusing to reuse unowned configuration"
   [[ -f "${CONFIG_DEST}" && ! -L "${CONFIG_DEST}" ]] || die 3 "managed config is missing: ${CONFIG_DEST}"
   CONFIG_SOURCE="${CONFIG_DEST}"
 else
@@ -233,6 +254,10 @@ else
   fi
 fi
 validate_config "${CONFIG_SOURCE}"
+
+if path_exists "${MARKER}" && ! validate_marker "${MARKER}" "${ROLE}"; then
+  die 4 "managed marker is invalid: ${MARKER}; refusing installation"
+fi
 
 for existing_path in "${BINARY_DEST}" "${UNIT_DEST}"; do
   if path_exists "${existing_path}"; then
@@ -275,7 +300,7 @@ if [[ "${STAGING}" -eq 0 ]]; then
     die 3 "missing no-login shell: expected /usr/sbin/nologin or /sbin/nologin"
   fi
 
-  if [[ -f "${MARKER}" && ! -L "${MARKER}" ]]; then
+  if validate_marker "${MARKER}" "${ROLE}"; then
     passwd_entry="$(getent passwd "${SERVICE_USER}" || true)"
     group_entry="$(getent group "${SERVICE_GROUP}" || true)"
     [[ -n "${passwd_entry}" && -n "${group_entry}" ]] || die 4 "managed service identity is incomplete: ${SERVICE_USER}"
@@ -358,7 +383,7 @@ rollback() {
   [[ "${CREATED_MARKER}" -eq 0 ]] || rm -f "${MARKER}" || failed=1
 
   for ((index = ${#CREATED_DIRS[@]} - 1; index >= 0; index--)); do
-    rmdir "${CREATED_DIRS[index]}" >/dev/null 2>&1 || true
+    rmdir "${CREATED_DIRS[index]}" >/dev/null 2>&1 || failed=1
   done
   if [[ "${STAGING}" -eq 0 ]]; then
     [[ "${CREATED_USER}" -eq 0 ]] || userdel "${SERVICE_USER}" >/dev/null 2>&1 || failed=1

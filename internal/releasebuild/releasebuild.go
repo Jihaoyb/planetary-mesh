@@ -43,6 +43,7 @@ var plannedCopies = []plannedCopy{
 	{Source: "docs/runbooks/local-release-install.md", Destination: "docs/runbooks/local-release-install.md", Optional: true},
 	{Source: "docs/runbooks/practical-workload-recipe.md", Destination: "docs/runbooks/practical-workload-recipe.md"},
 	{Source: "docs/runbooks/command-execution-safety.md", Destination: "docs/runbooks/command-execution-safety.md"},
+	{Source: "docs/runbooks/linux-service-install.md", Destination: "docs/runbooks/linux-service-install.md", GOOS: "linux"},
 	{Source: "packaging/linux/install-linux.sh", Destination: "install/install-linux.sh", GOOS: "linux"},
 	{Source: "packaging/linux/uninstall-linux.sh", Destination: "install/uninstall-linux.sh", GOOS: "linux"},
 	{Source: "packaging/linux/systemd/planetary-mesh-coordinator.service", Destination: "install/systemd/planetary-mesh-coordinator.service", GOOS: "linux"},

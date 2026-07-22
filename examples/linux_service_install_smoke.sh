@@ -145,14 +145,21 @@ require_command tar
 echo "Building Linux release layout in ${DIST_DIR}"
 (cd "${ROOT}" && go run ./tools/releasebuild --out "${DIST_DIR}" --version "${VERSION}" --targets "linux/${GOARCH_TARGET}")
 
+EXTRACT_DIR="${CASE_DIR}/extracted"
+mkdir -p "${EXTRACT_DIR}"
+tar -xzf "${ARCHIVE_PATH}" -C "${EXTRACT_DIR}"
+INSTALL_DIR="${EXTRACT_DIR}/planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}"
+
 INSTALL_SCRIPT="${INSTALL_DIR}/install/install-linux.sh"
 UNINSTALL_SCRIPT="${INSTALL_DIR}/install/uninstall-linux.sh"
 COORD_UNIT="${INSTALL_DIR}/install/systemd/planetary-mesh-coordinator.service"
 AGENT_UNIT="${INSTALL_DIR}/install/systemd/planetary-mesh-agent.service"
+SERVICE_RUNBOOK="${INSTALL_DIR}/docs/runbooks/linux-service-install.md"
 require_executable "${INSTALL_SCRIPT}"
 require_executable "${UNINSTALL_SCRIPT}"
 require_file "${COORD_UNIT}"
 require_file "${AGENT_UNIT}"
+require_file "${SERVICE_RUNBOOK}"
 require_file "${ARCHIVE_PATH}"
 require_mode "${INSTALL_SCRIPT}" 755
 require_mode "${UNINSTALL_SCRIPT}" 755
@@ -164,7 +171,8 @@ for expected_path in \
   "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/install/install-linux.sh" \
   "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/install/uninstall-linux.sh" \
   "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/install/systemd/planetary-mesh-coordinator.service" \
-  "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/install/systemd/planetary-mesh-agent.service"; do
+  "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/install/systemd/planetary-mesh-agent.service" \
+  "planetary-mesh-${VERSION}-linux-${GOARCH_TARGET}/docs/runbooks/linux-service-install.md"; do
   if ! grep -Fxq "${expected_path}" <<<"${archive_inventory}"; then
     echo "Expected archive entry: ${expected_path}" >&2
     exit 1
@@ -185,6 +193,18 @@ expect_failure 2 "ERROR[2] unsupported role: worker; expected coordinator or age
 expect_failure 2 "ERROR[2] exactly one of --config or --reuse-config is required" "${INSTALL_SCRIPT}" coordinator --root "${CASE_DIR}" --no-start
 expect_failure 2 "ERROR[2] --config and --reuse-config are mutually exclusive" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --reuse-config --root "${CASE_DIR}" --no-start
 expect_failure 2 "ERROR[2] --config must be an absolute path" "${INSTALL_SCRIPT}" coordinator --config relative.env --root "${CASE_DIR}" --no-start
+expect_failure 2 "ERROR[2] health-check options cannot be used with --no-start" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --health-url http://127.0.0.1:8080/healthz --root "${CASE_DIR}" --no-start
+expect_failure 2 "ERROR[2] --health-url must use http:// or https://" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --health-url file:///etc/passwd
+expect_failure 2 "ERROR[2] --health-url must not contain user credentials" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --health-url http://user:secret@127.0.0.1:8080/healthz
+if grep -Fq 'user:secret' "${CASE_DIR}/failure-output"; then
+  echo "Installer failure output exposed health URL credentials" >&2
+  exit 1
+fi
+expect_failure 2 "ERROR[2] --health-url must not contain a query or fragment" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --health-url "http://127.0.0.1:8080/healthz?token=secret"
+if grep -Fq 'token=secret' "${CASE_DIR}/failure-output"; then
+  echo "Installer failure output exposed a health URL query" >&2
+  exit 1
+fi
 expect_failure 3 "ERROR[3] config must be a readable regular file" "${INSTALL_SCRIPT}" coordinator --config "${SYMLINK_CONFIG}" --root "${CASE_DIR}" --no-start
 expect_failure 5 "ERROR[5] invalid env-style config" "${INSTALL_SCRIPT}" coordinator --config "${BAD_CONFIG}" --root "${CASE_DIR}" --no-start
 if grep -Fq 'secret-sentinel' "${CASE_DIR}/failure-output"; then
@@ -196,7 +216,7 @@ expect_failure 3 "ERROR[3] missing release binary" "${ROOT}/packaging/linux/inst
 BROKEN_RELEASE="${CASE_DIR}/broken-release"
 cp -R "${INSTALL_DIR}" "${BROKEN_RELEASE}"
 rm -f "${BROKEN_RELEASE}/install/systemd/planetary-mesh-agent.service"
-expect_failure 3 "ERROR[3] missing release binary" "${BROKEN_RELEASE}/install/install-linux.sh" agent --config "${AGENT_CONFIG}" --root "${CASE_DIR}" --no-start
+expect_failure 3 "ERROR[3] missing release unit" "${BROKEN_RELEASE}/install/install-linux.sh" agent --config "${AGENT_CONFIG}" --root "${CASE_DIR}" --no-start
 
 COORD_ROOT="${CASE_DIR}/coordinator-root"
 AGENT_ROOT="${CASE_DIR}/agent-root"
@@ -217,9 +237,18 @@ require_mode "${COORD_ROOT}/etc/systemd/system/planetary-mesh-coordinator.servic
 require_mode "${COORD_ROOT}/var/lib/planetary-mesh/.managed-coordinator" 600
 expect_failure 4 "ERROR[4] coordinator is already installed" "${INSTALL_SCRIPT}" coordinator --reuse-config --root "${COORD_ROOT}" --no-start
 
+printf 'role=agent\n' >"${COORD_ROOT}/var/lib/planetary-mesh/.managed-coordinator"
+expect_failure 4 "ERROR[4] managed marker is missing or invalid" "${UNINSTALL_SCRIPT}" coordinator --root "${COORD_ROOT}"
+require_executable "${COORD_ROOT}/opt/planetary-mesh/bin/coordinator"
+printf 'role=coordinator\n' >"${COORD_ROOT}/var/lib/planetary-mesh/.managed-coordinator"
+
 cp "${COORD_ROOT}/etc/planetary-mesh/coordinator.env" "${CASE_DIR}/coordinator-preserved.env"
 "${UNINSTALL_SCRIPT}" coordinator --root "${COORD_ROOT}"
 cmp "${CASE_DIR}/coordinator-preserved.env" "${COORD_ROOT}/etc/planetary-mesh/coordinator.env"
+printf 'role=agent\n' >"${COORD_ROOT}/var/lib/planetary-mesh/.managed-coordinator"
+expect_failure 4 "ERROR[4] managed marker is missing or invalid" "${INSTALL_SCRIPT}" coordinator --reuse-config --root "${COORD_ROOT}" --no-start
+[[ ! -e "${COORD_ROOT}/opt/planetary-mesh/bin/coordinator" ]] || { echo "Invalid marker reuse unexpectedly installed coordinator" >&2; exit 1; }
+printf 'role=coordinator\n' >"${COORD_ROOT}/var/lib/planetary-mesh/.managed-coordinator"
 expect_failure 4 "ERROR[4] managed config already exists" "${INSTALL_SCRIPT}" coordinator --config "${COORD_CONFIG}" --root "${COORD_ROOT}" --no-start
 "${INSTALL_SCRIPT}" coordinator --reuse-config --root "${COORD_ROOT}" --no-start
 "${UNINSTALL_SCRIPT}" coordinator --purge --root "${COORD_ROOT}"
@@ -239,6 +268,12 @@ rm -f "${AGENT_ROOT}/var/lib/planetary-mesh/agent/work/input.txt"
 "${UNINSTALL_SCRIPT}" agent --root "${AGENT_ROOT}"
 "${UNINSTALL_SCRIPT}" agent --root "${AGENT_ROOT}"
 "${INSTALL_SCRIPT}" agent --reuse-config --root "${AGENT_ROOT}" --no-start
+mv "${AGENT_ROOT}/etc/planetary-mesh/agent.env" "${AGENT_ROOT}/etc/planetary-mesh/agent.env.saved"
+mkdir "${AGENT_ROOT}/etc/planetary-mesh/agent.env"
+expect_failure 4 "managed config is not a regular file; refusing purge" "${UNINSTALL_SCRIPT}" agent --purge --root "${AGENT_ROOT}"
+require_executable "${AGENT_ROOT}/opt/planetary-mesh/bin/agent"
+rmdir "${AGENT_ROOT}/etc/planetary-mesh/agent.env"
+mv "${AGENT_ROOT}/etc/planetary-mesh/agent.env.saved" "${AGENT_ROOT}/etc/planetary-mesh/agent.env"
 "${UNINSTALL_SCRIPT}" agent --purge --root "${AGENT_ROOT}"
 require_empty_file_inventory "${AGENT_ROOT}"
 

@@ -96,6 +96,9 @@ planetary-mesh-dev-<goos>-<goarch>/
 Linux archives additionally contain:
 
 ```text
+docs/
+  runbooks/
+    linux-service-install.md
 install/
   install-linux.sh
   uninstall-linux.sh
