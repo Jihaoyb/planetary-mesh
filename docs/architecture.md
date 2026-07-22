@@ -425,6 +425,36 @@ Current secure mode:
 
 Certificate issuance, distribution, enrollment, and rotation are manual.
 
+### Linux Managed-Service Deployment
+
+Linux release archives add a pre-release systemd deployment layer around the
+existing coordinator and agent entrypoints. It does not add a runtime
+component, endpoint, protocol field, storage type, or job state.
+
+- Coordinator and agent install independently as
+  `planetary-mesh-coordinator.service` and
+  `planetary-mesh-agent.service`.
+- Fixed binaries live under `/opt/planetary-mesh/`; coordinator installation
+  also provides `/usr/local/bin/pmctl` and templates under `/usr/share`, while
+  agent installation provides the packaged `text-stats` example workload.
+- Separate stable system users and groups run the roles from
+  `/var/lib/planetary-mesh/{coordinator,agent}`.
+- Operator-provided env-style configuration is copied to role-specific `0640`
+  files under `/etc/planetary-mesh`; credentials are not embedded in unit
+  files. TLS files remain manually provisioned.
+- Both units invoke the existing binary with `--config <managed-path>`, emit
+  existing JSON logs to journald, use `Restart=on-failure`, and receive
+  `SIGTERM` with a 15-second systemd stop window around the existing ten-second
+  graceful shutdown.
+- Conservative systemd hardening reduces daemon privilege without restricting
+  supported networking, certificate reads, agent-local inputs, `/tmp`, device
+  access, or external allowlisted wrappers. It is not workload sandboxing.
+
+Service supervision does not alter execution recovery. Agent stop can interrupt
+active work; in-memory coordinator restart loses state; Postgres-backed restart
+uses existing bounded reconciliation; and no command transparently continues
+because systemd restarts a daemon.
+
 ## Current Limitations
 
 Current private-mesh limitations:
@@ -443,10 +473,10 @@ Current private-mesh limitations:
 - no generated API contract such as OpenAPI or protobuf; the current v0 API
   reference is a manual inventory
 - no cancellation API or cancellation behavior
-- pre-release local binary artifact generation and installed-binary smoke
-  validation exist, but there is no production image, signed installer,
-  package-manager distribution, GitHub Release artifact, or service install
-  workflow
+- pre-release local binary artifacts and Linux/systemd service installation
+  exist, but there is no production image, signed distribution, package-manager
+  delivery, GitHub Release artifact, automatic upgrade, non-Linux service
+  installer, or captured real systemd activation evidence
 - no automated mTLS certificate lifecycle
 - no multi-tenant authorization model
 

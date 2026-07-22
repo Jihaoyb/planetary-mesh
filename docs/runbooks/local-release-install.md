@@ -5,10 +5,12 @@ builds coordinator, agent, `pmctl`, and the tracked `text-stats` external
 workload plus example workflow templates into predictable install layouts, then
 validates that the mesh runs from those files instead of `go run`.
 
-This is Phase 2 install ergonomics work. It is not a production installer,
-signed binary distribution, package-manager release, GitHub Release, Docker
-image, remote private mesh, coordinator-owned template registry, file-transfer
-layer, workflow engine, or stronger execution sandbox.
+This is Phase 2 install ergonomics work. Linux archives include a pre-release
+systemd installer, while macOS and Windows remain manual-start environments.
+The artifacts are not signed binary distribution, package-manager releases,
+GitHub Releases, Docker images, remote private mesh, coordinator-owned template
+registries, file-transfer layers, workflow engines, or stronger execution
+sandboxes.
 
 ## Prerequisites
 
@@ -91,6 +93,27 @@ planetary-mesh-dev-<goos>-<goarch>/
   README.md
 ```
 
+Linux archives additionally contain:
+
+```text
+docs/
+  runbooks/
+    linux-service-install.md
+install/
+  install-linux.sh
+  uninstall-linux.sh
+  systemd/
+    planetary-mesh-coordinator.service
+    planetary-mesh-agent.service
+```
+
+These archive-relative files are inputs to the fixed managed host layout; they
+are not themselves installed paths. Follow
+[Linux Managed Service Installation](linux-service-install.md) for the exact
+`/opt`, `/etc`, `/usr`, and `/var/lib` destinations, stable service identities,
+permissions, service lifecycle, and removal rules. macOS and Windows archives
+do not include `install/`.
+
 Windows artifacts use `.exe` names:
 
 ```text
@@ -123,6 +146,14 @@ The script:
 - validates and previews installed `templates/text-stats.pmtemplate.json`
 - submits the installed template with `bin/pmctl submit template`
 - verifies that the job reaches `COMPLETED`
+
+Linux managed-service assets and temporary-root installation behavior have a
+separate non-mutating smoke gate:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service \
+./examples/linux_service_install_smoke.sh
+```
 
 Expected final output includes:
 

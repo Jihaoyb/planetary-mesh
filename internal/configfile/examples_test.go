@@ -6,15 +6,23 @@ import (
 	"testing"
 )
 
-func TestDemoScriptSyntax(t *testing.T) {
+func TestShellScriptSyntax(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash is not available")
 	}
 
-	paths, err := filepath.Glob(filepath.Join("..", "..", "examples", "*.sh"))
-	if err != nil {
-		t.Fatalf("glob examples: %v", err)
+	patterns := []string{
+		filepath.Join("..", "..", "examples", "*.sh"),
+		filepath.Join("..", "..", "packaging", "linux", "*.sh"),
+	}
+	var paths []string
+	for _, pattern := range patterns {
+		matched, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("glob %s: %v", pattern, err)
+		}
+		paths = append(paths, matched...)
 	}
 	if len(paths) == 0 {
 		t.Fatalf("expected at least one example shell script")

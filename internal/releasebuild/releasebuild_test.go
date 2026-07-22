@@ -48,14 +48,15 @@ func TestPlanArtifactNamesAndBinaryLayout(t *testing.T) {
 		Version: "dev",
 		Targets: []Target{
 			{GOOS: "linux", GOARCH: "arm64"},
+			{GOOS: "darwin", GOARCH: "arm64"},
 			{GOOS: "windows", GOARCH: "amd64"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("Plan returned error: %v", err)
 	}
-	if len(artifacts) != 2 {
-		t.Fatalf("expected 2 artifacts, got %d", len(artifacts))
+	if len(artifacts) != 3 {
+		t.Fatalf("expected 3 artifacts, got %d", len(artifacts))
 	}
 
 	linux := artifacts[0]
@@ -65,8 +66,18 @@ func TestPlanArtifactNamesAndBinaryLayout(t *testing.T) {
 	requirePlannedBinary(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "bin", "coordinator"))
 	requirePlannedBinary(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "workloads", "text-stats"))
 	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "templates", "text-stats.pmtemplate.json"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "docs", "runbooks", "linux-service-install.md"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "install-linux.sh"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "uninstall-linux.sh"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "systemd", "planetary-mesh-coordinator.service"))
+	requirePlannedCopyDestination(t, linux, filepath.Join(out, "planetary-mesh-dev-linux-arm64", "install", "systemd", "planetary-mesh-agent.service"))
 
-	windows := artifacts[1]
+	darwin := artifacts[1]
+	requirePlannedBinary(t, darwin, filepath.Join(out, "planetary-mesh-dev-darwin-arm64", "bin", "coordinator"))
+	requireNoPlannedCopyDestination(t, darwin, filepath.Join(out, "planetary-mesh-dev-darwin-arm64", "install", "install-linux.sh"))
+	requireNoPlannedCopyDestination(t, darwin, filepath.Join(out, "planetary-mesh-dev-darwin-arm64", "docs", "runbooks", "linux-service-install.md"))
+
+	windows := artifacts[2]
 	if windows.DirectoryName != "planetary-mesh-dev-windows-amd64" || windows.ArchiveName != "planetary-mesh-dev-windows-amd64.zip" {
 		t.Fatalf("unexpected windows artifact: %+v", windows)
 	}
@@ -74,6 +85,8 @@ func TestPlanArtifactNamesAndBinaryLayout(t *testing.T) {
 	requirePlannedBinary(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "workloads", "text-stats.exe"))
 	requirePlannedCopy(t, windows, filepath.Join(root, "config", "agent-1.env.example"))
 	requirePlannedCopyDestination(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "templates", "README.md"))
+	requireNoPlannedCopyDestination(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "install", "install-linux.sh"))
+	requireNoPlannedCopyDestination(t, windows, filepath.Join(out, "planetary-mesh-dev-windows-amd64", "docs", "runbooks", "linux-service-install.md"))
 }
 
 func TestPlanRejectsUnsafeVersion(t *testing.T) {
@@ -125,4 +138,13 @@ func requirePlannedCopyDestination(t *testing.T, artifact PlanArtifact, destinat
 		}
 	}
 	t.Fatalf("missing planned copy destination %q in %+v", destination, artifact.Copies)
+}
+
+func requireNoPlannedCopyDestination(t *testing.T, artifact PlanArtifact, destination string) {
+	t.Helper()
+	for _, copySpec := range artifact.Copies {
+		if copySpec.Destination == destination {
+			t.Fatalf("unexpected planned copy destination %q in %+v", destination, artifact.Copies)
+		}
+	}
 }

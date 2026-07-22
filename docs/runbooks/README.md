@@ -17,6 +17,9 @@ owns or controls:
 - [Local Release Build and Install Smoke](local-release-install.md) - the
   pre-release local binary artifact layout and installed-binary smoke workflow
   for coordinator, agent, `pmctl`, and the tracked `text-stats` workload.
+- [Linux Managed Service Installation](linux-service-install.md) - independent
+  coordinator and agent installation, systemd operation, journald inspection,
+  safe removal, and manual upgrade/rollback from Linux release archives.
 - [Local Private Mesh](local-private-mesh.md) - in-memory coordinator storage,
   tracked config examples, `examples/demo.sh`, manual starts, and basic
   `pmctl` workflows.
@@ -56,13 +59,16 @@ Current behavior:
   path.
 - Pre-release local binary artifact generation and installed-binary smoke
   validation for development use.
+- Pre-release Linux/systemd installation for independently managed coordinator
+  and agent services from extracted Linux release archives.
 - `pmctl` as a thin client over the coordinator API.
 
 Current non-goals:
 
 - No dashboard or desktop app.
-- No production image, signed installer, package-manager distribution, or
-  GitHub Release artifact.
+- No production image, signed distribution, package-manager delivery, GitHub
+  Release artifact, automatic upgrade, macOS launchd installer, or Windows
+  service installer.
 - No generated OpenAPI/protobuf contract.
 - No remote private mesh, shared pool, public-node onboarding, marketplace, or
   payment system.
@@ -111,6 +117,7 @@ Real LAN validation additionally expects:
 | External workload smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh` | Builds and runs the tracked `text-stats` helper through the allowlisted external command path. |
 | Template smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh` | Validates, previews, and submits the tracked `text-stats` template through `pmctl`. |
 | Local release smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh` | Builds a host release layout and runs coordinator, agent, `pmctl`, `text-stats`, and installed template preview/submission from installed files. |
+| Linux service-install smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service ./examples/linux_service_install_smoke.sh` | Builds a Linux archive and validates service assets and safe temporary-root install/uninstall behavior without mutating the host. |
 | Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
 | First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |
