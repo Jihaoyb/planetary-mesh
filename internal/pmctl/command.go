@@ -23,6 +23,12 @@ type clientAPI interface {
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := RunE(ctx, args, stdout); err != nil {
+		if exitErr, ok := doctorExit(err); ok {
+			if !exitErr.reported {
+				fmt.Fprintln(stderr, "pmctl:", safeDoctorError(err))
+			}
+			return exitErr.code
+		}
 		fmt.Fprintln(stderr, "pmctl:", err)
 		return 1
 	}
@@ -37,6 +43,9 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	if len(remaining) == 0 {
 		return usageError("missing command")
+	}
+	if isDoctorCommand(remaining) {
+		return runDoctorFromSources(ctx, args, remaining[1:], stdout, jsonOut)
 	}
 	if isLocalTemplateCommand(remaining) {
 		return runCommandWithClient(ctx, nil, remaining, stdout, jsonOut)
