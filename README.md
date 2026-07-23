@@ -15,8 +15,9 @@ shared compute scenarios.
   source-based onboarding, a practical external workload example, and a
   pre-release local binary artifact/install-smoke workflow, implemented
   `pmctl` workflow template validation, inspection, preview, and submission,
-  and a pre-release Linux/systemd managed-service path for coordinator and
-  agent. Phase 1 closed after the Milestone 20 readiness review, Milestone 18
+  a pre-release Linux/systemd managed-service path for coordinator and agent,
+  and read-only `pmctl doctor` private-mesh readiness diagnostics. Phase 1
+  closed after the Milestone 20 readiness review, Milestone 18
   real multi-device LAN validation, and Milestone 19 portable agent validation
   built-ins.
 - **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
@@ -32,7 +33,9 @@ shared compute scenarios.
   from a bounded in-memory cache.
 - **CLI**: `pmctl` is a thin client for status, node listing, job listing, job
   inspection, command job submission, and client-side workflow template
-  validation/inspection/preview/submission.
+  validation/inspection/preview/submission. `pmctl doctor` combines existing
+  `/status` and `/nodes` data into secret-safe readiness checks without
+  creating jobs or contacting agents directly.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
@@ -68,6 +71,9 @@ shared compute scenarios.
 - Linux release archives include independent coordinator and agent installers,
   fixed-path systemd units, stable unprivileged service identities, journald
   operation, config-preserving removal, and non-mutating install smoke coverage.
+- Read-only `pmctl doctor` diagnostics with human and schema-versioned JSON
+  output, warning-aware strict mode, bounded timeout, no-job smoke coverage,
+  and installed-binary verification.
 - No shell execution and no arbitrary executable paths from job submissions.
 - Fixed agent execution timeout, default `30s`.
 - Bounded stdout and stderr capture with per-stream truncation flags.
@@ -138,11 +144,13 @@ without changing runtime behavior. Milestone 25 implemented that model as
 `pmctl` client-side validation/submission to existing command jobs. Milestone 26
 added local template inspection and preview before submission. Milestone 27
 added pre-release Linux/systemd installation and lifecycle validation for the
-coordinator and agent without changing runtime behavior. Remaining gaps such as
-signed or package-managed distribution, non-Linux service installers, automatic
-upgrade, scheduler policy, cancellation, generated API contracts, richer
-operator UX beyond the current CLI, coordinator-owned template registries, and
-stronger isolation are Phase 2 or later backlog unless explicitly reclassified.
+coordinator and agent without changing runtime behavior. Milestone 28 added
+read-only `pmctl doctor` readiness diagnostics over the existing coordinator
+APIs. Remaining gaps such as signed or package-managed distribution, non-Linux
+service installers, automatic upgrade, scheduler policy, cancellation,
+generated API contracts, further operator UX beyond the current CLI diagnostics,
+coordinator-owned template registries, and stronger isolation are Phase 2 or
+later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -434,6 +442,8 @@ Certificate generation, distribution, enrollment, and rotation remain manual.
 go install ./cmd/pmctl
 
 pmctl status
+pmctl doctor
+pmctl doctor --strict
 pmctl nodes list
 pmctl jobs list
 pmctl submit command echo hello mesh
@@ -449,7 +459,15 @@ Use JSON output for automation:
 ```bash
 pmctl --json jobs inspect job-1
 pmctl --json nodes list
+pmctl --json doctor --timeout 5s
 ```
+
+`doctor` uses only `GET /status` and `GET /nodes`. A reachable coordinator with
+no `HEALTHY` agent is `WARN`: normal mode exits `0`, while `--strict` exits `5`.
+`PASS` means the coordinator reports a plausibly runnable private mesh; it does
+not verify agent allowlists, workload executables, agent-local files, strong
+isolation, or production readiness. See the
+[Operator Diagnostics runbook](docs/runbooks/operator-diagnostics.md).
 
 Point at another coordinator with a flag, environment variable, or config file:
 
@@ -509,6 +527,7 @@ Current sources of truth:
 - [Operator Runbooks](docs/runbooks/README.md)
 - [First-Run Private Mesh Onboarding](docs/runbooks/first-run-private-mesh.md)
 - [Linux Managed Service Installation](docs/runbooks/linux-service-install.md)
+- [Operator Diagnostics](docs/runbooks/operator-diagnostics.md)
 - [Workflow Templates](docs/runbooks/workflow-templates.md)
 - [Current Limitations](docs/current-limitations.md)
 - [Product Requirements](docs/product-requirements.md)

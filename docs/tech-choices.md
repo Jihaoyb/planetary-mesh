@@ -423,6 +423,7 @@ Why:
 Current commands:
 
 - `pmctl status`
+- `pmctl doctor [--strict] [--timeout <duration>]`
 - `pmctl nodes list`
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
@@ -438,10 +439,16 @@ same node metadata for automation. Template validation, inspection, and preview
 support human and JSON output. Template preview is local-only and does not
 create jobs, contact the coordinator, or check agent allowlists. Template
 submission returns the same job output as direct command submission.
+`pmctl doctor` remains a thin read-only client: it uses only existing
+versioned `/status` and `/nodes` responses, emits human or diagnostic-schema
+version `1` JSON, and never creates a job or contacts agents directly. Normal
+warnings exit successfully; `--strict` makes warnings automation-visible
+without redefining them as failures. Its output is a readiness aid, not a
+security audit, direct agent probe, or production-readiness certification.
 
 Future decisions:
 
-- richer CLI UX
+- further CLI UX beyond current consolidated diagnostics
 - dashboard
 - API contract generation
 - operator auth model

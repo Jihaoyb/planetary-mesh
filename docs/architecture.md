@@ -143,6 +143,7 @@ progress today.
 Supported operations:
 
 - `pmctl status`
+- `pmctl doctor [--strict] [--timeout <duration>]`
 - `pmctl nodes list`
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
@@ -157,8 +158,13 @@ configured with a coordinator URL plus optional CA/cert/key files for secure
 coordinator access. `pmctl nodes list` shows node state, active execution count,
 capabilities, address, last seen time, and certificate fingerprint. Template
 commands validate local JSON files and expand them into the existing command-job
-request path. `pmctl` does not own scheduling, lifecycle transitions, retries,
-storage, or result acceptance.
+request path. `pmctl doctor` is a read-only diagnostic composition over existing
+`GET /status` and `GET /nodes`: it validates local client/TLS configuration,
+classifies coordinator and protocol failures, summarizes coordinator-reported
+node states, and produces secret-safe human or schema-versioned JSON output. It
+does not create jobs, probe agents, read `/metrics`, inspect allowlists or
+agent-local files, or prove production readiness. `pmctl` does not own
+scheduling, lifecycle transitions, retries, storage, or result acceptance.
 
 ### Storage
 
@@ -470,6 +476,8 @@ Current private-mesh limitations:
 - no per-job timeout override
 - no file upload/result download workflow
 - no dashboard
+- no direct agent diagnostics, allowlist discovery, executable/file checks, or
+  log aggregation; `pmctl doctor` uses coordinator-reported snapshots only
 - no generated API contract such as OpenAPI or protobuf; the current v0 API
   reference is a manual inventory
 - no cancellation API or cancellation behavior

@@ -12,6 +12,21 @@ For endpoint details and status-code expectations, use the
 
 ## First Checks
 
+Run the consolidated read-only diagnostic first:
+
+```bash
+go run ./cmd/pmctl doctor
+go run ./cmd/pmctl --json doctor
+go run ./cmd/pmctl doctor --strict
+```
+
+Doctor uses only `GET /status` and `GET /nodes`; it does not create jobs,
+execute commands, contact agents directly, inspect allowlists or agent-local
+files, collect logs, or modify configuration. Normal warnings exit `0`;
+`--strict` exits `5` for warnings. See
+[Operator Diagnostics](operator-diagnostics.md) for the complete check, JSON,
+exit-code, redaction, and limitation contract.
+
 From the repository root, check the branch and local changes before debugging
 code or docs drift:
 
