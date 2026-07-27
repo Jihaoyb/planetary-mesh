@@ -93,6 +93,66 @@ func TestSmokeFlowAgainstCoordinatorHandler(t *testing.T) {
 	}
 }
 
+func TestDoctorUsesOnlyVersionedReadOnlyCoordinatorEndpoints(t *testing.T) {
+	registry := coordinator.NewNodeRegistry()
+	if _, err := registry.Register(coordinator.NodeRegistration{
+		ID:      "doctor-agent",
+		Address: "http://private-doctor-agent.local:8081",
+	}); err != nil {
+		t.Fatalf("register node: %v", err)
+	}
+	jobs := coordinator.NewJobStore()
+	srv := coordinator.NewServerWithRuntime(
+		registry,
+		jobs,
+		nil,
+		coordinator.DefaultDispatchConfig(),
+		coordinator.SecurityConfig{},
+		coordinator.RuntimeConfig{StorageBackend: "in_memory"},
+		nil,
+	)
+
+	var methods []string
+	var paths []string
+	recordingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		paths = append(paths, r.URL.Path)
+		if r.Header.Get(protocol.HeaderName) != protocol.Version {
+			t.Errorf("request %s %s missing protocol version", r.Method, r.URL.Path)
+		}
+		srv.Mux().ServeHTTP(w, r)
+	})
+	client := NewClientWithHTTPClient("http://coordinator.test", &http.Client{
+		Transport: handlerTransport{handler: recordingHandler},
+	})
+	client.requireSingleJSON = true
+
+	report := newDoctorReport(doctorOptions{Timeout: DefaultTimeout})
+	report.addCheck(validConfigurationCheck())
+	result := runDoctorChecks(context.Background(), client, &report)
+	if result.interrupted {
+		t.Fatal("doctor unexpectedly interrupted")
+	}
+	report.aggregate()
+
+	if report.OverallStatus != doctorStatusPass {
+		t.Fatalf("expected PASS, got %+v", report)
+	}
+	if got, want := strings.Join(methods, ","), "GET,GET"; got != want {
+		t.Fatalf("unexpected methods: got %q want %q", got, want)
+	}
+	if got, want := strings.Join(paths, ","), "/status,/nodes"; got != want {
+		t.Fatalf("unexpected paths: got %q want %q", got, want)
+	}
+	listed, err := jobs.List()
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("doctor created jobs: %+v", listed)
+	}
+}
+
 func TestNewClientLoadsSecureConfig(t *testing.T) {
 	files := writeTestTLSFiles(t)
 	client, err := NewClient(Config{

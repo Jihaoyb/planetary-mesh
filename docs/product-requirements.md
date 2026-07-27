@@ -45,7 +45,9 @@ command keys without changing coordinator or agent runtime behavior. Milestone
 26 adds local template inspection and preview before submission while preserving
 that runtime boundary. Milestone 27 adds independent Linux/systemd coordinator
 and agent installation from pre-release archives while preserving protocol,
-storage, execution, and job-lifecycle behavior.
+storage, execution, and job-lifecycle behavior. Milestone 28 adds read-only
+`pmctl doctor` readiness diagnostics over existing coordinator endpoints,
+without creating diagnostic jobs or expanding runtime authority.
 
 ## Non-goals
 
@@ -97,6 +99,10 @@ Practical MVP success means:
   extracted archive, operate them with systemd/journald, preserve managed
   configuration during normal removal, and validate installer behavior without
   mutating the developer machine
+- an operator can run one secret-safe `pmctl doctor` command to distinguish
+  local configuration failure, coordinator/protocol failure, coordinator-only
+  operation, degraded nodes, and a plausibly job-ready mesh without creating a
+  job
 - contributors have a current manual HTTP/JSON v0 API inventory and
   compatibility policy for endpoint, JSON-field, and metrics review
 - default build/test checks pass without external services
@@ -120,11 +126,13 @@ artifacts and installed-binary smoke validation. Milestone 24 accepted the
 private workflow template model, and Milestone 25 implemented it in `pmctl`.
 Milestone 26 added local template inspection and preview before submission.
 Milestone 27 added pre-release Linux/systemd managed-service installation and
-lifecycle validation. These improve fresh-checkout usability, the real private
+lifecycle validation. Milestone 28 added consolidated read-only operator
+diagnostics. These improve fresh-checkout usability, the real private
 workload path, local install confidence, repeatable template operation, and
 always-on Linux operation, but they are not signed or package-manager
 distribution, automatic upgrade, non-Linux service installers, a production
-image, dashboard, remote private mesh, file-transfer layer, coordinator-owned
+image, dashboard, log aggregation, direct agent inspection, remote private
+mesh, file-transfer layer, coordinator-owned
 template registry, or workflow engine.
 
 ## Future Expansion

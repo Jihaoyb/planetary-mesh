@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,8 +28,9 @@ type Config struct {
 }
 
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL           string
+	httpClient        *http.Client
+	requireSingleJSON bool
 }
 
 type HTTPError struct {
@@ -42,6 +44,30 @@ func (e *HTTPError) Error() string {
 		return fmt.Sprintf("coordinator returned %s", e.Status)
 	}
 	return fmt.Sprintf("coordinator returned %s: %s", e.Status, strings.TrimSpace(e.Body))
+}
+
+type RequestError struct {
+	Err error
+}
+
+func (e *RequestError) Error() string {
+	return fmt.Sprintf("request coordinator: %v", e.Err)
+}
+
+func (e *RequestError) Unwrap() error {
+	return e.Err
+}
+
+type DecodeError struct {
+	Err error
+}
+
+func (e *DecodeError) Error() string {
+	return fmt.Sprintf("decode response: %v", e.Err)
+}
+
+func (e *DecodeError) Unwrap() error {
+	return e.Err
 }
 
 type Node struct {
@@ -107,6 +133,19 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{baseURL: baseURL, httpClient: httpClient}, nil
 }
 
+func newDoctorClient(cfg Config, timeout time.Duration) (*Client, error) {
+	cfg.Timeout = timeout
+	client, err := NewClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	client.requireSingleJSON = true
+	client.httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client, nil
+}
+
 func NewClientWithHTTPClient(baseURL string, httpClient *http.Client) *Client {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
@@ -129,6 +168,9 @@ func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	err := c.doJSON(ctx, http.MethodGet, "/nodes", nil, &out)
 	if err != nil {
 		return nil, err
+	}
+	if c.requireSingleJSON && out == nil {
+		return nil, &DecodeError{Err: errors.New("nodes response must be a JSON array")}
 	}
 	if err := normalizeNodes(out); err != nil {
 		return nil, err
@@ -194,7 +236,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) e
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request coordinator: %w", err)
+		return &RequestError{Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -210,8 +252,19 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) e
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(out); err != nil {
+		return &DecodeError{Err: err}
+	}
+	if c.requireSingleJSON {
+		var trailing any
+		err := decoder.Decode(&trailing)
+		if !errors.Is(err, io.EOF) {
+			if err == nil {
+				err = errors.New("unexpected trailing JSON value")
+			}
+			return &DecodeError{Err: err}
+		}
 	}
 	return nil
 }

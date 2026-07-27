@@ -177,6 +177,7 @@ require_command curl
 require_command awk
 require_command grep
 require_command sed
+require_command tr
 
 HOST_GOOS="$(go env GOOS)"
 HOST_GOARCH="$(go env GOARCH)"
@@ -244,6 +245,27 @@ echo "${INSTALL_DIR}"
 echo
 echo "Registered nodes"
 pmctl nodes list
+
+echo
+echo "Running installed private-mesh doctor"
+pmctl doctor
+DOCTOR_JSON="$(pmctl --json doctor)"
+if ! require_json_contains "${DOCTOR_JSON}" '"schema_version": 1,' ||
+  ! require_json_contains "${DOCTOR_JSON}" '"overall_status": "PASS",' ||
+  ! require_json_contains "${DOCTOR_JSON}" '"job_submission_ready": true,' ||
+  ! require_json_contains "${DOCTOR_JSON}" '"healthy": 1,' ||
+  ! require_json_contains "${DOCTOR_JSON}" '"creates_jobs": false,' ||
+  ! require_json_contains "${DOCTOR_JSON}" '"contacts_agents_directly": false'; then
+  echo "Unexpected installed doctor result" >&2
+  echo "Logs are in ${LOG_DIR}" >&2
+  exit 1
+fi
+JOBS_AFTER_DOCTOR="$(pmctl --json jobs list)"
+if [[ "$(tr -d '[:space:]' <<<"${JOBS_AFTER_DOCTOR}")" != "[]" ]]; then
+  echo "Installed doctor unexpectedly created a job" >&2
+  echo "${JOBS_AFTER_DOCTOR}" >&2
+  exit 1
+fi
 
 echo
 echo "Validating installed text-stats template"

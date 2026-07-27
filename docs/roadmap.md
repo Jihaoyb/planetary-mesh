@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 27 Linux managed-service installation and
-  lifecycle validation
+- Baseline: `main` after Milestone 28 `pmctl doctor` and private-mesh readiness
+  diagnostics
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -78,6 +78,9 @@ Implemented capability and accepted planning baseline:
 - Linux release-only systemd assets, role-specific managed-service installers,
   stable unprivileged service identities, config-preserving uninstall, and
   non-mutating temporary-root lifecycle validation
+- read-only `pmctl doctor` diagnostics using existing `/status` and `/nodes`,
+  with secret-safe human and schema-versioned JSON output, warning-aware strict
+  mode, bounded network timeout, and no-job smoke validation
 - thin CLI for status, node/job listing, job inspection, command submission,
   and client-side template validation/inspection/preview/submission, including
   human and JSON output where supported
@@ -88,7 +91,7 @@ Implemented capability and accepted planning baseline:
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-27
+## Completed Baseline / Milestones 1-28
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
@@ -100,8 +103,10 @@ runtime behavior. Milestone 25 implemented that model as `pmctl` client-side
 expansion to existing command jobs. Milestone 26 added local template
 inspection and preview before submission. Milestone 27 added pre-release
 Linux/systemd managed-service installation and lifecycle validation without
-changing runtime behavior. This history remains useful because it explains why
-the current baseline is intentionally narrow.
+changing runtime behavior. Milestone 28 added consolidated read-only
+private-mesh readiness diagnostics without changing the runtime API or creating
+diagnostic jobs. This history remains useful because it explains why the
+current baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -592,9 +597,10 @@ pre-release local release build/install smoke, and Milestone 24 private workflow
 template model planning. Milestone 25 implemented `pmctl` template
 validation/submission, Milestone 26 added local template inspection and
 preview, and Milestone 27 added pre-release Linux/systemd coordinator and agent
-installation. Phase 2 work should still be selected as explicit, narrow
-milestones and should not imply remote mesh, shared pool, marketplace, payment,
-or arbitrary untrusted workload support.
+installation. Milestone 28 added read-only `pmctl doctor` readiness diagnostics
+over the existing coordinator APIs. Phase 2 work should still be selected as
+explicit, narrow milestones and should not imply remote mesh, shared pool,
+marketplace, payment, or arbitrary untrusted workload support.
 
 ### Milestone 21: First-Run Private Mesh Onboarding
 
@@ -806,13 +812,45 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 28: pmctl Doctor and Private-Mesh Readiness Diagnostics
+
+Goal: let an operator determine whether the configured private mesh is
+reachable and plausibly ready for command-job submission without creating a
+job, probing agents directly, or exposing secret-bearing configuration.
+
+Completed outcomes:
+
+- additive `pmctl doctor`, `pmctl doctor --strict`, and doctor-only bounded
+  `--timeout` behavior with human and schema-versioned JSON output
+- ordered PASS/WARN/FAIL checks for local pmctl configuration, coordinator
+  connectivity, status/protocol/runtime metadata, storage/security posture,
+  Postgres reconciliation, and coordinator-reported node readiness
+- normal warnings exit successfully while strict warnings exit `5`; diagnostic,
+  usage, timeout/cancellation, and internal-output failures have documented
+  distinct exit behavior
+- output excludes coordinator URLs, config/TLS paths and values, HTTP bodies,
+  node identities/addresses, certificate metadata, and arbitrary remote values
+- doctor uses only existing versioned `GET /status` and `GET /nodes`, creates
+  no jobs, contacts no agents directly, reads no metrics, and does not inspect
+  allowlists, executables, or agent-local files
+- DB-free unit and handler-backed tests cover protocol/HTTP/TLS/config errors,
+  readiness modes, deterministic output, redaction, and no-mutation boundaries
+- dedicated doctor smoke covers coordinator-only WARN/strict behavior and a
+  healthy one-agent PASS while proving the jobs list remains empty
+- installed-release smoke invokes the packaged `pmctl doctor`; Linux CI runs
+  the dedicated smoke while the existing OS matrix retains build/test/vet
+- HTTP/JSON v0, protocol version `1`, endpoints, coordinator/agent behavior,
+  job lifecycle, nodes/jobs-only storage, schema readiness version `2`, and
+  manual mTLS lifecycle are unchanged
+
+Status: complete
+
 Potential work:
 
-- richer CLI/operator UX or dashboard
+- further CLI/operator UX, logs UX, or a scoped dashboard
 - API keys or another user-facing auth model
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
-- logs UX
 - signed or package-manager distribution, automatic upgrade, non-Linux service
   installers, or production image
 - demo pipeline such as OCR, transcription, embeddings, image conversion, or

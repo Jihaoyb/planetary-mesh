@@ -69,6 +69,10 @@ jobs:
         if: runner.os == 'Linux'
         run: go run ./tools/releasebuild --out "${RUNNER_TEMP}/planetary-mesh-dist" --version dev
 
+      - name: Run pmctl doctor smoke
+        if: runner.os == 'Linux'
+        run: GOCACHE="${RUNNER_TEMP}/planetary-mesh-gocache-doctor" ./examples/doctor_smoke.sh
+
       - name: Run release smoke
         if: runner.os == 'Linux'
         run: GOCACHE="${RUNNER_TEMP}/planetary-mesh-gocache-release" ./examples/release_smoke.sh

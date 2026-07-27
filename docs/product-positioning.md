@@ -17,7 +17,9 @@ smoke workflows, pre-release local binary artifact/install-smoke tooling, and
 `pmctl` client-side workflow template validation, inspection, preview, and
 submission. Linux release archives also provide a pre-release systemd path for
 installing coordinator and agent independently under stable unprivileged
-service identities.
+service identities. `pmctl doctor` provides read-only, secret-safe readiness
+diagnostics from existing coordinator status and node data; it does not create
+jobs or prove workload availability or production readiness.
 
 It is not a public marketplace, production multi-tenant compute platform,
 signed distribution, package-manager distributed product, automatic-update

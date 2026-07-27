@@ -23,6 +23,12 @@ type clientAPI interface {
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := RunE(ctx, args, stdout); err != nil {
+		if exitErr, ok := doctorExit(err); ok {
+			if !exitErr.reported {
+				fmt.Fprintln(stderr, "pmctl:", safeDoctorError(err))
+			}
+			return exitErr.code
+		}
 		fmt.Fprintln(stderr, "pmctl:", err)
 		return 1
 	}
@@ -33,10 +39,19 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 	localCfg := ConfigFromEnv()
 	jsonOut, remaining, err := parseGlobalFlags(args, &localCfg)
 	if err != nil {
+		if doctorFollowsGlobalFlags(args) {
+			return &doctorCommandError{
+				code:    doctorExitUsage,
+				message: "usage: pmctl [global flags] doctor [--strict] [--timeout <duration>]",
+			}
+		}
 		return err
 	}
 	if len(remaining) == 0 {
 		return usageError("missing command")
+	}
+	if isDoctorCommand(remaining) {
+		return runDoctorFromSources(ctx, args, remaining[1:], stdout, jsonOut)
 	}
 	if isLocalTemplateCommand(remaining) {
 		return runCommandWithClient(ctx, nil, remaining, stdout, jsonOut)
@@ -63,6 +78,39 @@ func RunE(ctx context.Context, args []string, stdout io.Writer) error {
 
 func isLocalTemplateCommand(args []string) bool {
 	return len(args) > 0 && args[0] == "templates"
+}
+
+func doctorFollowsGlobalFlags(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return i+1 < len(args) && args[i+1] == "doctor"
+		case arg == "doctor":
+			return true
+		case !strings.HasPrefix(arg, "-") || arg == "-":
+			return false
+		case globalFlagNeedsValue(arg):
+			if !strings.Contains(arg, "=") {
+				i++
+			}
+		}
+	}
+	return false
+}
+
+func globalFlagNeedsValue(arg string) bool {
+	name := strings.SplitN(arg, "=", 2)[0]
+	switch name {
+	case "-config", "--config",
+		"-coordinator-url", "--coordinator-url",
+		"-ca-file", "--ca-file",
+		"-cert-file", "--cert-file",
+		"-key-file", "--key-file":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseGlobalFlags(args []string, cfg *Config) (bool, []string, error) {

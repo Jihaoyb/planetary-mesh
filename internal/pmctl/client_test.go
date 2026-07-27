@@ -112,6 +112,81 @@ func TestNewClientDefaultsAndRejectsPartialTLSConfig(t *testing.T) {
 	}
 }
 
+func TestDoctorClientRejectsRedirectsAndTrailingJSON(t *testing.T) {
+	tests := []struct {
+		name       string
+		response   *http.Response
+		listNodes  bool
+		wantStatus int
+		wantDecode bool
+	}{
+		{
+			name: "redirect",
+			response: &http.Response{
+				StatusCode: http.StatusTemporaryRedirect,
+				Status:     "307 Temporary Redirect",
+				Header:     http.Header{"Location": []string{"http://private-target.invalid/status"}},
+				Body:       io.NopCloser(strings.NewReader("redirect-secret")),
+			},
+			wantStatus: http.StatusTemporaryRedirect,
+		},
+		{
+			name: "trailing JSON",
+			response: &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"status":"ok"} {"secret":"trailing"}`)),
+			},
+			wantDecode: true,
+		},
+		{
+			name: "null nodes collection",
+			response: &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`null`)),
+			},
+			listNodes:  true,
+			wantDecode: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClientWithHTTPClient("http://coordinator.test", &http.Client{
+				Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return tc.response, nil
+				}),
+			})
+			client.requireSingleJSON = true
+			client.httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+
+			var err error
+			if tc.listNodes {
+				_, err = client.ListNodes(context.Background())
+			} else {
+				_, err = client.Status(context.Background())
+			}
+			if tc.wantStatus != 0 {
+				var httpErr *HTTPError
+				if !errors.As(err, &httpErr) || httpErr.StatusCode != tc.wantStatus {
+					t.Fatalf("expected HTTP %d error, got %v", tc.wantStatus, err)
+				}
+			}
+			if tc.wantDecode {
+				var decodeErr *DecodeError
+				if !errors.As(err, &decodeErr) {
+					t.Fatalf("expected decode error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

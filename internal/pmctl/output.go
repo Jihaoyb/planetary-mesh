@@ -156,6 +156,86 @@ func writeTemplatePreview(w io.Writer, out templatePreviewOutput) error {
 	return tw.Flush()
 }
 
+func writeDoctorReport(w io.Writer, report doctorReport) error {
+	if _, err := fmt.Fprintln(w, "Planetary Mesh doctor"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Overall: %s\n", report.OverallStatus); err != nil {
+		return err
+	}
+	mode := "normal"
+	if report.Strict {
+		mode = "strict"
+	}
+	if _, err := fmt.Fprintf(w, "Mode: %s\n", mode); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Timeout: %s\n", report.Timeout); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Ready for job submission: %s\n\n", formatDoctorReadiness(report.Facts.JobSubmissionReady)); err != nil {
+		return err
+	}
+
+	tw := newTabWriter(w)
+	if _, err := fmt.Fprintln(tw, "CHECK\tSTATUS\tSUMMARY"); err != nil {
+		return err
+	}
+	for _, check := range report.Checks {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", check.Name, check.Status, check.Summary); err != nil {
+			return err
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "\nSummary: PASS=%d WARN=%d FAIL=%d\n\n", report.Summary.Pass, report.Summary.Warn, report.Summary.Fail); err != nil {
+		return err
+	}
+
+	hasRemediation := false
+	for _, check := range report.Checks {
+		if len(check.Remediation) > 0 {
+			if !hasRemediation {
+				if _, err := fmt.Fprintln(w, "Remediation"); err != nil {
+					return err
+				}
+				hasRemediation = true
+			}
+			for _, remediation := range check.Remediation {
+				if _, err := fmt.Fprintf(w, "- %s: %s\n", check.Name, remediation); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if !hasRemediation {
+		if _, err := fmt.Fprintln(w, "Remediation: none"); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(w, "\nLimitations"); err != nil {
+		return err
+	}
+	for _, limitation := range report.Limitations {
+		if _, err := fmt.Fprintf(w, "- %s\n", limitation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func formatDoctorReadiness(ready *bool) string {
+	if ready == nil {
+		return "unknown"
+	}
+	if *ready {
+		return "yes"
+	}
+	return "no"
+}
+
 func newTabWriter(w io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }
