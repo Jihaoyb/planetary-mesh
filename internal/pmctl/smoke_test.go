@@ -129,7 +129,7 @@ func TestDoctorUsesOnlyVersionedReadOnlyCoordinatorEndpoints(t *testing.T) {
 
 	report := newDoctorReport(doctorOptions{Timeout: DefaultTimeout})
 	report.addCheck(validConfigurationCheck())
-	result := runDoctorChecks(context.Background(), client, validatedDoctorConfig{}, &report)
+	result := runDoctorChecks(context.Background(), client, &report)
 	if result.interrupted {
 		t.Fatal("doctor unexpectedly interrupted")
 	}

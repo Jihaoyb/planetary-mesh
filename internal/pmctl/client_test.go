@@ -116,6 +116,7 @@ func TestDoctorClientRejectsRedirectsAndTrailingJSON(t *testing.T) {
 	tests := []struct {
 		name       string
 		response   *http.Response
+		listNodes  bool
 		wantStatus int
 		wantDecode bool
 	}{
@@ -139,6 +140,17 @@ func TestDoctorClientRejectsRedirectsAndTrailingJSON(t *testing.T) {
 			},
 			wantDecode: true,
 		},
+		{
+			name: "null nodes collection",
+			response: &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`null`)),
+			},
+			listNodes:  true,
+			wantDecode: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -153,7 +165,12 @@ func TestDoctorClientRejectsRedirectsAndTrailingJSON(t *testing.T) {
 				return http.ErrUseLastResponse
 			}
 
-			_, err := client.Status(context.Background())
+			var err error
+			if tc.listNodes {
+				_, err = client.ListNodes(context.Background())
+			} else {
+				_, err = client.Status(context.Background())
+			}
 			if tc.wantStatus != 0 {
 				var httpErr *HTTPError
 				if !errors.As(err, &httpErr) || httpErr.StatusCode != tc.wantStatus {

@@ -141,11 +141,6 @@ type doctorRunResult struct {
 	interrupted bool
 }
 
-type validatedDoctorConfig struct {
-	Config Config
-	URL    *url.URL
-}
-
 func parseDoctorFlags(args []string) (doctorOptions, error) {
 	fs := flag.NewFlagSet("pmctl doctor", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -195,7 +190,7 @@ func runDoctorFromSources(ctx context.Context, allArgs, doctorArgs []string, std
 		return writeDoctorResult(stdout, report, jsonOut, doctorRunResult{})
 	}
 
-	client, err := newDoctorClient(validated.Config, opts.Timeout)
+	client, err := newDoctorClient(validated, opts.Timeout)
 	if err != nil {
 		report.addCheck(doctorCheck{
 			Name:    "coordinator_connectivity",
@@ -211,7 +206,7 @@ func runDoctorFromSources(ctx context.Context, allArgs, doctorArgs []string, std
 
 	networkCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	result := runDoctorChecks(networkCtx, client, validated, &report)
+	result := runDoctorChecks(networkCtx, client, &report)
 	return writeDoctorResult(stdout, report, jsonOut, result)
 }
 
@@ -232,7 +227,7 @@ func newDoctorReport(opts doctorOptions) doctorReport {
 	}
 }
 
-func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
+func validateDoctorConfig(cfg Config) (Config, doctorCheck) {
 	rawURL := strings.TrimSpace(cfg.CoordinatorURL)
 	if rawURL == "" {
 		rawURL = DefaultCoordinatorURL
@@ -241,12 +236,13 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 	if err != nil ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
 		parsed.Host == "" ||
+		parsed.Hostname() == "" ||
 		parsed.Opaque != "" ||
 		parsed.User != nil ||
 		parsed.RawQuery != "" ||
 		parsed.Fragment != "" ||
 		(parsed.Path != "" && parsed.Path != "/") {
-		return validatedDoctorConfig{}, doctorCheck{
+		return Config{}, doctorCheck{
 			Name:    "client_configuration",
 			Status:  doctorStatusFail,
 			Code:    "coordinator_url_invalid",
@@ -258,7 +254,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 	}
 
 	if err := cfg.TLSFiles.ValidateComplete("PMCTL"); err != nil {
-		return validatedDoctorConfig{}, doctorCheck{
+		return Config{}, doctorCheck{
 			Name:    "client_configuration",
 			Status:  doctorStatusFail,
 			Code:    "tls_config_partial",
@@ -269,7 +265,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 		}
 	}
 	if cfg.TLSFiles.Configured() && parsed.Scheme != "https" {
-		return validatedDoctorConfig{}, doctorCheck{
+		return Config{}, doctorCheck{
 			Name:    "client_configuration",
 			Status:  doctorStatusFail,
 			Code:    "tls_requires_https",
@@ -283,7 +279,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 		for _, path := range []string{cfg.TLSFiles.CAFile, cfg.TLSFiles.CertFile, cfg.TLSFiles.KeyFile} {
 			file, err := os.Open(path)
 			if err != nil {
-				return validatedDoctorConfig{}, doctorCheck{
+				return Config{}, doctorCheck{
 					Name:    "client_configuration",
 					Status:  doctorStatusFail,
 					Code:    "tls_file_unreadable",
@@ -296,7 +292,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 			_ = file.Close()
 		}
 		if _, err := security.LoadCAPool(cfg.TLSFiles.CAFile); err != nil {
-			return validatedDoctorConfig{}, doctorCheck{
+			return Config{}, doctorCheck{
 				Name:    "client_configuration",
 				Status:  doctorStatusFail,
 				Code:    "tls_ca_invalid",
@@ -307,7 +303,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 			}
 		}
 		if _, err := security.LoadKeyPair(cfg.TLSFiles.CertFile, cfg.TLSFiles.KeyFile); err != nil {
-			return validatedDoctorConfig{}, doctorCheck{
+			return Config{}, doctorCheck{
 				Name:    "client_configuration",
 				Status:  doctorStatusFail,
 				Code:    "tls_keypair_invalid",
@@ -320,7 +316,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 	}
 
 	cfg.CoordinatorURL = strings.TrimRight(rawURL, "/")
-	return validatedDoctorConfig{Config: cfg, URL: parsed}, doctorCheck{
+	return cfg, doctorCheck{
 		Name:        "client_configuration",
 		Status:      doctorStatusPass,
 		Code:        "configuration_valid",
@@ -329,7 +325,7 @@ func validateDoctorConfig(cfg Config) (validatedDoctorConfig, doctorCheck) {
 	}
 }
 
-func runDoctorChecks(ctx context.Context, client doctorClient, validated validatedDoctorConfig, report *doctorReport) doctorRunResult {
+func runDoctorChecks(ctx context.Context, client doctorClient, report *doctorReport) doctorRunResult {
 	status, err := client.Status(ctx)
 	if err != nil {
 		return classifyStatusFailure(ctx, err, report)
@@ -410,7 +406,7 @@ func runDoctorChecks(ctx context.Context, client doctorClient, validated validat
 	})
 
 	classifyStorage(status, report)
-	classifySecurity(status, validated, report)
+	classifySecurity(status, report)
 	classifyReconciliation(status, report)
 
 	nodes, err := client.ListNodes(ctx)
@@ -674,7 +670,7 @@ func classifyStorage(status protocol.CoordinatorStatusResponse, report *doctorRe
 	}
 }
 
-func classifySecurity(status protocol.CoordinatorStatusResponse, _ validatedDoctorConfig, report *doctorReport) {
+func classifySecurity(status protocol.CoordinatorStatusResponse, report *doctorReport) {
 	report.Facts.SecureMode = boolPointer(status.SecureMode)
 	report.Facts.NodeAllowlistEnabled = boolPointer(status.NodeAllowlistEnabled)
 	switch {
@@ -1014,7 +1010,9 @@ func isTLSFailure(err error) bool {
 		return true
 	}
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "tls:") || strings.Contains(text, "x509:")
+	return strings.Contains(text, "tls:") ||
+		strings.Contains(text, "x509:") ||
+		strings.Contains(text, "server gave http response to https client")
 }
 
 func isDoctorCommand(args []string) bool {

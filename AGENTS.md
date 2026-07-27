@@ -224,15 +224,6 @@ bash -n packaging/linux/*.sh
 bash -n examples/*.sh
 ```
 
-Release/install smoke gates:
-
-```bash
-GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh
-GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service ./examples/linux_service_install_smoke.sh
-bash -n packaging/linux/*.sh
-bash -n examples/*.sh
-```
-
 Do not commit `.gocache/`.
 
 ## Local Run Commands

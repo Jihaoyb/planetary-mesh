@@ -41,9 +41,8 @@ func TestDoctorHealthyMeshPassesInStableOrder(t *testing.T) {
 		status: healthyDoctorStatus("in_memory"),
 		nodes:  []Node{healthyDoctorNode("agent-private", "http://private-agent.local:8081")},
 	}
-	validated := validatedDoctorConfig{Config: Config{CoordinatorURL: DefaultCoordinatorURL}}
 
-	result := runDoctorChecks(context.Background(), client, validated, &report)
+	result := runDoctorChecks(context.Background(), client, &report)
 	if result.interrupted {
 		t.Fatal("healthy diagnostics unexpectedly interrupted")
 	}
@@ -112,7 +111,7 @@ func TestDoctorNodeReadinessWarnings(t *testing.T) {
 			runDoctorChecks(context.Background(), &fakeDoctorClient{
 				status: healthyDoctorStatus("in_memory"),
 				nodes:  tc.nodes,
-			}, validatedDoctorConfig{}, &report)
+			}, &report)
 			report.aggregate()
 
 			if report.OverallStatus != doctorStatusWarn {
@@ -220,7 +219,7 @@ func TestDoctorStorageSecurityAndReconciliationPolicies(t *testing.T) {
 			runDoctorChecks(context.Background(), &fakeDoctorClient{
 				status: status,
 				nodes:  []Node{healthyDoctorNode("agent-1", "http://agent.local:8081")},
-			}, validatedDoctorConfig{}, &report)
+			}, &report)
 			report.aggregate()
 
 			check, ok := findDoctorCheck(report, tc.checkName)
@@ -311,7 +310,7 @@ func TestDoctorStatusFailuresAreSanitizedAndDistinct(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			report := newDoctorReport(doctorOptions{Timeout: DefaultTimeout})
 			report.addCheck(validConfigurationCheck())
-			result := runDoctorChecks(context.Background(), &fakeDoctorClient{statusErr: tc.err}, validatedDoctorConfig{}, &report)
+			result := runDoctorChecks(context.Background(), &fakeDoctorClient{statusErr: tc.err}, &report)
 			if result.interrupted != tc.wantInterrupted {
 				t.Fatalf("unexpected interruption: %t", result.interrupted)
 			}
@@ -382,7 +381,7 @@ func TestDoctorProtocolAndRuntimeFailures(t *testing.T) {
 			tc.mutate(&status)
 			report := newDoctorReport(doctorOptions{Timeout: DefaultTimeout})
 			report.addCheck(validConfigurationCheck())
-			runDoctorChecks(context.Background(), &fakeDoctorClient{status: status}, validatedDoctorConfig{}, &report)
+			runDoctorChecks(context.Background(), &fakeDoctorClient{status: status}, &report)
 			report.aggregate()
 
 			check := report.Checks[len(report.Checks)-1]
@@ -443,6 +442,11 @@ func TestDoctorConfigurationValidation(t *testing.T) {
 		{
 			name:     "path rejected",
 			cfg:      Config{CoordinatorURL: "http://coordinator.test/private-path"},
+			wantCode: "coordinator_url_invalid",
+		},
+		{
+			name:     "missing hostname rejected",
+			cfg:      Config{CoordinatorURL: "http://:8080"},
 			wantCode: "coordinator_url_invalid",
 		},
 		{
@@ -513,15 +517,32 @@ func TestDoctorConfigurationValidation(t *testing.T) {
 }
 
 func TestDoctorClassifiesLocalTLSHandshakeFailure(t *testing.T) {
-	report := newDoctorReport(doctorOptions{Timeout: time.Second})
-	report.addCheck(validConfigurationCheck())
-	runDoctorChecks(context.Background(), &fakeDoctorClient{
-		statusErr: &RequestError{Err: x509.UnknownAuthorityError{Cert: &x509.Certificate{}}},
-	}, validatedDoctorConfig{}, &report)
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "unknown authority",
+			err:  x509.UnknownAuthorityError{Cert: &x509.Certificate{}},
+		},
+		{
+			name: "plain HTTP response on HTTPS URL",
+			err:  errors.New("http: server gave HTTP response to HTTPS client"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := newDoctorReport(doctorOptions{Timeout: time.Second})
+			report.addCheck(validConfigurationCheck())
+			runDoctorChecks(context.Background(), &fakeDoctorClient{
+				statusErr: &RequestError{Err: tc.err},
+			}, &report)
 
-	check := report.Checks[len(report.Checks)-1]
-	if check.Code != "tls_handshake_failed" || check.Status != doctorStatusFail {
-		t.Fatalf("unexpected TLS check: %+v", check)
+			check := report.Checks[len(report.Checks)-1]
+			if check.Code != "tls_handshake_failed" || check.Status != doctorStatusFail {
+				t.Fatalf("unexpected TLS check: %+v", check)
+			}
+		})
 	}
 }
 
@@ -558,7 +579,7 @@ func TestDoctorCancellationAndTimeoutAreInterrupted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			report := newDoctorReport(doctorOptions{Timeout: DefaultTimeout})
 			report.addCheck(validConfigurationCheck())
-			result := runDoctorChecks(tc.ctx(), &fakeDoctorClient{statusErr: &RequestError{Err: tc.err}}, validatedDoctorConfig{}, &report)
+			result := runDoctorChecks(tc.ctx(), &fakeDoctorClient{statusErr: &RequestError{Err: tc.err}}, &report)
 			if !result.interrupted {
 				t.Fatal("expected interrupted result")
 			}
@@ -594,7 +615,7 @@ func TestDoctorRejectsMalformedNodeMetadata(t *testing.T) {
 			runDoctorChecks(context.Background(), &fakeDoctorClient{
 				status: healthyDoctorStatus("in_memory"),
 				nodes:  tc.nodes,
-			}, validatedDoctorConfig{}, &report)
+			}, &report)
 			report.aggregate()
 
 			check := report.Checks[len(report.Checks)-1]
@@ -630,6 +651,18 @@ func TestDoctorCommandExitCodesAndOutputStreams(t *testing.T) {
 			wantStderr: "pmctl: usage: pmctl doctor",
 		},
 		{
+			name:       "invalid global flag before doctor is usage",
+			args:       []string{"--unknown-global", "doctor"},
+			wantExit:   doctorExitUsage,
+			wantStderr: "pmctl: usage: pmctl [global flags] doctor",
+		},
+		{
+			name:       "invalid global boolean before doctor is redacted usage",
+			args:       []string{"--json=private-invalid-value", "doctor"},
+			wantExit:   doctorExitUsage,
+			wantStderr: "pmctl: usage: pmctl [global flags] doctor",
+		},
+		{
 			name:       "invalid URL diagnostic failure",
 			args:       []string{"--json", "--coordinator-url", "not-a-url", "doctor"},
 			wantExit:   doctorExitDiagnosticFailure,
@@ -663,7 +696,24 @@ func TestDoctorCommandExitCodesAndOutputStreams(t *testing.T) {
 			if strings.Contains(stdout.String()+stderr.String(), "user:secret") {
 				t.Fatalf("output exposed URL credentials:\n%s%s", stdout.String(), stderr.String())
 			}
+			if strings.Contains(stdout.String()+stderr.String(), "private-invalid-value") {
+				t.Fatalf("output exposed an invalid global flag value:\n%s%s", stdout.String(), stderr.String())
+			}
 		})
+	}
+}
+
+func TestDoctorUsageMappingDoesNotChangeOtherCommands(t *testing.T) {
+	clearPMCTLEnv(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exit := Run(context.Background(), []string{"--unknown-global", "status"}, &stdout, &stderr)
+	if exit != 1 {
+		t.Fatalf("expected legacy non-doctor exit 1, got %d", exit)
+	}
+	if stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("unexpected output separation: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -731,7 +781,7 @@ func TestDoctorHumanOutputDoesNotExposeNodeDetails(t *testing.T) {
 	runDoctorChecks(context.Background(), &fakeDoctorClient{
 		status: healthyDoctorStatus("in_memory"),
 		nodes:  []Node{healthyDoctorNode("private-node-secret", "http://10.20.30.40:8081")},
-	}, validatedDoctorConfig{}, &report)
+	}, &report)
 	report.aggregate()
 
 	var out bytes.Buffer

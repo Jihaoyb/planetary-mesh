@@ -169,6 +169,9 @@ func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.requireSingleJSON && out == nil {
+		return nil, &DecodeError{Err: errors.New("nodes response must be a JSON array")}
+	}
 	if err := normalizeNodes(out); err != nil {
 		return nil, err
 	}
