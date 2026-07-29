@@ -23,7 +23,7 @@ const (
 	JobStatusCancelled JobStatus = "CANCELLED"
 )
 
-const QueuedJobExpiredError = "queued job expired before a healthy node became available"
+const QueuedJobExpiredError = "queued job expired before an eligible healthy node became available"
 
 // Job is the coordinator's view of a unit of work.
 // Payload is an opaque string for now; may become structured JSON later.

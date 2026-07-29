@@ -27,7 +27,8 @@ func jsonResponse(status int, body any) *http.Response {
 }
 
 type staticNodeStore struct {
-	nodes []Node
+	nodes     []Node
+	listCalls *int
 }
 
 func (s staticNodeStore) Register(NodeRegistration) (Node, error) {
@@ -35,6 +36,9 @@ func (s staticNodeStore) Register(NodeRegistration) (Node, error) {
 }
 
 func (s staticNodeStore) List() ([]Node, error) {
+	if s.listCalls != nil {
+		*s.listCalls = *s.listCalls + 1
+	}
 	nodes := make([]Node, len(s.nodes))
 	copy(nodes, s.nodes)
 	return nodes, nil
@@ -145,7 +149,12 @@ func TestDispatchJobNoHealthyNodes(t *testing.T) {
 
 func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {
 	jobStore := NewJobStore()
-	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	job, err := jobStore.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "echo",
+		Args:                 []string{"hello"},
+		RequiredCapabilities: []string{"role:worker"},
+	})
 	if err != nil {
 		t.Fatalf("create job: %v", err)
 	}
@@ -171,11 +180,13 @@ func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {
 			}
 		}),
 	}
+	listCalls := 0
 	nodes := staticNodeStore{nodes: []Node{
 		{ID: "node-offline", Address: "node-offline.local:8081", State: NodeStateOffline},
-		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy},
-		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy},
-	}}
+		{ID: "node-nonmatching", Address: "node-nonmatching.local:8081", State: NodeStateHealthy},
+		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy, Capabilities: []string{"role:worker"}},
+		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy, Capabilities: []string{"role:worker"}},
+	}, listCalls: &listCalls}
 	cfg := DispatchConfig{Timeout: 500 * time.Millisecond, MaxAttempts: 2, BaseBackoff: time.Millisecond}
 	srv := NewServerWithConfig(nodes, jobStore, client, cfg, nil)
 
@@ -206,9 +217,15 @@ func TestDispatchReassignsAfterRetryableNodeFailures(t *testing.T) {
 	if calls["node-offline.local:8081"] != 0 {
 		t.Fatalf("expected offline node to be skipped, got %d calls", calls["node-offline.local:8081"])
 	}
+	if calls["node-nonmatching.local:8081"] != 0 {
+		t.Fatalf("expected nonmatching node to be skipped, got %d calls", calls["node-nonmatching.local:8081"])
+	}
+	if listCalls != 1 {
+		t.Fatalf("expected one frozen node snapshot, got %d list calls", listCalls)
+	}
 }
 
-func TestDispatchIgnoresCapabilitiesAndLoadForSelection(t *testing.T) {
+func TestDispatchPrefersLowestReportedActiveExecutionsForUnconstrainedJob(t *testing.T) {
 	jobStore := NewJobStore()
 	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
 	if err != nil {
@@ -241,8 +258,175 @@ func TestDispatchIgnoresCapabilitiesAndLoadForSelection(t *testing.T) {
 
 	srv.dispatchJob(job.ID)
 
+	if calledHost != "node-b.local:8081" {
+		t.Fatalf("expected least-active node to be selected, got %q", calledHost)
+	}
+}
+
+func TestDispatchBreaksLoadTiesByNodeID(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{Type: "command", Command: "echo"})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	var calledHost string
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calledHost = r.URL.Host
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{ID: "node-b", Address: "node-b.local:8081", State: NodeStateHealthy, Load: protocol.NodeLoad{ActiveExecutions: 2}},
+		{ID: "node-a", Address: "node-a.local:8081", State: NodeStateHealthy, Load: protocol.NodeLoad{ActiveExecutions: 2}},
+	}}
+	srv := NewServerWithConfig(nodes, jobStore, client, DispatchConfig{Timeout: time.Second, MaxAttempts: 1}, nil)
+
+	srv.dispatchJob(job.ID)
+
 	if calledHost != "node-a.local:8081" {
-		t.Fatalf("expected first healthy node to be selected, got %q", calledHost)
+		t.Fatalf("expected node ID tie-breaker to select node-a, got %q", calledHost)
+	}
+}
+
+func TestDispatchRequiresAllCapabilitiesAndHealthyState(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "text-stats",
+		RequiredCapabilities: []string{"profile:local", "role:text-worker"},
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	var calledHost string
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calledHost = r.URL.Host
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{
+			ID:           "node-one-label",
+			Address:      "node-one-label.local:8081",
+			State:        NodeStateHealthy,
+			Capabilities: []string{"role:text-worker"},
+			Load:         protocol.NodeLoad{ActiveExecutions: 0},
+		},
+		{
+			ID:           "node-suspect",
+			Address:      "node-suspect.local:8081",
+			State:        NodeStateSuspect,
+			Capabilities: []string{"profile:local", "role:text-worker"},
+			Load:         protocol.NodeLoad{ActiveExecutions: 0},
+		},
+		{
+			ID:           "node-match",
+			Address:      "node-match.local:8081",
+			State:        NodeStateHealthy,
+			Capabilities: []string{"profile:local", "role:text-worker"},
+			Load:         protocol.NodeLoad{ActiveExecutions: 8},
+		},
+	}}
+	srv := NewServerWithConfig(nodes, jobStore, client, DispatchConfig{Timeout: time.Second, MaxAttempts: 1}, nil)
+
+	srv.dispatchJob(job.ID)
+
+	if calledHost != "node-match.local:8081" {
+		t.Fatalf("expected all-of healthy match, got %q", calledHost)
+	}
+}
+
+func TestDispatchLeavesConstrainedJobQueuedWithoutMatchingNode(t *testing.T) {
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "echo",
+		RequiredCapabilities: []string{"role:gpu-worker"},
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	calls := 0
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+	nodes := staticNodeStore{nodes: []Node{
+		{ID: "node-healthy", Address: "node-healthy.local:8081", State: NodeStateHealthy, Capabilities: []string{"role:cpu-worker"}},
+	}}
+	srv := NewServerWithConfig(nodes, jobStore, client, DispatchConfig{Timeout: time.Second, MaxAttempts: 1}, nil)
+
+	srv.dispatchJob(job.ID)
+
+	final, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if final.Status != JobStatusQueued || final.Attempts != 0 || final.NodeID != "" || final.StartedAt != nil {
+		t.Fatalf("expected constrained job to remain unattempted and queued, got %+v", final)
+	}
+	if calls != 0 {
+		t.Fatalf("expected no agent contacts, got %d", calls)
+	}
+}
+
+func TestDispatchUsesCapabilitiesAddedByLaterHeartbeat(t *testing.T) {
+	registry := NewNodeRegistry()
+	if _, err := registry.Register(NodeRegistration{
+		ID:           "node-1",
+		Address:      "node-1.local:8081",
+		Capabilities: []string{"profile:local"},
+	}); err != nil {
+		t.Fatalf("register initial node: %v", err)
+	}
+	jobStore := NewJobStore()
+	job, err := jobStore.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "echo",
+		RequiredCapabilities: []string{"role:text-worker"},
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	calls := 0
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			return jsonResponse(http.StatusOK, protocol.ExecuteResponse{Status: "ok"}), nil
+		}),
+	}
+	srv := NewServerWithConfig(registry, jobStore, client, DispatchConfig{Timeout: time.Second, MaxAttempts: 1}, nil)
+
+	srv.dispatchJob(job.ID)
+	if calls != 0 {
+		t.Fatalf("expected no initial dispatch, got %d calls", calls)
+	}
+	if _, err := registry.Register(NodeRegistration{
+		ID:           "node-1",
+		Address:      "node-1.local:8081",
+		Capabilities: []string{"profile:local", "role:text-worker"},
+	}); err != nil {
+		t.Fatalf("register matching heartbeat: %v", err)
+	}
+	srv.dispatchJob(job.ID)
+
+	final, _, err := jobStore.Get(job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if final.Status != JobStatusCompleted || final.NodeID != "node-1" || final.Attempts != 1 {
+		t.Fatalf("expected later matching heartbeat to enable dispatch, got %+v", final)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one dispatch after matching heartbeat, got %d", calls)
 	}
 }
 
