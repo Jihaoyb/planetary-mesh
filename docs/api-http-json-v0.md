@@ -26,7 +26,8 @@ Coordinator operator/client-facing endpoints:
 | `GET` | `/healthz` | no | Basic coordinator health check |
 | `GET` | `/status` | yes | Non-secret runtime status/config metadata |
 | `GET` | `/nodes` | yes | List registered nodes |
-| `POST` | `/jobs` | yes | Submit a job |
+| `POST` | `/jobs` | yes | Submit an unconstrained/legacy job |
+| `POST` | `/jobs/command` | yes | Submit a placement-aware command job |
 | `GET` | `/jobs` | yes | List jobs |
 | `GET` | `/jobs/{id}` | yes | Inspect one job |
 
@@ -107,8 +108,8 @@ Postgres-backed coordinators may include:
 {
   "schema": {
     "ready": true,
-    "version": 2,
-    "expected_version": 2
+    "version": 3,
+    "expected_version": 3
   },
   "reconciliation": {
     "grace": "30s",
@@ -161,8 +162,10 @@ Lists registered nodes.
 - Security: if the coordinator server itself is running with mTLS, the TLS
   handshake policy applies before the handler. No node allowlist check is
   performed by this handler.
-- Compatibility notes: node capability/load metadata is visibility-only and does
-  not affect scheduling in v0.
+- Compatibility notes: older agents may omit capability/load metadata and then
+  report empty capabilities and zero active executions. The coordinator uses
+  this heartbeat snapshot for eligibility and deterministic candidate ordering;
+  it is not a reservation or verified capacity report.
 
 Node response/list-entry shape:
 
@@ -192,14 +195,16 @@ certificate fields are omitted when empty.
 
 ### `POST /jobs`
 
-Submits a job. The current supported workload is `type="command"`.
+Submits an unconstrained/legacy job. The current supported workload is
+`type="command"`.
 
 - Protocol header: required.
 - Request body: job create JSON.
 - Success: `201 Created`, JSON job response/list-entry shape.
 - Important errors: `400 Bad Request` for invalid JSON, missing `type`, missing
-  command for `type="command"`, `payload` on `type="command"`, or
-  `command`/`args` on non-command job types; `409 Conflict` for protocol
+  command for `type="command"`, `payload` on `type="command"`,
+  `command`/`args` on non-command job types, or any occurrence of
+  `required_capabilities` including `null` or `[]`; `409 Conflict` for protocol
   mismatch; `405 Method Not Allowed` for unsupported methods on `/jobs`;
   `500 Internal Server Error` for storage failure.
 - Security: if the coordinator server itself is running with mTLS, the TLS
@@ -207,7 +212,9 @@ Submits a job. The current supported workload is `type="command"`.
   performed by this handler.
 - Compatibility notes: command jobs use logical allowlist keys, not executable
   paths. Non-command payload-style jobs are legacy-compatible behavior, but
-  allowlisted command execution is the current workload model.
+  allowlisted command execution is the current workload model. This endpoint
+  rejects placement fields so a caller cannot accidentally rely on an older
+  coordinator silently ignoring them.
 
 Command request shape:
 
@@ -218,6 +225,43 @@ Command request shape:
   "args": ["hello mesh"]
 }
 ```
+
+### `POST /jobs/command`
+
+Submits a placement-aware command job. Direct HTTP clients that need capability
+constraints must use this endpoint.
+
+- Protocol header: required.
+- Request body: placement-aware command create JSON.
+- Success: `201 Created`, JSON job response/list-entry shape.
+- Important errors: `400 Bad Request` for invalid JSON, a type other than
+  `command`, missing command, command payload, malformed requirement labels,
+  or more than 32 distinct requirements; `409 Conflict` for protocol mismatch;
+  `405 Method Not Allowed` for non-`POST`; `500 Internal Server Error` for
+  storage failure.
+- Validation: labels are trimmed, exact duplicates are removed, and the result
+  is sorted lexically. A label is 1-64 characters, starts with an ASCII
+  alphanumeric, and otherwise contains only ASCII alphanumeric characters or
+  `.`, `_`, `:`, and `-`. Matching is case-sensitive and all-of.
+- Compatibility notes: absent, `null`, and empty requirements normalize to
+  `[]`. `pmctl` uses legacy `POST /jobs` for that unconstrained case and this
+  endpoint only for nonempty constraints. Placement requirements are
+  coordinator job metadata and are not sent to agents.
+
+Request shape:
+
+```json
+{
+  "type": "command",
+  "command": "text-stats",
+  "args": ["/data/input.txt"],
+  "required_capabilities": ["profile:local", "role:text-worker"]
+}
+```
+
+If no matching `HEALTHY` node exists, the request still succeeds and returns a
+`QUEUED` job with `attempts: 0`. Nonmatching healthy nodes are not contacted. A
+later matching heartbeat can make the job eligible.
 
 ### `GET /jobs`
 
@@ -259,6 +303,7 @@ Job response/list-entry shape:
   "payload": "",
   "command": "echo",
   "args": ["hello mesh"],
+  "required_capabilities": [],
   "status": "COMPLETED",
   "node_id": "agent-1",
   "attempts": 1,
@@ -275,8 +320,10 @@ Job response/list-entry shape:
 }
 ```
 
-`command`, `args`, `node_id`, `started_at`, `completed_at`, and `exit_code` are
-omitted when their Go `omitempty` conditions are met. Current job statuses are
+`required_capabilities` is always present and is a canonical array; older rows
+and unconstrained jobs emit `[]`. `command`, `args`, `node_id`, `started_at`,
+`completed_at`, and `exit_code` are omitted when their Go `omitempty`
+conditions are met. Current job statuses are
 `QUEUED`, `RUNNING`, `COMPLETED`, and `FAILED`. `CANCELLED` is reserved in code
 but unsupported and not emitted by current coordinator paths.
 
@@ -336,7 +383,7 @@ Metrics:
 
 | Metric | Type | Notes |
 |---|---|---|
-| `planetary_jobs_created_total` | counter | Jobs created through `POST /jobs` |
+| `planetary_jobs_created_total` | counter | Jobs created through either job-submission endpoint |
 | `planetary_jobs_completed_total` | counter | Jobs that ended in `COMPLETED` |
 | `planetary_jobs_failed_total` | counter | Jobs that ended in `FAILED` |
 | `planetary_jobs_recovered_on_startup_total` | counter | Startup `RUNNING` jobs marked `FAILED` after reconciliation grace |
@@ -444,11 +491,23 @@ flag when clipped.
   `pmctl` client-side expansion into the existing command-job request shape.
   This does not add a v0 HTTP API surface. A coordinator-owned template
   registry or template job metadata would require future API planning.
+- Milestone 29 adds `POST /jobs/command` and the job
+  `required_capabilities` field under protocol version `1`. Old clients remain
+  compatible with a new server and create unconstrained jobs through
+  `POST /jobs`. New clients remain compatible with an old server for
+  unconstrained submission. A constrained request to an old server receives
+  `404` or `405`; `pmctl` reports
+  `coordinator does not support required capabilities; upgrade the coordinator`
+  and never retries through `/jobs`, so no unconstrained job is created.
+- Direct callers must use `POST /jobs/command` for constraints. A new server
+  rejects any `required_capabilities` field on legacy `POST /jobs`, including
+  `null` and `[]`.
 - `pmctl` remains a thin API client. It must not become authoritative for
   coordinator validation, scheduling, lifecycle transitions, result acceptance,
   metrics, or storage behavior.
 - Metrics names and types are part of the current v0 operational surface and
   should be documented when changed. This manual inventory does not promise
   permanent Prometheus compatibility.
-- Postgres persists nodes/jobs only. Schema readiness metadata remains version
-  `2`; this inventory does not add schema changes.
+- Postgres persists nodes/jobs only. Schema readiness metadata is version `3`;
+  existing job rows are unconstrained and the additive
+  `required_capabilities` column defaults to `[]`.

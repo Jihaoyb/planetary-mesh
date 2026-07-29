@@ -47,7 +47,10 @@ that runtime boundary. Milestone 27 adds independent Linux/systemd coordinator
 and agent installation from pre-release archives while preserving protocol,
 storage, execution, and job-lifecycle behavior. Milestone 28 adds read-only
 `pmctl doctor` readiness diagnostics over existing coordinator endpoints,
-without creating diagnostic jobs or expanding runtime authority.
+without creating diagnostic jobs or expanding runtime authority. Milestone 29
+adds fail-closed all-of capability constraints and deterministic
+least-reported-active placement for heterogeneous private meshes while keeping
+capability labels as unverified operator assertions.
 
 ## Non-goals
 
@@ -79,6 +82,11 @@ Practical MVP success means:
 - restart recovery behavior, best-effort result reporting, and remaining
   limitations are documented without implying full execution recovery exists
 - a user can see node state, configured capabilities, and active execution count
+- a user can constrain a command job to all required capability labels, see
+  canonical requirements in job output, and leave it queued rather than route
+  it to a nonmatching healthy node
+- matching candidates are selected deterministically by lowest reported active
+  execution count and then node ID, without promising capacity or fairness
 - a user can choose in-memory or Postgres coordinator storage
 - a user can follow current operator runbooks for local startup, Postgres
   durability, mTLS trusted-LAN setup, command-execution safety,
@@ -127,12 +135,15 @@ private workflow template model, and Milestone 25 implemented it in `pmctl`.
 Milestone 26 added local template inspection and preview before submission.
 Milestone 27 added pre-release Linux/systemd managed-service installation and
 lifecycle validation. Milestone 28 added consolidated read-only operator
-diagnostics. These improve fresh-checkout usability, the real private
+diagnostics. Milestone 29 added capability-constrained placement and
+least-reported-active scheduler ordering. These improve fresh-checkout
+usability, the real private
 workload path, local install confidence, repeatable template operation, and
 always-on Linux operation, but they are not signed or package-manager
 distribution, automatic upgrade, non-Linux service installers, a production
-image, dashboard, log aggregation, direct agent inspection, remote private
-mesh, file-transfer layer, coordinator-owned
+image, capacity reservations, scheduler fairness, dashboard, log aggregation,
+direct agent inspection, remote private mesh, file-transfer layer,
+coordinator-owned
 template registry, or workflow engine.
 
 ## Future Expansion

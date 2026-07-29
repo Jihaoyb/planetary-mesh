@@ -71,7 +71,8 @@ Coordinator endpoints:
 - `GET /status` - non-secret runtime status/config
 - `POST /register` - agent registration and heartbeat
 - `GET /nodes` - list known nodes
-- `POST /jobs` - submit a job
+- `POST /jobs` - submit an unconstrained/legacy job
+- `POST /jobs/command` - submit a placement-aware command job
 - `GET /jobs` - list jobs
 - `GET /jobs/{id}` - inspect a job
 - `POST /jobs/{id}/result` - agent terminal result report
@@ -99,8 +100,9 @@ Coordinator responsibilities:
 - validate job submissions
 - store job metadata and execution result fields
 - enforce explicit job lifecycle transitions
-- select the first healthy node for initial dispatch and reassign to other
-  healthy nodes after retryable dispatch failures
+- filter one node snapshot to matching `HEALTHY` candidates, order it by
+  reported active executions and node ID, and reuse it for initial dispatch
+  and retryable cross-node reassignment
 - dispatch to agent `/execute`
 - retry retryable transport errors and agent `5xx` responses
 - mark terminal job outcomes as `COMPLETED` or `FAILED`
@@ -147,11 +149,11 @@ Supported operations:
 - `pmctl nodes list`
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
-- `pmctl submit command <command> [args...]`
+- `pmctl submit command [--require-capability <label> ...] [--] <command> [args...]`
 - `pmctl templates validate <template-file>`
 - `pmctl templates inspect <template-file>`
-- `pmctl templates preview <template-file> --set name=value`
-- `pmctl submit template <template-file> --set name=value`
+- `pmctl templates preview <template-file> [--require-capability <label> ...] --set name=value`
+- `pmctl submit template <template-file> [--require-capability <label> ...] --set name=value`
 
 `pmctl` sends the protocol version header, supports JSON output, and can be
 configured with a coordinator URL plus optional CA/cert/key files for secure
@@ -171,7 +173,7 @@ scheduling, lifecycle transitions, retries, storage, or result acceptance.
 Coordinator storage holds:
 
 - nodes, including reported capabilities/load metadata
-- jobs
+- jobs, including canonical all-of capability requirements
 
 Default storage is in-memory. This keeps local development simple and ordinary
 `go test ./...` DB-free.
@@ -184,8 +186,9 @@ capability/load reporting decision.
 Postgres behavior today:
 
 - embedded schema initialization at startup
-- `schema_version` table with current version `2`
+- `schema_version` table with current version `3`
 - node rows include `capabilities` and `active_executions`
+- job rows include `required_capabilities`, with a non-null empty-array default
 - backfill missing schema metadata on existing databases
 - reject databases marked with a newer schema version than the running binary
   expects
@@ -198,8 +201,10 @@ Postgres behavior today:
 - enforce the same job lifecycle transition rules as the in-memory store
 
 ADR 0013 documents the accepted reconciliation strategy. Milestone 15 implements
-the first runtime slice without changing schema versioning. This is not a full
-migration framework.
+the first runtime slice. ADR 0016 advances readiness metadata to version `3`
+for job requirements. A version-2 coordinator rejects a database marked
+version `3`; rollback requires restoration of a complete pre-upgrade database
+backup. This is not a full migration framework.
 
 ### Command Execution Model
 
@@ -211,7 +216,8 @@ Submission:
 {
   "type": "command",
   "command": "echo",
-  "args": ["hello mesh"]
+  "args": ["hello mesh"],
+  "required_capabilities": ["profile:local"]
 }
 ```
 
@@ -219,10 +225,14 @@ Rules:
 
 - `command` is a logical allowlist key.
 - `args` is an argument vector.
+- `required_capabilities` is optional all-of coordinator metadata, normalized
+  with the same label grammar as node capabilities.
 - `payload` is rejected for `type="command"`.
 - Agents map logical command keys to local executable paths or reserved
   built-in validation targets through
   `AGENT_COMMAND_ALLOWLIST`.
+- Placement requirements are not sent to agents and do not alter the
+  agent `/execute` request.
 - Agents execute external command targets with `exec.CommandContext`.
 - Built-in targets use explicit `builtin:<name>` allowlist values and are
   limited to portable validation helpers such as `builtin:echo`,
@@ -252,7 +262,8 @@ Templates:
 - are JSON `version: 1` files loaded from explicit operator-provided paths
 - reference one logical allowlist command key
 - define ordered literal and parameter argument tokens
-- expand into the existing `POST /jobs` command request shape
+- expand into one command and argument vector; invocation-time placement flags
+  select the constrained command endpoint without changing the template file
 - are not stored by the coordinator or agents
 
 Template validation rejects unsupported JSON fields, unknown template versions,
@@ -262,33 +273,42 @@ Template inspection and preview are local-only `pmctl` ergonomics: inspection
 shows template metadata and argument token structure, and preview shows the
 expanded command-job vector without creating a job, contacting the coordinator,
 or checking agent allowlists. Successful submission still creates an ordinary
-command job. The coordinator stores the expanded command and args; it does not
-store the template name or parameter map.
+command job. The coordinator stores the expanded command, args, and
+invocation-time capability requirements; it does not store the template name
+or parameter map.
 
-Templates do not transfer files, store artifacts, choose nodes, manage secrets,
-override timeouts, cancel jobs, or create multi-step workflows.
+Templates do not transfer files, store artifacts, declare placement fields,
+manage secrets, override timeouts, cancel jobs, or create multi-step workflows.
+`--require-capability` is submission metadata and does not alter strict template
+schema version `1`.
 
 ### Scheduling and Dispatch
 
 Current dispatch behavior:
 
-1. Client submits a job to `POST /jobs`.
+1. A client submits an unconstrained job to `POST /jobs` or a placement-aware
+   command job to `POST /jobs/command`.
 2. Coordinator validates and stores the job as `QUEUED`.
 3. A goroutine attempts dispatch immediately.
-4. Coordinator lists nodes and picks the first `HEALTHY` node.
+4. Coordinator reads one node snapshot, keeps only `HEALTHY` nodes containing
+   every required capability, and sorts candidates by
+   `load.active_executions` ascending then node ID ascending.
 5. Coordinator marks the job `RUNNING` for each attempt.
 6. Coordinator sends an HTTP/JSON `POST /execute` request to the selected agent.
 7. Retryable failures are retried on that node up to the configured attempt
-   count, then reassigned to another eligible `HEALTHY` node.
+   count, then reassigned to the next node in the same candidate snapshot.
 8. Coordinator records the terminal result as `COMPLETED` or `FAILED`.
 
 Queued scheduler behavior:
 
 - the coordinator periodically lists jobs still in `QUEUED` state
-- if no healthy node exists, queued jobs remain queued
-- if a healthy node exists, the coordinator starts re-dispatch for queued jobs
+- if no matching healthy node exists, queued jobs remain queued with no new
+  attempt and no agent contact
+- a later heartbeat that adds the required labels or makes a matching node
+  healthy can make the job eligible on a later scheduler pass
 - if a queued job is still waiting after 24 hours, the coordinator marks it
-  `FAILED` with `queued job expired before a healthy node became available`
+  `FAILED` with
+  `queued job expired before an eligible healthy node became available`
 - duplicate concurrent dispatch of the same job is skipped within the running
   coordinator process
 - persisted `QUEUED` jobs can be picked up after coordinator restart when
@@ -302,16 +322,19 @@ Retry behavior:
   command exit are terminal
 - retry attempts use exponential backoff per selected node
 - when a selected node exhausts retryable attempts, the coordinator tries the
-  next healthy node not already attempted in that dispatch cycle
+  next matching node from the fixed candidate snapshot
 - if all eligible healthy nodes fail retryably, the job fails with the last
   retryable error
 - node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
   in-flight execution attempt in v0
 
-The scheduler is still simple first-healthy-node initial dispatch with
-cross-node retry. Reported capabilities and active execution counts are
-operator-visible only; they do not affect node selection, priority,
-reassignment, or queue fairness.
+Unconstrained jobs use the same ordering across all `HEALTHY` nodes. Reported
+load is a heartbeat snapshot, not a reservation or capacity guarantee;
+concurrent dispatches can choose the same node before a later heartbeat.
+Capability labels are operator assertions and do not prove hardware, software,
+allowlist entries, agent-local files, identity, or actual capacity. The
+scheduler adds no priorities, quotas, fairness, reservations, or queue-depth
+model.
 
 ### Job Lifecycle State Model
 
@@ -465,10 +488,10 @@ because systemd restarts a daemon.
 
 Current private-mesh limitations:
 
-- queued-job scheduling is periodic, first-healthy-node initial dispatch, and
-  uses a fixed 24-hour queued-job expiration window
-- reported node capabilities/load are visibility fields only; there is no
-  load-aware or capability-aware scheduling
+- queued-job scheduling is periodic and uses a fixed 24-hour queued-job
+  expiration window
+- capability/load placement uses unverified heartbeat snapshots; there is no
+  reservation, capacity guarantee, priority, quota, or fairness model
 - reconciliation is best-effort only: agents cache recent terminal results in
   memory, agent restart loses cached reports, and dropped in-progress
   `/execute` requests can still leave no terminal result to report
@@ -504,7 +527,8 @@ These are planned or possible directions, not current implementation.
 
 Private mesh hardening:
 
-- scheduler policy for reported node capabilities/load
+- richer capacity, priority, quota, or fairness policy if operational evidence
+  justifies it
 - operator runbooks
 - future generated API contract decision if the manual inventory proves
   insufficient

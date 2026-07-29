@@ -14,7 +14,7 @@ storage and loses state when the process exits.
 Postgres persists:
 
 - nodes, including reported capabilities and active execution counts
-- jobs and job result fields
+- jobs, canonical capability requirements, and job result fields
 
 Postgres does not persist:
 
@@ -35,8 +35,9 @@ The script requires Docker Compose. It:
 - starts Postgres, one coordinator, and two agents from `compose.yaml`
 - builds a temporary `pmctl` binary
 - verifies coordinator status reports Postgres storage
-- verifies schema readiness version `2`
-- submits a durable command job
+- verifies schema readiness version `3`
+- submits a durable constrained command job and verifies its requirements after
+  restart
 - restarts the coordinator while a `sleep` job is `RUNNING`
 - verifies reconciliation grace and the restart recovery error
 - verifies `/metrics`
@@ -45,8 +46,8 @@ The script requires Docker Compose. It:
 Expected outcome:
 
 - `pmctl status` reports `storage_backend=postgres`.
-- Schema readiness reports `ready=true`, `version=2`, and
-  `expected_version=2`.
+- Schema readiness reports `ready=true`, `version=3`, and
+  `expected_version=3`.
 - Reconciliation grace in the Compose workflow is `3s`.
 - The restart-recovered long-running job eventually becomes `FAILED` with:
 
@@ -122,12 +123,24 @@ collisions with manually running services.
 
 ## Schema Readiness
 
-The current Postgres schema readiness metadata version is `2`.
+The current Postgres schema readiness metadata version is `3`.
 
-Version `2` represents:
+Version `3` represents:
 
 - nodes/jobs schema
 - node capability/load columns
+- a non-null `jobs.required_capabilities` JSON array with an empty-array
+  default
+
+Applying the embedded schema to a version-2 database is additive and
+idempotent. Existing job rows are backfilled as unconstrained (`[]`) and schema
+metadata advances to version `3` in the same startup flow. Back up the complete
+database before upgrading.
+
+A version-2 coordinator rejects a database marked version `3`. Supported
+rollback therefore requires restoring the complete pre-upgrade backup. Do not
+manually decrement `schema_version` or drop the column; there is no supported
+down migration or general migration framework.
 - schema readiness metadata
 
 It is not a full migration framework. The coordinator applies embedded schema
@@ -209,7 +222,7 @@ The coordinator exposes pending startup-running jobs through `pmctl status`,
   not full in-progress execution recovery after a dropped coordinator
   connection.
 - Postgres persists nodes and jobs only.
-- Postgres schema readiness version `2` is not a general migration framework.
+- Postgres schema readiness version `3` is not a general migration framework.
 - Durable storage does not change scheduling, command execution, mTLS, or API
   compatibility behavior.
 

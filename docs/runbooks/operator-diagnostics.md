@@ -61,7 +61,7 @@ Current informational PASS cases include:
 
 - in-memory storage, with an explicit non-durability note
 - plain coordinator mode, with an explicit local/trusted-network scope note
-- Postgres with schema readiness version `2`
+- Postgres with schema readiness version `2` or `3`
 - zero pending reconciliation jobs
 - at least one healthy node with no suspect/offline nodes
 
@@ -137,7 +137,7 @@ Remediation
 
 Limitations
 - Node health is a coordinator-reported heartbeat snapshot, not a direct agent probe.
-- A PASS does not prove workload safety, strong isolation, production readiness, or agent-local file availability.
+- A PASS does not prove that a particular constrained workload has a matching node, is allowlisted, or has required agent-local files; it also does not prove strong isolation or production readiness.
 ```
 
 The report never prints the coordinator URL, node identity/address,
@@ -216,6 +216,7 @@ contains at least one healthy agent.
 
 PASS does not prove:
 
+- that any healthy node matches a particular job's required capabilities
 - direct agent endpoint reachability
 - agent allowlist coverage
 - workload executable, wrapper, input, or output-path availability

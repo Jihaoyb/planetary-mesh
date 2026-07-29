@@ -143,8 +143,10 @@ The script:
 - starts installed `bin/agent`
 - maps installed `workloads/text-stats` through `AGENT_COMMAND_ALLOWLIST`
 - creates a temporary agent-local input file
-- validates and previews installed `templates/text-stats.pmtemplate.json`
-- submits the installed template with `bin/pmctl submit template`
+- validates and previews installed `templates/text-stats.pmtemplate.json` with
+  canonical capability requirements
+- submits the installed template with a constrained
+  `bin/pmctl submit template` invocation
 - verifies that the job reaches `COMPLETED`
 
 Linux managed-service assets and temporary-root installation behavior have a
@@ -251,8 +253,8 @@ expanded job:
 ```bash
 ./bin/pmctl --config config/pmctl.env.example templates validate templates/text-stats.pmtemplate.json
 ./bin/pmctl --config config/pmctl.env.example templates inspect templates/text-stats.pmtemplate.json
-./bin/pmctl --config config/pmctl.env.example templates preview templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-release-input.txt
-./bin/pmctl --config config/pmctl.env.example --json submit template templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-release-input.txt
+./bin/pmctl --config config/pmctl.env.example templates preview templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-release-input.txt
+./bin/pmctl --config config/pmctl.env.example --json submit template templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-release-input.txt
 ./bin/pmctl --config config/pmctl.env.example jobs inspect <job-id>
 ```
 
@@ -308,15 +310,16 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 ./bin/pmctl templates inspect templates/text-stats.pmtemplate.json
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-./bin/pmctl templates preview templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+./bin/pmctl templates preview templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=<agent-local-input-path>
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-./bin/pmctl --json submit template templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+./bin/pmctl --json submit template templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=<agent-local-input-path>
 ```
 
-Scheduling is still first healthy node with retryable cross-node reassignment.
-For this recipe, run one eligible agent or install the helper and input path on
-every healthy agent that might receive the job.
+The capability flag filters to healthy agents reporting `role:text-worker`;
+matching candidates are ordered by reported active executions then node ID.
+The label does not verify the installed helper or input path, so prepare every
+matching agent or use a narrower operator-managed label.
 
 Record committed evidence only with placeholders such as
 `<coordinator-lan-host>`, `<agent-lan-host>`, `<node-id>`,

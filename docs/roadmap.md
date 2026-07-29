@@ -10,8 +10,8 @@ capabilities.
 
 ## Current Baseline
 
-- Baseline: `main` after Milestone 28 `pmctl doctor` and private-mesh readiness
-  diagnostics
+- Baseline: `main` after Milestone 29 capability-constrained and
+  least-reported-active scheduling
 - Stage: Phase 2 productized private mesh work after the Phase 1 complete Go
   1.25.4 LAN/private-network command-job prototype
 - Positioning: lightweight private compute mesh for running command-based jobs
@@ -27,11 +27,15 @@ Implemented capability and accepted planning baseline:
 - node health states: `HEALTHY`, `SUSPECT`, `OFFLINE`
 - node capabilities and active execution count reported through
   registration/heartbeat, `GET /nodes`, and `pmctl nodes list`
-- command job submission with `type="command"`, `command`, and optional `args`
+- command job submission with `type="command"`, `command`, optional `args`, and
+  optional all-of `required_capabilities`
 - explicit coordinator-owned job lifecycle transitions for `QUEUED`,
   `RUNNING`, `COMPLETED`, and `FAILED`
-- first-healthy-node initial dispatch at job submission time
-- cross-node reassignment after retryable dispatch failures
+- fail-closed constrained submission through `POST /jobs/command`
+- `HEALTHY` candidate ordering by reported active executions and then node ID
+  for constrained and unconstrained jobs
+- cross-node reassignment within the matching candidate snapshot after
+  retryable dispatch failures
 - periodic queued-job scheduler/re-dispatch loop
 - queued jobs expire as `FAILED` after 24 hours
 - allowlisted external command execution using `exec.CommandContext`
@@ -42,7 +46,7 @@ Implemented capability and accepted planning baseline:
 - retry handling for retryable dispatch failures
 - additive agent terminal result reporting through `POST /jobs/{id}/result`
 - optional Postgres persistence for nodes/jobs and node metadata
-- Postgres schema readiness metadata version `2`
+- Postgres schema readiness metadata version `3`
 - bounded Postgres reconciliation grace for persisted startup `RUNNING` jobs
 - best-effort agent result reporting from bounded in-memory cache
 - opt-in mTLS and node allowlists with manual certificate lifecycle
@@ -85,13 +89,13 @@ Implemented capability and accepted planning baseline:
   and client-side template validation/inspection/preview/submission, including
   human and JSON output where supported
 - CI/build/test health with default DB-free tests across Ubuntu, macOS, and
-  Windows expectations
+  Windows expectations plus a separate Postgres-tagged service gate
 - Phase 1 readiness review with no remaining Phase 1 exit blockers
 
 Current limitations are tracked in
 [current-limitations.md](current-limitations.md).
 
-## Completed Baseline / Milestones 1-28
+## Completed Baseline / Milestones 1-29
 
 The first twenty milestones established a working private LAN/trusted-network
 prototype. Milestone 21 began Phase 2 by making source-based first-run
@@ -105,8 +109,10 @@ inspection and preview before submission. Milestone 27 added pre-release
 Linux/systemd managed-service installation and lifecycle validation without
 changing runtime behavior. Milestone 28 added consolidated read-only
 private-mesh readiness diagnostics without changing the runtime API or creating
-diagnostic jobs. This history remains useful because it explains why the
-current baseline is intentionally narrow.
+diagnostic jobs. Milestone 29 added capability-constrained command placement
+and deterministic least-reported-active selection without changing agent wire
+behavior. This history remains useful because it explains why the current
+baseline is intentionally narrow.
 
 ### Milestone 1: Control-Plane Foundation
 
@@ -845,12 +851,55 @@ Completed outcomes:
 
 Status: complete
 
+### Milestone 29: Capability-Constrained and Load-Preferred Job Scheduling
+
+Goal: route command jobs to prepared hosts in heterogeneous private meshes and
+prefer the matching node with the lowest coordinator-reported active execution
+count.
+
+Completed outcomes:
+
+- additive `required_capabilities` job metadata with canonical all-of label
+  validation, human/JSON visibility, in-memory slice-copy safety, and Postgres
+  persistence
+- fail-closed `POST /jobs/command` constrained submission; legacy `POST /jobs`
+  rejects any occurrence of the placement field, while empty requirements keep
+  old-client/old-coordinator compatibility
+- `pmctl submit command`, template submit, and local template preview accept
+  repeatable `--require-capability` flags without changing strict template
+  schema version `1`
+- each dispatch uses one node snapshot, filters to matching `HEALTHY` nodes,
+  and orders candidates by `load.active_executions` then node ID; unconstrained
+  jobs use the same ordering
+- no eligible node leaves a job `QUEUED` with no new attempt or agent contact;
+  a later matching heartbeat can make it eligible, and retryable reassignment
+  stays within the original matching snapshot
+- Postgres schema readiness advances from version `2` to `3` with one
+  idempotent non-null empty-array job column and existing-row backfill
+- schema-v3 rollback requires restoration of a complete pre-upgrade backup;
+  version-2 coordinators reject a database marked version `3`
+- deterministic unit/handler tests cover matching, ordering, tie breaking,
+  retries, mixed versions, CLI parsing, storage, and API drift; a scheduler
+  smoke and installed-release smoke cover operator behavior
+- Linux CI runs the scheduler smoke and a separate Postgres service job runs
+  tagged integration tests while ordinary tests remain DB-free
+- HTTP/JSON v0, protocol version `1`, agent registration and `/execute` shapes,
+  job lifecycle states, result fields, execution security boundaries, and
+  diagnostic schema version `1` remain unchanged
+
+Capability labels remain operator assertions, not verified software, hardware,
+allowlist, file, identity, or capacity attestation. This milestone adds no
+reservation, fairness, quota, priority, new metric, dependency, or agent probe.
+
+Status: complete
+
 Potential work:
 
 - further CLI/operator UX, logs UX, or a scoped dashboard
 - API keys or another user-facing auth model
 - file upload/result download if needed by selected workflows
 - persistent job history improvements
+- richer capacity, priority, quota, or fairness policy
 - signed or package-manager distribution, automatic upgrade, non-Linux service
   installers, or production image
 - demo pipeline such as OCR, transcription, embeddings, image conversion, or

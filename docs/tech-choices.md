@@ -107,10 +107,10 @@ Current constraints:
 - no SQLite or alternate durable backend today
 - Postgres tests are opt-in
 - embedded schema initialization remains current
-- schema readiness metadata version `2` is current
+- schema readiness metadata version `3` is current
 - node rows store reported capabilities and active execution count
-- result reporting and Postgres startup reconciliation use existing job rows;
-  Milestone 15 did not add schema changes
+- job rows store canonical required capabilities with an empty-array default
+- result reporting and Postgres startup reconciliation use existing job rows
 - schema readiness metadata is not a full migration framework
 
 Future decisions:
@@ -230,41 +230,47 @@ Future decisions:
 
 ## Scheduling Strategy
 
-Choice: simple first-healthy-node initial dispatch with cross-node retry for
-retryable dispatch failures.
+Choice: capability-filtered, least-reported-active dispatch with deterministic
+node-ID tie breaking and cross-node retry.
+
+Related ADR:
+
+- [ADR 0016](adr/0016-capability-aware-scheduler-policy.md)
 
 Why:
 
-- enough to prove registration, heartbeat, dispatch, retries, command execution,
-  persistence, mTLS, and CLI workflows
-- keeps early behavior easy to inspect and test
+- lets heterogeneous private meshes route wrappers to prepared hosts
+- keeps selection deterministic and testable without adding a reservation or
+  capacity system
 
 Current behavior:
 
 - a job is stored as `QUEUED`
 - dispatch attempts immediately after submission
-- coordinator selects the first node currently in `HEALTHY` state
-- reported node capabilities and active execution counts are visible to
-  operators but are not used for scheduling
+- command jobs may require all labels in canonical `required_capabilities`
+- coordinator filters one node snapshot to matching `HEALTHY` nodes and orders
+  candidates by `active_executions` ascending, then node ID ascending
+- unconstrained jobs use the same ordering over every `HEALTHY` node
 - a coordinator-owned scheduler periodically revisits jobs that remain `QUEUED`
 - retryable dispatch failures are retried against the selected node up to the
   configured attempt count
-- after those retryable attempts are exhausted, the coordinator tries another
-  `HEALTHY` node that has not already been attempted in that dispatch cycle
+- after those retryable attempts are exhausted, the coordinator tries the next
+  matching node in the same fixed candidate snapshot
 - if all eligible healthy nodes fail retryably, the job is marked `FAILED` with
   the last retryable error
-- if no healthy node exists, the job remains queued until a later scheduler pass
-  sees a healthy node
-- if no healthy node becomes available within 24 hours, the queued job is marked
-  `FAILED`
+- if no matching healthy node exists, the job remains queued without a new
+  attempt or agent contact until a later scheduler pass sees one
+- if no eligible healthy node becomes available within 24 hours, the queued job
+  is marked `FAILED`
 - duplicate concurrent dispatch of the same job is skipped within one running
   coordinator process
+- reported load is one heartbeat snapshot, not a reservation, fairness, or
+  capacity guarantee; concurrent dispatches may choose the same node
 
 Future decisions:
 
 - configurable queued-job expiration
-- capability-aware scheduling
-- load-aware scheduling
+- capacity/reservation reporting
 - priorities, quotas, and fairness
 
 ## Job Lifecycle State Model
@@ -356,7 +362,7 @@ Why:
 - static labels are simple to configure and do not require hardware discovery
 - active command execution count is feasible with the current agent execution
   model
-- keeping reporting separate from scheduling preserves current dispatch behavior
+- labels remain operator assertions rather than verified inventory
 
 Current behavior:
 
@@ -375,7 +381,7 @@ Future decisions:
 - capacity reporting
 - queue depth reporting
 - hardware or runtime discovery
-- capability-aware or load-aware scheduler policy
+- verified inventory or capability attestation
 
 ## Security Model
 
@@ -427,11 +433,11 @@ Current commands:
 - `pmctl nodes list`
 - `pmctl jobs list`
 - `pmctl jobs inspect <job-id>`
-- `pmctl submit command <command> [args...]`
+- `pmctl submit command [--require-capability <label> ...] [--] <command> [args...]`
 - `pmctl templates validate <template-file>`
 - `pmctl templates inspect <template-file>`
-- `pmctl templates preview <template-file> --set name=value`
-- `pmctl submit template <template-file> --set name=value`
+- `pmctl templates preview <template-file> [--require-capability <label> ...] --set name=value`
+- `pmctl submit template <template-file> [--require-capability <label> ...] --set name=value`
 
 `pmctl nodes list` includes node state, active execution count, capabilities,
 address, last seen time, and certificate fingerprint. JSON output includes the
@@ -439,6 +445,10 @@ same node metadata for automation. Template validation, inspection, and preview
 support human and JSON output. Template preview is local-only and does not
 create jobs, contact the coordinator, or check agent allowlists. Template
 submission returns the same job output as direct command submission.
+Requirements are invocation metadata, remain outside strict template schema
+version `1`, and are visible in human and JSON job output. `pmctl` uses the
+legacy endpoint for empty requirements and the fail-closed placement-aware
+endpoint for nonempty requirements; it never falls back after a `404` or `405`.
 `pmctl doctor` remains a thin read-only client: it uses only existing
 versioned `/status` and `/nodes` responses, emits human or diagnostic-schema
 version `1` JSON, and never creates a job or contacts agents directly. Normal
