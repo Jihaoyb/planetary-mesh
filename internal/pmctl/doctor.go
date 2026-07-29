@@ -221,7 +221,7 @@ func newDoctorReport(opts doctorOptions) doctorReport {
 		},
 		Limitations: []string{
 			"Node health is a coordinator-reported heartbeat snapshot, not a direct agent probe.",
-			"A PASS does not prove workload safety, strong isolation, production readiness, or agent-local file availability.",
+			"A PASS does not prove that a particular constrained workload has a matching node, is allowlisted, or has required agent-local files; it also does not prove strong isolation or production readiness.",
 		},
 	}
 }

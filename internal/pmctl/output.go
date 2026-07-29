@@ -48,13 +48,14 @@ func writeNodes(w io.Writer, nodes []Node) error {
 
 func writeJobs(w io.Writer, jobs []Job) error {
 	tw := newTabWriter(w)
-	fmt.Fprintln(tw, "ID\tSTATUS\tTYPE\tCOMMAND\tNODE\tATTEMPTS\tUPDATED")
+	fmt.Fprintln(tw, "ID\tSTATUS\tTYPE\tCOMMAND\tREQUIRES\tNODE\tATTEMPTS\tUPDATED")
 	for _, job := range jobs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			job.ID,
 			job.Status,
 			job.Type,
 			joinCommand(job.Command, job.Args),
+			formatCapabilities(job.RequiredCapabilities),
 			dash(job.NodeID),
 			job.Attempts,
 			formatTime(job.UpdatedAt),
@@ -69,6 +70,7 @@ func writeJobDetail(w io.Writer, job Job) error {
 	fmt.Fprintf(tw, "Status\t%s\n", job.Status)
 	fmt.Fprintf(tw, "Type\t%s\n", job.Type)
 	fmt.Fprintf(tw, "Command\t%s\n", joinCommand(job.Command, job.Args))
+	fmt.Fprintf(tw, "Required Capabilities\t%s\n", formatCapabilities(job.RequiredCapabilities))
 	fmt.Fprintf(tw, "Node\t%s\n", dash(job.NodeID))
 	fmt.Fprintf(tw, "Attempts\t%d\n", job.Attempts)
 	if job.ExitCode != nil {
@@ -144,6 +146,7 @@ func writeTemplatePreview(w io.Writer, out templatePreviewOutput) error {
 	fmt.Fprintf(tw, "Name:\t%s\n", out.Name)
 	fmt.Fprintf(tw, "Expanded Job Type:\t%s\n", out.ExpandedJob.Type)
 	fmt.Fprintf(tw, "Expanded Command:\t%s\n", out.ExpandedJob.Command)
+	fmt.Fprintf(tw, "Required Capabilities:\t%s\n", formatCapabilities(out.ExpandedJob.RequiredCapabilities))
 	fmt.Fprintf(tw, "Creates Job:\t%t\n", out.CreatesJob)
 	fmt.Fprintf(tw, "Contacts Coordinator:\t%t\n", out.ContactsCoordinator)
 	fmt.Fprintf(tw, "Checks Agent Allowlist:\t%t\n", out.ChecksAgentAllowlist)

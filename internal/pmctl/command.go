@@ -18,8 +18,14 @@ type clientAPI interface {
 	ListNodes(context.Context) ([]Node, error)
 	ListJobs(context.Context) ([]Job, error)
 	GetJob(context.Context, string) (Job, error)
-	CreateCommandJob(context.Context, string, []string) (Job, error)
+	CreateCommandJob(context.Context, string, []string, []string) (Job, error)
 }
+
+const (
+	submitCommandUsage   = "usage: pmctl submit command [--require-capability <label> ...] [--] <command> [args...]"
+	submitTemplateUsage  = "usage: pmctl submit template <template-file> [--require-capability <label> ...] --set name=value [--set name=value...]"
+	previewTemplateUsage = "usage: pmctl templates preview <template-file> [--require-capability <label> ...] --set name=value [--set name=value...]"
+)
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := RunE(ctx, args, stdout); err != nil {
@@ -162,11 +168,17 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 			if err != nil {
 				return err
 			}
+			if err := normalizeJobs(jobs); err != nil {
+				return err
+			}
 			return writeValue(stdout, jobs, jsonOut, writeJobs)
 		}
 		if len(args) == 3 && args[1] == "inspect" {
 			job, err := client.GetJob(ctx, args[2])
 			if err != nil {
+				return err
+			}
+			if err := normalizeJob(&job); err != nil {
 				return err
 			}
 			return writeValue(stdout, job, jsonOut, writeJobDetail)
@@ -176,13 +188,25 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 		return runTemplateCommand(args[1:], stdout, jsonOut)
 	case "submit":
 		switch {
-		case len(args) >= 3 && args[1] == "command":
-			job, err := client.CreateCommandJob(ctx, args[2], args[3:])
+		case len(args) >= 2 && args[1] == "command":
+			submission, err := parseCommandSubmission(args[2:])
 			if err != nil {
 				return err
 			}
+			job, err := client.CreateCommandJob(
+				ctx,
+				submission.command,
+				submission.args,
+				submission.requiredCapabilities,
+			)
+			if err != nil {
+				return err
+			}
+			if err := normalizeJob(&job); err != nil {
+				return err
+			}
 			return writeValue(stdout, job, jsonOut, writeJobDetail)
-		case len(args) >= 3 && args[1] == "template":
+		case len(args) >= 2 && args[1] == "template":
 			submission, err := parseTemplateSubmission(args[2:])
 			if err != nil {
 				return err
@@ -195,13 +219,21 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 			if err != nil {
 				return fmt.Errorf("invalid template parameters for %s: %w", submission.path, err)
 			}
-			job, err := client.CreateCommandJob(ctx, expanded.Command, expanded.Args)
+			job, err := client.CreateCommandJob(
+				ctx,
+				expanded.Command,
+				expanded.Args,
+				submission.requiredCapabilities,
+			)
 			if err != nil {
+				return err
+			}
+			if err := normalizeJob(&job); err != nil {
 				return err
 			}
 			return writeValue(stdout, job, jsonOut, writeJobDetail)
 		default:
-			return usageError("usage: pmctl submit command <command> [args...] | pmctl submit template <template-file> --set name=value [--set name=value...]")
+			return usageError(submitCommandUsage + " | " + strings.TrimPrefix(submitTemplateUsage, "usage: "))
 		}
 	default:
 		return usageError("unknown command " + args[0])
@@ -210,7 +242,7 @@ func runCommandWithClient(ctx context.Context, client clientAPI, args []string, 
 
 func runTemplateCommand(args []string, stdout io.Writer, jsonOut bool) error {
 	if len(args) == 0 {
-		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> --set name=value [--set name=value...]")
+		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> [--require-capability <label> ...] --set name=value [--set name=value...]")
 	}
 
 	switch args[0] {
@@ -253,9 +285,14 @@ func runTemplateCommand(args []string, stdout io.Writer, jsonOut bool) error {
 		if err != nil {
 			return fmt.Errorf("invalid template parameters for %s: %w", preview.path, err)
 		}
-		return writeValue(stdout, newTemplatePreviewOutput(preview.path, tmpl, expanded), jsonOut, writeTemplatePreview)
+		return writeValue(
+			stdout,
+			newTemplatePreviewOutput(preview.path, tmpl, expanded, preview.requiredCapabilities),
+			jsonOut,
+			writeTemplatePreview,
+		)
 	default:
-		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> --set name=value [--set name=value...]")
+		return usageError("usage: pmctl templates validate <template-file> | pmctl templates inspect <template-file> | pmctl templates preview <template-file> [--require-capability <label> ...] --set name=value [--set name=value...]")
 	}
 }
 
@@ -296,53 +333,113 @@ type templatePreviewOutput struct {
 }
 
 type expandedCommandJob struct {
-	Type    string   `json:"type"`
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	Type                 string   `json:"type"`
+	Command              string   `json:"command"`
+	Args                 []string `json:"args"`
+	RequiredCapabilities []string `json:"required_capabilities"`
 }
 
 type templateParameters struct {
-	path   string
-	values map[string]string
+	path                 string
+	values               map[string]string
+	requiredCapabilities []string
 }
 
-type setFlags []string
-
-func (f *setFlags) String() string {
-	return strings.Join(*f, ",")
-}
-
-func (f *setFlags) Set(value string) error {
-	*f = append(*f, value)
-	return nil
+type commandSubmission struct {
+	command              string
+	args                 []string
+	requiredCapabilities []string
 }
 
 func parseTemplateSubmission(args []string) (templateParameters, error) {
-	return parseTemplateParameters(args, "usage: pmctl submit template <template-file> --set name=value [--set name=value...]")
+	return parseTemplateParameters(args, submitTemplateUsage)
 }
 
 func parseTemplatePreview(args []string) (templateParameters, error) {
-	return parseTemplateParameters(args, "usage: pmctl templates preview <template-file> --set name=value [--set name=value...]")
+	return parseTemplateParameters(args, previewTemplateUsage)
+}
+
+func parseCommandSubmission(args []string) (commandSubmission, error) {
+	var rawRequirements []string
+	for i := 0; i < len(args); {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			i++
+			if i >= len(args) {
+				return commandSubmission{}, usageError(submitCommandUsage)
+			}
+			return newCommandSubmission(args[i], args[i+1:], rawRequirements)
+		case arg == "--require-capability":
+			if i+1 >= len(args) {
+				return commandSubmission{}, errors.New("--require-capability requires a value")
+			}
+			rawRequirements = append(rawRequirements, args[i+1])
+			i += 2
+		case strings.HasPrefix(arg, "--require-capability="):
+			rawRequirements = append(rawRequirements, strings.TrimPrefix(arg, "--require-capability="))
+			i++
+		case strings.HasPrefix(arg, "-"):
+			return commandSubmission{}, fmt.Errorf("unknown placement flag %q", arg)
+		default:
+			return newCommandSubmission(arg, args[i+1:], rawRequirements)
+		}
+	}
+	return commandSubmission{}, usageError(submitCommandUsage)
+}
+
+func newCommandSubmission(command string, args, rawRequirements []string) (commandSubmission, error) {
+	requirements, err := protocol.NormalizeRequiredCapabilities(rawRequirements)
+	if err != nil {
+		return commandSubmission{}, fmt.Errorf("invalid required capabilities: %w", err)
+	}
+	return commandSubmission{
+		command:              command,
+		args:                 append([]string(nil), args...),
+		requiredCapabilities: requirements,
+	}, nil
 }
 
 func parseTemplateParameters(args []string, usage string) (templateParameters, error) {
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 		return templateParameters{}, usageError(usage)
 	}
-
-	fs := flag.NewFlagSet("pmctl template parameters", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var raw setFlags
-	fs.Var(&raw, "set", "template parameter value name=value")
-	if err := fs.Parse(args[1:]); err != nil {
-		return templateParameters{}, err
-	}
-	if fs.NArg() != 0 {
+	if strings.HasPrefix(args[0], "-") {
 		return templateParameters{}, usageError(usage)
 	}
 
-	values := make(map[string]string, len(raw))
-	for _, entry := range raw {
+	var rawSets []string
+	var rawRequirements []string
+	for i := 1; i < len(args); {
+		arg := args[i]
+		switch {
+		case arg == "--set":
+			if i+1 >= len(args) {
+				return templateParameters{}, errors.New("--set requires a value")
+			}
+			rawSets = append(rawSets, args[i+1])
+			i += 2
+		case strings.HasPrefix(arg, "--set="):
+			rawSets = append(rawSets, strings.TrimPrefix(arg, "--set="))
+			i++
+		case arg == "--require-capability":
+			if i+1 >= len(args) {
+				return templateParameters{}, errors.New("--require-capability requires a value")
+			}
+			rawRequirements = append(rawRequirements, args[i+1])
+			i += 2
+		case strings.HasPrefix(arg, "--require-capability="):
+			rawRequirements = append(rawRequirements, strings.TrimPrefix(arg, "--require-capability="))
+			i++
+		case strings.HasPrefix(arg, "-"):
+			return templateParameters{}, fmt.Errorf("unknown template flag %q", arg)
+		default:
+			return templateParameters{}, usageError(usage)
+		}
+	}
+
+	values := make(map[string]string, len(rawSets))
+	for _, entry := range rawSets {
 		name, value, ok := strings.Cut(entry, "=")
 		if !ok || name == "" {
 			return templateParameters{}, fmt.Errorf("invalid --set %q: expected name=value", entry)
@@ -352,10 +449,15 @@ func parseTemplateParameters(args []string, usage string) (templateParameters, e
 		}
 		values[name] = value
 	}
+	requirements, err := protocol.NormalizeRequiredCapabilities(rawRequirements)
+	if err != nil {
+		return templateParameters{}, fmt.Errorf("invalid required capabilities: %w", err)
+	}
 
 	return templateParameters{
-		path:   args[0],
-		values: values,
+		path:                 args[0],
+		values:               values,
+		requiredCapabilities: requirements,
 	}, nil
 }
 
@@ -380,15 +482,21 @@ func newTemplateInspectionOutput(path string, tmpl workflowtemplate.Template, ar
 	}
 }
 
-func newTemplatePreviewOutput(path string, tmpl workflowtemplate.Template, expanded workflowtemplate.ExpandedCommand) templatePreviewOutput {
+func newTemplatePreviewOutput(
+	path string,
+	tmpl workflowtemplate.Template,
+	expanded workflowtemplate.ExpandedCommand,
+	requiredCapabilities []string,
+) templatePreviewOutput {
 	return templatePreviewOutput{
 		Valid: true,
 		Path:  path,
 		Name:  tmpl.Name,
 		ExpandedJob: expandedCommandJob{
-			Type:    "command",
-			Command: expanded.Command,
-			Args:    append([]string{}, expanded.Args...),
+			Type:                 "command",
+			Command:              expanded.Command,
+			Args:                 append([]string{}, expanded.Args...),
+			RequiredCapabilities: append([]string{}, requiredCapabilities...),
 		},
 		CreatesJob:           false,
 		ContactsCoordinator:  false,
@@ -430,8 +538,8 @@ func (a clientAdapter) GetJob(ctx context.Context, id string) (Job, error) {
 	return a.client.GetJob(ctx, id)
 }
 
-func (a clientAdapter) CreateCommandJob(ctx context.Context, command string, args []string) (Job, error) {
-	return a.client.CreateCommandJob(ctx, command, args)
+func (a clientAdapter) CreateCommandJob(ctx context.Context, command string, args, requiredCapabilities []string) (Job, error) {
+	return a.client.CreateCommandJob(ctx, command, args, requiredCapabilities)
 }
 
 func isUsageError(err error) bool {
