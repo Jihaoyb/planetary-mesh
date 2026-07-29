@@ -22,7 +22,6 @@ const (
 	doctorSchemaVersion = 1
 	doctorMinTimeout    = 100 * time.Millisecond
 	doctorMaxTimeout    = 60 * time.Second
-	knownSchemaVersion  = 2
 
 	doctorExitDiagnosticFailure = 1
 	doctorExitUsage             = 2
@@ -638,7 +637,7 @@ func classifyStorage(status protocol.CoordinatorStatusResponse, report *doctorRe
 					"Use the expected coordinator/database schema combination before accepting jobs.",
 				},
 			})
-		case schema.ExpectedVersion != knownSchemaVersion:
+		case !isKnownSchemaVersion(schema.ExpectedVersion):
 			report.addCheck(doctorCheck{
 				Name:    "storage_readiness",
 				Status:  doctorStatusWarn,
@@ -653,7 +652,7 @@ func classifyStorage(status protocol.CoordinatorStatusResponse, report *doctorRe
 				Name:        "storage_readiness",
 				Status:      doctorStatusPass,
 				Code:        "postgres_schema_ready",
-				Summary:     "Postgres schema readiness version 2 is valid.",
+				Summary:     fmt.Sprintf("Postgres schema readiness version %d is valid.", schema.ExpectedVersion),
 				Remediation: []string{},
 			})
 		}
@@ -668,6 +667,10 @@ func classifyStorage(status protocol.CoordinatorStatusResponse, report *doctorRe
 			},
 		})
 	}
+}
+
+func isKnownSchemaVersion(version int) bool {
+	return version == 2 || version == 3
 }
 
 func classifySecurity(status protocol.CoordinatorStatusResponse, report *doctorReport) {

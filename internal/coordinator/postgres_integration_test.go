@@ -151,12 +151,20 @@ func TestPostgresJobLifecyclePersistence(t *testing.T) {
 	store := openPostgresTestStore(t)
 	jobs := store.Jobs()
 
-	created, err := jobs.Create(JobCreateInput{Type: "command", Command: "echo", Args: []string{"hello"}})
+	created, err := jobs.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "echo",
+		Args:                 []string{"hello"},
+		RequiredCapabilities: []string{" role:worker ", "profile:postgres", "role:worker"},
+	})
 	if err != nil {
 		t.Fatalf("create job: %v", err)
 	}
 	if created.ID != "job-1" {
 		t.Fatalf("expected job-1, got %s", created.ID)
+	}
+	if strings.Join(created.RequiredCapabilities, ",") != "profile:postgres,role:worker" {
+		t.Fatalf("unexpected canonical requirements: %+v", created.RequiredCapabilities)
 	}
 
 	started, err := jobs.StartAttempt(created.ID, "node-pg")
@@ -188,6 +196,9 @@ func TestPostgresJobLifecyclePersistence(t *testing.T) {
 	}
 	if got.Stdout != "hello\n" || got.ExitCode == nil || *got.ExitCode != 0 {
 		t.Fatalf("unexpected persisted result: %+v", got)
+	}
+	if strings.Join(got.RequiredCapabilities, ",") != "profile:postgres,role:worker" {
+		t.Fatalf("unexpected persisted requirements: %+v", got.RequiredCapabilities)
 	}
 
 	listed, err := jobs.List()
@@ -822,6 +833,9 @@ VALUES (
 	if len(jobs) != 1 || jobs[0].ID != "job-1" || jobs[0].Stdout != "ok" {
 		t.Fatalf("unexpected jobs after backfill: %+v", jobs)
 	}
+	if jobs[0].RequiredCapabilities == nil || len(jobs[0].RequiredCapabilities) != 0 {
+		t.Fatalf("expected backfilled unconstrained job, got %+v", jobs[0].RequiredCapabilities)
+	}
 	next, err := store.Jobs().Create(JobCreateInput{Type: "command", Command: "echo"})
 	if err != nil {
 		t.Fatalf("create job after backfill: %v", err)
@@ -842,8 +856,12 @@ CREATE TABLE schema_version (
   id TEXT PRIMARY KEY,
   version INTEGER NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-INSERT INTO schema_version (id, version) VALUES ($1, 1);
+)
+`); err != nil {
+		t.Fatalf("create version 1 schema metadata: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO schema_version (id, version) VALUES ($1, 1)
 `, postgresSchemaVersionID); err != nil {
 		t.Fatalf("seed version 1 schema metadata: %v", err)
 	}
@@ -872,6 +890,55 @@ VALUES ('v1-node', 'http://agent:8081', now(), 'HEALTHY', now())
 	}
 }
 
+func TestPostgresSchemaVersionTwoBackfillsRequiredCapabilities(t *testing.T) {
+	dsn := newPostgresTestDSN(t)
+	db := openPostgresTestDB(t, dsn)
+	if _, err := db.Exec(oldPostgresSchemaSQL); err != nil {
+		t.Fatalf("initialize version 2 job schema: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE schema_version (
+  id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+`); err != nil {
+		t.Fatalf("create version 2 schema metadata: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO schema_version (id, version) VALUES ($1, 2)
+`, postgresSchemaVersionID); err != nil {
+		t.Fatalf("seed version 2 schema metadata: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO jobs (
+  id, type, payload, command, args, status, node_id, attempts,
+  stdout, stderr, stdout_truncated, stderr_truncated, last_error,
+  created_at, updated_at
+)
+VALUES (
+  'job-1', 'command', '', 'echo', '[]'::jsonb, 'QUEUED', '', 0,
+  '', '', false, false, '', now(), now()
+)
+`); err != nil {
+		t.Fatalf("insert version 2 job: %v", err)
+	}
+
+	store := openPostgresTestStoreForDSN(t, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+
+	if got := querySchemaVersion(t, dsn); got != PostgresExpectedSchemaVersion {
+		t.Fatalf("expected upgraded schema version %d, got %d", PostgresExpectedSchemaVersion, got)
+	}
+	job, ok, err := store.Jobs().Get("job-1")
+	if err != nil || !ok {
+		t.Fatalf("get upgraded job: ok=%t err=%v", ok, err)
+	}
+	if job.RequiredCapabilities == nil || len(job.RequiredCapabilities) != 0 {
+		t.Fatalf("expected version 2 row to backfill [], got %+v", job.RequiredCapabilities)
+	}
+}
+
 func TestPostgresSchemaVersionRejectsNewerDatabase(t *testing.T) {
 	dsn := newPostgresTestDSN(t)
 	db := openPostgresTestDB(t, dsn)
@@ -880,8 +947,12 @@ CREATE TABLE schema_version (
   id TEXT PRIMARY KEY,
   version INTEGER NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-INSERT INTO schema_version (id, version) VALUES ($1, $2);
+)
+`); err != nil {
+		t.Fatalf("create newer schema metadata: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO schema_version (id, version) VALUES ($1, $2)
 `, postgresSchemaVersionID, PostgresExpectedSchemaVersion+1); err != nil {
 		t.Fatalf("seed newer schema version: %v", err)
 	}

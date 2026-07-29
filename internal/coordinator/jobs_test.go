@@ -46,6 +46,71 @@ func TestJobStoreCreateAndList(t *testing.T) {
 	}
 }
 
+func TestJobStoreCanonicalizesAndClonesJobSlices(t *testing.T) {
+	store := NewJobStore()
+	args := []string{"input"}
+	requirements := []string{" role:text-worker ", "profile:local", "role:text-worker"}
+
+	created, err := store.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "text-stats",
+		Args:                 args,
+		RequiredCapabilities: requirements,
+	})
+	if err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	if strings.Join(created.RequiredCapabilities, ",") != "profile:local,role:text-worker" {
+		t.Fatalf("unexpected canonical requirements: %+v", created.RequiredCapabilities)
+	}
+
+	args[0] = "mutated input"
+	requirements[0] = "mutated input"
+	created.Args[0] = "mutated create result"
+	created.RequiredCapabilities[0] = "mutated create result"
+
+	got, ok, err := store.Get(created.ID)
+	if err != nil || !ok {
+		t.Fatalf("get job: ok=%t err=%v", ok, err)
+	}
+	if got.Args[0] != "input" || strings.Join(got.RequiredCapabilities, ",") != "profile:local,role:text-worker" {
+		t.Fatalf("stored job was mutated through create boundary: %+v", got)
+	}
+
+	listed, err := store.List()
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	listed[0].Args[0] = "mutated list result"
+	listed[0].RequiredCapabilities[0] = "mutated list result"
+
+	started, err := store.StartAttempt(created.ID, "node-1")
+	if err != nil {
+		t.Fatalf("start attempt: %v", err)
+	}
+	started.Args[0] = "mutated transition result"
+	started.RequiredCapabilities[0] = "mutated transition result"
+
+	got, ok, err = store.Get(created.ID)
+	if err != nil || !ok {
+		t.Fatalf("get job after mutations: ok=%t err=%v", ok, err)
+	}
+	if got.Args[0] != "input" || strings.Join(got.RequiredCapabilities, ",") != "profile:local,role:text-worker" {
+		t.Fatalf("stored job was mutated through return boundaries: %+v", got)
+	}
+}
+
+func TestJobStoreRejectsInvalidRequiredCapabilities(t *testing.T) {
+	store := NewJobStore()
+	if _, err := store.Create(JobCreateInput{
+		Type:                 "command",
+		Command:              "echo",
+		RequiredCapabilities: []string{"-bad"},
+	}); err == nil || !strings.Contains(err.Error(), `invalid required capability "-bad"`) {
+		t.Fatalf("expected invalid requirement error, got %v", err)
+	}
+}
+
 func TestJobStoreListQueuedIDs(t *testing.T) {
 	store := NewJobStore()
 

@@ -146,6 +146,7 @@ func (s *Server) Mux() *http.ServeMux {
 	mux.HandleFunc("/register", s.handleRegister)
 	mux.HandleFunc("/nodes", s.handleListNodes)
 	mux.HandleFunc("/jobs", s.handleJobs)
+	mux.HandleFunc("/jobs/command", s.handleCreateCommandJob)
 	mux.HandleFunc("/jobs/", s.handleJobByID)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/status", s.handleStatus)
@@ -161,10 +162,19 @@ type registerRequest struct {
 }
 
 type createJobRequest struct {
-	Type    string   `json:"type"`
-	Payload string   `json:"payload,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
+	Type                 string          `json:"type"`
+	Payload              string          `json:"payload,omitempty"`
+	Command              string          `json:"command,omitempty"`
+	Args                 []string        `json:"args,omitempty"`
+	RequiredCapabilities json.RawMessage `json:"required_capabilities,omitempty"`
+}
+
+type createCommandJobRequest struct {
+	Type                 string   `json:"type"`
+	Payload              string   `json:"payload,omitempty"`
+	Command              string   `json:"command,omitempty"`
+	Args                 []string `json:"args,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities"`
 }
 
 // HealthHandler is a basic health check.
@@ -492,6 +502,52 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+	if req.RequiredCapabilities != nil {
+		http.Error(w, "required_capabilities are only supported by POST /jobs/command", http.StatusBadRequest)
+		return
+	}
+	s.createJob(w, createCommandJobRequest{
+		Type:    req.Type,
+		Payload: req.Payload,
+		Command: req.Command,
+		Args:    req.Args,
+	})
+}
+
+// handleCreateCommandJob implements fail-closed placement-aware command
+// submission at POST /jobs/command.
+func (s *Server) handleCreateCommandJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireProtocolVersion(w, r) {
+		return
+	}
+
+	var req createCommandJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		http.Error(w, "type is required", http.StatusBadRequest)
+		return
+	}
+	if req.Type != "command" {
+		http.Error(w, "type must be command for POST /jobs/command", http.StatusBadRequest)
+		return
+	}
+	requiredCapabilities, err := protocol.NormalizeRequiredCapabilities(req.RequiredCapabilities)
+	if err != nil {
+		http.Error(w, "invalid required_capabilities: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.RequiredCapabilities = requiredCapabilities
+	s.createJob(w, req)
+}
+
+func (s *Server) createJob(w http.ResponseWriter, req createCommandJobRequest) {
 	if req.Type == "" {
 		http.Error(w, "type is required", http.StatusBadRequest)
 		return
@@ -511,10 +567,11 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := s.jobs.Create(JobCreateInput{
-		Type:    req.Type,
-		Payload: req.Payload,
-		Command: req.Command,
-		Args:    req.Args,
+		Type:                 req.Type,
+		Payload:              req.Payload,
+		Command:              req.Command,
+		Args:                 req.Args,
+		RequiredCapabilities: req.RequiredCapabilities,
 	})
 	if err != nil {
 		s.logger.Error("create job failed", "err", err)

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"planetary-mesh/internal/protocol"
 )
 
 // JobStatus represents the lifecycle state of a job.
@@ -31,6 +33,8 @@ type Job struct {
 	Payload string   `json:"payload"`
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
+	// RequiredCapabilities is coordinator-owned placement metadata.
+	RequiredCapabilities []string `json:"required_capabilities"`
 
 	Status JobStatus `json:"status"`
 
@@ -51,10 +55,11 @@ type Job struct {
 }
 
 type JobCreateInput struct {
-	Type    string
-	Payload string
-	Command string
-	Args    []string
+	Type                 string
+	Payload              string
+	Command              string
+	Args                 []string
+	RequiredCapabilities []string
 }
 
 type JobResult struct {
@@ -112,24 +117,30 @@ func (s *JobStore) Create(in JobCreateInput) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	requiredCapabilities, err := protocol.NormalizeRequiredCapabilities(in.RequiredCapabilities)
+	if err != nil {
+		return Job{}, err
+	}
+
 	s.nextID++
 	id := fmt.Sprintf("job-%d", s.nextID)
 	now := time.Now().UTC()
 
 	j := &Job{
-		ID:        id,
-		Type:      in.Type,
-		Payload:   in.Payload,
-		Command:   in.Command,
-		Args:      append([]string(nil), in.Args...),
-		Status:    JobStatusQueued,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                   id,
+		Type:                 in.Type,
+		Payload:              in.Payload,
+		Command:              in.Command,
+		Args:                 append([]string(nil), in.Args...),
+		RequiredCapabilities: requiredCapabilities,
+		Status:               JobStatusQueued,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 
 	s.jobs[id] = j
 
-	return *j, nil
+	return cloneJob(*j), nil
 }
 
 // List returns all jobs as a slice of copies.
@@ -139,7 +150,7 @@ func (s *JobStore) List() ([]Job, error) {
 
 	result := make([]Job, 0, len(s.jobs))
 	for _, j := range s.jobs {
-		result = append(result, *j)
+		result = append(result, cloneJob(*j))
 	}
 	return result, nil
 }
@@ -202,7 +213,7 @@ func (s *JobStore) Get(id string) (Job, bool, error) {
 	if !ok {
 		return Job{}, false, nil
 	}
-	return *j, true, nil
+	return cloneJob(*j), true, nil
 }
 
 func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
@@ -226,7 +237,7 @@ func (s *JobStore) StartAttempt(id, nodeID string) (Job, error) {
 	}
 	j.UpdatedAt = now
 
-	return *j, nil
+	return cloneJob(*j), nil
 }
 
 func (s *JobStore) Complete(id, nodeID string, result JobResult) (Job, error) {
@@ -250,15 +261,16 @@ func (s *JobStore) AcceptReportedResult(id, nodeID string, status JobStatus, res
 		return Job{}, ReportedResultNotFound, nil
 	}
 	if j.Status != JobStatusRunning {
-		return *j, classifyReportedResultMiss(*j, nodeID), nil
+		current := cloneJob(*j)
+		return current, classifyReportedResultMiss(current, nodeID), nil
 	}
 	if j.NodeID != nodeID {
-		return *j, ReportedResultWrongNode, nil
+		return cloneJob(*j), ReportedResultWrongNode, nil
 	}
 
 	now := time.Now().UTC()
 	applyJobResult(j, nodeID, status, result, now)
-	return *j, ReportedResultAccepted, nil
+	return cloneJob(*j), ReportedResultAccepted, nil
 }
 
 // ExpireQueuedJobs marks queued jobs older than maxAge as failed.
@@ -341,7 +353,19 @@ func (s *JobStore) finish(id, nodeID string, status JobStatus, result JobResult)
 	now := time.Now().UTC()
 	applyJobResult(j, nodeID, status, result, now)
 
-	return *j, nil
+	return cloneJob(*j), nil
+}
+
+func cloneJob(job Job) Job {
+	job.Args = append([]string(nil), job.Args...)
+	job.RequiredCapabilities = append([]string(nil), job.RequiredCapabilities...)
+	if job.Args == nil {
+		job.Args = []string{}
+	}
+	if job.RequiredCapabilities == nil {
+		job.RequiredCapabilities = []string{}
+	}
+	return job
 }
 
 func applyJobResult(j *Job, nodeID string, status JobStatus, result JobResult, now time.Time) {
