@@ -16,16 +16,18 @@ shared compute scenarios.
   pre-release local binary artifact/install-smoke workflow, implemented
   `pmctl` workflow template validation, inspection, preview, and submission,
   a pre-release Linux/systemd managed-service path for coordinator and agent,
-  and read-only `pmctl doctor` private-mesh readiness diagnostics. Phase 1
-  closed after the Milestone 20 readiness review, Milestone 18
+  read-only `pmctl doctor` private-mesh readiness diagnostics, and
+  capability-constrained, least-reported-active scheduling. Phase 1 closed
+  after the Milestone 20 readiness review, Milestone 18
   real multi-device LAN validation, and Milestone 19 portable agent validation
   built-ins.
-- **Coordinator**: registers agents, tracks node health, accepts jobs, dispatches
-  first to the first healthy node, reassigns after retryable dispatch failures,
+- **Coordinator**: registers agents, tracks node health, accepts jobs, filters
+  `HEALTHY` nodes by optional all-of capability requirements, dispatches to the
+  matching node with the lowest reported active execution count (node ID breaks
+  ties), reassigns within that matching set after retryable dispatch failures,
   periodically revisits queued jobs, owns explicit job lifecycle transitions,
   accepts additive terminal result reports from agents, exposes metrics and
-  status, stores reported node capabilities/load, and can persist nodes and jobs
-  in Postgres.
+  status, and can persist nodes and jobs in Postgres.
 - **Agent**: registers with the coordinator, sends heartbeats with optional
   static capabilities and current active execution count, executes allowlisted
   command jobs without invoking a shell, including explicit portable validation
@@ -39,7 +41,7 @@ shared compute scenarios.
 - **Security**: plain HTTP is available for local development; mTLS and node
   allowlists are supported but opt-in and manually configured.
 - **Persistence**: in-memory storage is the default; Postgres durability is
-  optional and includes lightweight schema readiness metadata version `2`.
+  optional and includes lightweight schema readiness metadata version `3`.
   Postgres startup leaves persisted `RUNNING` jobs in a bounded reconciliation
   grace window before failing unreconciled jobs.
 
@@ -48,14 +50,18 @@ shared compute scenarios.
 - HTTP/JSON control plane with `X-Planetary-Protocol-Version: 1`.
 - Manual HTTP/JSON v0 API inventory and compatibility policy.
 - Coordinator `GET /healthz`, `GET /status`, `POST /register`, `GET /nodes`,
-  `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/result`, and
-  `GET /metrics`.
+  `POST /jobs`, placement-aware `POST /jobs/command`, `GET /jobs`,
+  `GET /jobs/{id}`, `POST /jobs/{id}/result`, and `GET /metrics`.
 - Agent `GET /healthz` and `POST /execute`.
 - Node registration and heartbeat through repeated `POST /register` calls.
 - Node health states: `HEALTHY`, `SUSPECT`, and `OFFLINE`.
 - Operator-visible node capabilities and active execution counts reported
   through registration/heartbeat, `GET /nodes`, and `pmctl nodes list`.
-- Command job submission with `type="command"`, `command`, and optional `args`.
+- Command job submission with `type="command"`, `command`, optional `args`, and
+  optional canonical all-of `required_capabilities`.
+- Capability-constrained selection of matching `HEALTHY` nodes, ordered by
+  reported active executions and then node ID; unconstrained jobs use the same
+  deterministic ordering.
 - Explicit coordinator-owned job lifecycle states: `QUEUED`, `RUNNING`,
   `COMPLETED`, and `FAILED`.
 - Allowlisted external process execution using `exec.CommandContext`.
@@ -82,9 +88,9 @@ shared compute scenarios.
 - Cross-node reassignment after retryable dispatch failures when the selected
   healthy node exhausts its configured attempts.
 - Periodic coordinator-owned re-dispatch for jobs left `QUEUED` because no
-  healthy node existed at submission time.
-- Queued jobs expire as `FAILED` after 24 hours if no healthy node becomes
-  available.
+  eligible healthy node existed at submission time.
+- Queued jobs expire as `FAILED` after 24 hours if no eligible healthy node
+  becomes available.
 - Optional Postgres persistence for nodes/jobs, node capability/load metadata,
   bounded startup reconciliation grace for persisted `RUNNING` jobs, and schema
   readiness reporting.
@@ -105,7 +111,8 @@ shared compute scenarios.
 - Production Docker image, signed distribution, package-manager delivery,
   GitHub Release artifact, automatic upgrade, macOS launchd installer, or
   Windows service installer.
-- Load-aware, capability-aware, or queue-aware scheduling.
+- Reservations, capacity guarantees, priorities, quotas, fairness, or
+  queue-aware scheduling.
 - Job cancellation API or cancellation behavior.
 - Durable agent result history after agent restart.
 - Full in-progress execution recovery after coordinator restart.
@@ -146,11 +153,13 @@ added local template inspection and preview before submission. Milestone 27
 added pre-release Linux/systemd installation and lifecycle validation for the
 coordinator and agent without changing runtime behavior. Milestone 28 added
 read-only `pmctl doctor` readiness diagnostics over the existing coordinator
-APIs. Remaining gaps such as signed or package-managed distribution, non-Linux
-service installers, automatic upgrade, scheduler policy, cancellation,
-generated API contracts, further operator UX beyond the current CLI diagnostics,
-coordinator-owned template registries, and stronger isolation are Phase 2 or
-later backlog unless explicitly reclassified.
+APIs. Milestone 29 added fail-closed capability-constrained submission and
+deterministic least-reported-active scheduling without changing the agent wire
+protocol. Remaining gaps such as signed or package-managed distribution,
+non-Linux service installers, automatic upgrade, broader capacity/fairness
+policy, cancellation, generated API contracts, further operator UX beyond the
+current CLI diagnostics, coordinator-owned template registries, and stronger
+isolation are Phase 2 or later backlog unless explicitly reclassified.
 
 ## Architecture Summary
 
@@ -286,6 +295,12 @@ To verify the current template path locally:
 GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh
 ```
 
+To verify capability-constrained placement and queued behavior:
+
+```bash
+GOCACHE=/private/tmp/planetary-mesh-gocache-scheduler ./examples/scheduler_smoke.sh
+```
+
 To verify the pre-release installed-binary path locally:
 
 ```bash
@@ -309,8 +324,9 @@ For durable-state verification with Docker Compose:
 ```
 
 That workflow starts coordinator + Postgres + agents, verifies status, schema
-readiness, and reconciliation metadata, checks deferred restart recovery for
-persisted `RUNNING` jobs, checks `/metrics`, and submits another command after
+readiness, and reconciliation metadata, verifies constrained-job requirements
+before and after restart, checks deferred restart recovery for persisted
+`RUNNING` jobs, checks `/metrics`, and submits another constrained command after
 restart.
 
 For step-by-step operator workflows, see the
@@ -373,10 +389,12 @@ go run ./cmd/coordinator
 ```
 
 Postgres startup uses embedded schema initialization plus lightweight schema
-readiness metadata. `schema_version` value `2` represents the current nodes/jobs
-schema, node capability/load columns, and readiness marker. The coordinator
-exposes schema readiness through startup logs, `/status`, `/metrics`,
-`pmctl --json status`, tests, and the Postgres smoke workflow.
+readiness metadata. `schema_version` value `3` represents the current nodes/jobs
+schema, node capability/load columns, canonical job requirements, and readiness
+marker. The coordinator exposes schema readiness through startup logs,
+`/status`, `/metrics`, `pmctl --json status`, tests, and the Postgres smoke
+workflow. Rollback to a version-2 coordinator requires restoring a complete
+pre-upgrade database backup.
 
 When Postgres is enabled, persisted `RUNNING` jobs found at coordinator startup
 enter a bounded reconciliation grace window. The default is `30s` and can be set
@@ -447,12 +465,27 @@ pmctl doctor --strict
 pmctl nodes list
 pmctl jobs list
 pmctl submit command echo hello mesh
+pmctl submit command --require-capability role:text-worker -- echo hello mesh
 pmctl templates validate examples/templates/text-stats.pmtemplate.json
 pmctl templates inspect examples/templates/text-stats.pmtemplate.json
-pmctl templates preview examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
-pmctl submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
+pmctl templates preview examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-workloads/input.txt
+pmctl submit template examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-workloads/input.txt
 pmctl jobs inspect job-1
 ```
+
+Global flags such as `--json` remain before the top-level command. For direct
+submission, placement parsing stops at the first command token, so a later
+`--require-capability` is a workload argument; use `--` to end placement parsing
+explicitly when the logical command begins with `-`. Repeated requirements are
+trimmed, deduplicated, sorted, and matched all-of. Human job output shows
+`REQUIRES`/`Required Capabilities`; JSON always emits
+`required_capabilities`, including `[]`.
+
+If a constrained job has no matching healthy node, creation succeeds and it
+remains `QUEUED` with zero attempts until a matching heartbeat arrives or the
+fixed 24-hour queue window expires. If an older coordinator lacks the
+placement-aware endpoint, `pmctl` fails without falling back to an
+unconstrained submission.
 
 Use JSON output for automation:
 
@@ -465,8 +498,9 @@ pmctl --json doctor --timeout 5s
 `doctor` uses only `GET /status` and `GET /nodes`. A reachable coordinator with
 no `HEALTHY` agent is `WARN`: normal mode exits `0`, while `--strict` exits `5`.
 `PASS` means the coordinator reports a plausibly runnable private mesh; it does
-not verify agent allowlists, workload executables, agent-local files, strong
-isolation, or production readiness. See the
+not prove that a particular requirement set has a matching node or verify agent
+allowlists, workload executables, agent-local files, strong isolation, or
+production readiness. See the
 [Operator Diagnostics runbook](docs/runbooks/operator-diagnostics.md).
 
 Point at another coordinator with a flag, environment variable, or config file:
@@ -554,3 +588,4 @@ Architecture Decision Records:
 - [ADR 0013: Agent reconciliation strategy after coordinator restart](docs/adr/0013-agent-reconciliation-strategy.md)
 - [ADR 0014: HTTP/JSON v0 API inventory and compatibility policy](docs/adr/0014-http-json-v0-api-inventory-and-compatibility.md)
 - [ADR 0015: Private workflow template model](docs/adr/0015-private-workflow-template-model.md)
+- [ADR 0016: Capability-aware scheduler policy](docs/adr/0016-capability-aware-scheduler-policy.md)

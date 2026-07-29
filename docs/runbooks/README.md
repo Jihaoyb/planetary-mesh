@@ -60,6 +60,8 @@ Current behavior:
 - Tracked example workflow templates under `examples/templates/` for the
   current `pmctl` client-side validation, inspection, preview, and expansion
   path.
+- Optional all-of command-job capability requirements and deterministic
+  matching-node ordering by reported active executions then node ID.
 - Pre-release local binary artifact generation and installed-binary smoke
   validation for development use.
 - Pre-release Linux/systemd installation for independently managed coordinator
@@ -122,9 +124,10 @@ Real LAN validation additionally expects:
 | Doctor smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-doctor ./examples/doctor_smoke.sh` | Verifies coordinator-only WARN/strict behavior, healthy PASS, schema-versioned JSON, and no job creation. |
 | External workload smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-workload ./examples/external_workload_smoke.sh` | Builds and runs the tracked `text-stats` helper through the allowlisted external command path. |
 | Template smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-template ./examples/template_smoke.sh` | Validates, previews, and submits the tracked `text-stats` template through `pmctl`. |
+| Scheduler smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-scheduler ./examples/scheduler_smoke.sh` | Proves constrained placement, nonmatching-agent exclusion, unavailable-capability queuing, requirement inspection, and unconstrained compatibility. |
 | Local release smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-release ./examples/release_smoke.sh` | Builds a host release layout and runs coordinator, agent, installed `pmctl doctor`, `text-stats`, and installed template preview/submission. |
 | Linux service-install smoke | `GOCACHE=/private/tmp/planetary-mesh-gocache-linux-service ./examples/linux_service_install_smoke.sh` | Builds a Linux archive and validates service assets and safe temporary-root install/uninstall behavior without mutating the host. |
-| Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies durable storage and reconciliation behavior. |
+| Postgres smoke | `./examples/postgres_smoke.sh` | Requires Docker Compose; verifies schema version `3`, constrained-job persistence, and reconciliation behavior. |
 | First-run onboarding | Follow [First-Run Private Mesh Onboarding](first-run-private-mesh.md) | Source-based local and LAN operator path with cleanup and failure handling. |
 | Opt-in Postgres tests | `GOCACHE=/private/tmp/planetary-mesh-gocache-postgres go test -tags postgres ./internal/coordinator` | Use only when touching Postgres behavior or explicitly validating durable storage. |
 | Real LAN validation | Follow [Real LAN Validation](real-lan-validation.md) | Manual gate for proving coordinator, remote agent, `pmctl`, dispatch, result capture, and failure/restart behavior across physical LAN machines. |

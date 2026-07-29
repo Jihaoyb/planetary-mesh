@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"planetary-mesh/internal/protocol"
@@ -103,6 +104,128 @@ func TestHandleCommandJobRejectsPayload(t *testing.T) {
 	srv.handleJobs(w, req)
 	if w.Result().StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleCreateCommandJobCanonicalizesRequirements(t *testing.T) {
+	srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+	bodyBytes, err := json.Marshal(createCommandJobRequest{
+		Type:                 "command",
+		Command:              "text-stats",
+		Args:                 []string{"input.txt"},
+		RequiredCapabilities: []string{" role:text-worker ", "profile:local", "role:text-worker"},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := newVersionedRequest(http.MethodPost, "/jobs/command", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Mux().ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Result().StatusCode, w.Body.String())
+	}
+	var got Job
+	if err := json.NewDecoder(w.Result().Body).Decode(&got); err != nil {
+		t.Fatalf("decode job: %v", err)
+	}
+	if len(got.RequiredCapabilities) != 2 ||
+		got.RequiredCapabilities[0] != "profile:local" ||
+		got.RequiredCapabilities[1] != "role:text-worker" {
+		t.Fatalf("unexpected requirements: %+v", got.RequiredCapabilities)
+	}
+}
+
+func TestHandleCreateCommandJobNormalizesEmptyRequirements(t *testing.T) {
+	for _, body := range []string{
+		`{"type":"command","command":"echo"}`,
+		`{"type":"command","command":"echo","required_capabilities":null}`,
+		`{"type":"command","command":"echo","required_capabilities":[]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+			req := newVersionedRequest(http.MethodPost, "/jobs/command", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			srv.Mux().ServeHTTP(w, req)
+
+			if w.Result().StatusCode != http.StatusCreated {
+				t.Fatalf("expected 201, got %d: %s", w.Result().StatusCode, w.Body.String())
+			}
+			var raw map[string]any
+			if err := json.NewDecoder(w.Result().Body).Decode(&raw); err != nil {
+				t.Fatalf("decode job: %v", err)
+			}
+			requirements, ok := raw["required_capabilities"].([]any)
+			if !ok || len(requirements) != 0 {
+				t.Fatalf("expected required_capabilities [], got %#v", raw["required_capabilities"])
+			}
+		})
+	}
+}
+
+func TestHandleJobsRejectsPlacementFieldOnLegacyEndpoint(t *testing.T) {
+	for _, value := range []string{"null", "[]", `["role:worker"]`} {
+		t.Run(value, func(t *testing.T) {
+			store := NewJobStore()
+			srv := NewServer(NewNodeRegistry(), store, nil)
+			body := `{"type":"command","command":"echo","required_capabilities":` + value + `}`
+			req := newVersionedRequest(http.MethodPost, "/jobs", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			srv.Mux().ServeHTTP(w, req)
+
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+			}
+			if got := w.Body.String(); got != "required_capabilities are only supported by POST /jobs/command\n" {
+				t.Fatalf("unexpected error: %q", got)
+			}
+			jobs, err := store.List()
+			if err != nil {
+				t.Fatalf("list jobs: %v", err)
+			}
+			if len(jobs) != 0 {
+				t.Fatalf("legacy endpoint created a constrained job: %+v", jobs)
+			}
+		})
+	}
+}
+
+func TestHandleCreateCommandJobRejectsInvalidRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "missing type", body: `{"command":"echo"}`, want: "type is required\n"},
+		{name: "wrong type", body: `{"type":"other","command":"echo"}`, want: "type must be command for POST /jobs/command\n"},
+		{name: "payload", body: `{"type":"command","command":"echo","payload":"no"}`, want: "payload is not supported for type=command\n"},
+		{
+			name: "malformed requirement",
+			body: `{"type":"command","command":"echo","required_capabilities":["-bad"]}`,
+			want: "invalid required_capabilities: invalid required capability \"-bad\"\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := NewServer(NewNodeRegistry(), NewJobStore(), nil)
+			req := newVersionedRequest(http.MethodPost, "/jobs/command", strings.NewReader(tc.body))
+			w := httptest.NewRecorder()
+
+			srv.Mux().ServeHTTP(w, req)
+
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+			}
+			if got := w.Body.String(); got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
 	}
 }
 

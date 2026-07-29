@@ -20,11 +20,12 @@ type fakeClient struct {
 	jobs   []Job
 	job    Job
 
-	command string
-	args    []string
-	calls   int
-	creates int
-	err     error
+	command              string
+	args                 []string
+	requiredCapabilities []string
+	calls                int
+	creates              int
+	err                  error
 }
 
 func (f *fakeClient) Status(context.Context) (protocol.CoordinatorStatusResponse, error) {
@@ -53,11 +54,12 @@ func (f *fakeClient) GetJob(_ context.Context, id string) (Job, error) {
 	return f.job, nil
 }
 
-func (f *fakeClient) CreateCommandJob(_ context.Context, command string, args []string) (Job, error) {
+func (f *fakeClient) CreateCommandJob(_ context.Context, command string, args, requiredCapabilities []string) (Job, error) {
 	f.calls++
 	f.creates++
 	f.command = command
 	f.args = append([]string(nil), args...)
+	f.requiredCapabilities = append([]string(nil), requiredCapabilities...)
 	return f.job, f.err
 }
 
@@ -95,6 +97,74 @@ func TestRunCommandSubmitCommand(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "job-1") || !strings.Contains(out.String(), "QUEUED") {
 		t.Fatalf("unexpected output:\n%s", out.String())
+	}
+}
+
+func TestRunCommandSubmitCommandParsesPlacementBeforeWorkload(t *testing.T) {
+	client := &fakeClient{job: Job{ID: "job-1", Type: "command", Command: "echo", Status: "QUEUED"}}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{
+		"submit", "command",
+		"--require-capability", " role:worker ",
+		"--require-capability=profile:local",
+		"--require-capability", "role:worker",
+		"echo",
+		"--require-capability", "workload-value",
+		"--json",
+	}, &out, false)
+	if err != nil {
+		t.Fatalf("submit constrained command: %v", err)
+	}
+	if client.command != "echo" {
+		t.Fatalf("unexpected command: %q", client.command)
+	}
+	if !equalStringSlices(client.args, []string{"--require-capability", "workload-value", "--json"}) {
+		t.Fatalf("unexpected workload args: %q", client.args)
+	}
+	if !equalStringSlices(client.requiredCapabilities, []string{"profile:local", "role:worker"}) {
+		t.Fatalf("unexpected requirements: %q", client.requiredCapabilities)
+	}
+}
+
+func TestRunCommandSubmitCommandExplicitFlagTerminator(t *testing.T) {
+	client := &fakeClient{job: Job{ID: "job-1", Type: "command", Command: "--logical-command", Status: "QUEUED"}}
+
+	err := runCommandWithClient(context.Background(), client, []string{
+		"submit", "command", "--require-capability", "role:worker", "--", "--logical-command", "arg",
+	}, ioDiscard{}, false)
+	if err != nil {
+		t.Fatalf("submit command with terminator: %v", err)
+	}
+	if client.command != "--logical-command" || !equalStringSlices(client.args, []string{"arg"}) {
+		t.Fatalf("unexpected command request: command=%q args=%q", client.command, client.args)
+	}
+}
+
+func TestRunCommandSubmitCommandPlacementErrorsAreLocal(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing value", args: []string{"--require-capability"}, want: "--require-capability requires a value"},
+		{name: "unknown flag", args: []string{"--unknown", "echo"}, want: `unknown placement flag "--unknown"`},
+		{name: "invalid label", args: []string{"--require-capability=-bad", "echo"}, want: `invalid required capability "-bad"`},
+		{name: "missing command", args: []string{"--require-capability", "role:worker"}, want: submitCommandUsage},
+		{name: "terminator without command", args: []string{"--"}, want: submitCommandUsage},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeClient{}
+			args := append([]string{"submit", "command"}, tc.args...)
+			err := runCommandWithClient(context.Background(), client, args, ioDiscard{}, false)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if client.calls != 0 || client.creates != 0 {
+				t.Fatalf("local validation contacted client: calls=%d creates=%d", client.calls, client.creates)
+			}
+		})
 	}
 }
 
@@ -284,6 +354,40 @@ func TestRunCommandTemplatesPreviewHumanOutput(t *testing.T) {
 	}
 }
 
+func TestRunCommandTemplatesPreviewIncludesCanonicalRequirements(t *testing.T) {
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "text-stats",
+  "command": "text-stats",
+  "args": []
+}`)
+	client := &fakeClient{}
+	var out bytes.Buffer
+
+	err := runCommandWithClient(context.Background(), client, []string{
+		"templates", "preview", path,
+		"--require-capability", " role:text-worker ",
+		"--require-capability=profile:local",
+	}, &out, true)
+	if err != nil {
+		t.Fatalf("templates preview requirements: %v", err)
+	}
+	var got struct {
+		ExpandedJob struct {
+			RequiredCapabilities []string `json:"required_capabilities"`
+		} `json:"expanded_job"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if !equalStringSlices(got.ExpandedJob.RequiredCapabilities, []string{"profile:local", "role:text-worker"}) {
+		t.Fatalf("unexpected preview requirements: %+v", got.ExpandedJob.RequiredCapabilities)
+	}
+	if client.calls != 0 {
+		t.Fatalf("preview contacted client %d times", client.calls)
+	}
+}
+
 func TestRunCommandTemplatesPreviewJSONOutput(t *testing.T) {
 	path := writeTemplateFile(t, `{
   "version": 1,
@@ -353,7 +457,8 @@ func TestRunCommandTemplatesPreviewJSONOutputUsesEmptyArgsArray(t *testing.T) {
 
 	var got struct {
 		ExpandedJob struct {
-			Args []string `json:"args"`
+			Args                 []string `json:"args"`
+			RequiredCapabilities []string `json:"required_capabilities"`
 		} `json:"expanded_job"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -361,6 +466,9 @@ func TestRunCommandTemplatesPreviewJSONOutputUsesEmptyArgsArray(t *testing.T) {
 	}
 	if got.ExpandedJob.Args == nil || len(got.ExpandedJob.Args) != 0 {
 		t.Fatalf("expected empty args array, got %s", out.String())
+	}
+	if got.ExpandedJob.RequiredCapabilities == nil || len(got.ExpandedJob.RequiredCapabilities) != 0 {
+		t.Fatalf("expected empty required_capabilities array, got %s", out.String())
 	}
 	if client.calls != 0 {
 		t.Fatalf("templates preview JSON should not contact coordinator, got %d calls", client.calls)
@@ -385,7 +493,13 @@ func TestRunCommandSubmitTemplate(t *testing.T) {
 	client := &fakeClient{job: Job{ID: "job-1", Type: "command", Command: "text-stats", Args: []string{"--format", "json", "/agent/input.txt"}, Status: "QUEUED"}}
 	var out bytes.Buffer
 
-	err := runCommandWithClient(context.Background(), client, []string{"submit", "template", path, "--set", "input_path=/agent/input.txt", "--set", "format=json"}, &out, false)
+	err := runCommandWithClient(context.Background(), client, []string{
+		"submit", "template", path,
+		"--set", "input_path=/agent/input.txt",
+		"--require-capability", "role:text-worker",
+		"--set=format=json",
+		"--require-capability=profile:local",
+	}, &out, false)
 	if err != nil {
 		t.Fatalf("submit template: %v", err)
 	}
@@ -395,6 +509,9 @@ func TestRunCommandSubmitTemplate(t *testing.T) {
 	wantArgs := []string{"--format", "json", "/agent/input.txt"}
 	if !equalStringSlices(client.args, wantArgs) {
 		t.Fatalf("expected args %q, got %q", wantArgs, client.args)
+	}
+	if !equalStringSlices(client.requiredCapabilities, []string{"profile:local", "role:text-worker"}) {
+		t.Fatalf("unexpected requirements: %q", client.requiredCapabilities)
 	}
 	if !strings.Contains(out.String(), "job-1") || !strings.Contains(out.String(), "QUEUED") {
 		t.Fatalf("unexpected output:\n%s", out.String())
@@ -603,6 +720,44 @@ func TestRunCommandUsageErrors(t *testing.T) {
 	}
 }
 
+func TestRunCommandOutputFailuresPreserveCreationBoundary(t *testing.T) {
+	client := &fakeClient{job: Job{ID: "job-1", Type: "command", Command: "echo", Status: "QUEUED"}}
+	err := runCommandWithClient(
+		context.Background(),
+		client,
+		[]string{"submit", "command", "--require-capability", "role:worker", "echo"},
+		failingWriter{},
+		false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "writer-secret") {
+		t.Fatalf("expected writer error after submission, got %v", err)
+	}
+	if client.creates != 1 {
+		t.Fatalf("expected job creation before output failure, got %d", client.creates)
+	}
+
+	path := writeTemplateFile(t, `{
+  "version": 1,
+  "name": "preview",
+  "command": "echo",
+  "args": []
+}`)
+	previewClient := &fakeClient{}
+	err = runCommandWithClient(
+		context.Background(),
+		previewClient,
+		[]string{"templates", "preview", path, "--require-capability", "role:worker"},
+		failingWriter{},
+		false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "writer-secret") {
+		t.Fatalf("expected preview writer error, got %v", err)
+	}
+	if previewClient.calls != 0 {
+		t.Fatalf("preview output failure contacted client %d times", previewClient.calls)
+	}
+}
+
 func TestRunCommandTemplateUsageErrors(t *testing.T) {
 	tests := [][]string{
 		{"templates"},
@@ -745,7 +900,7 @@ func TestWriteNodesAndJobs(t *testing.T) {
 	if err := writeJobs(&out, []Job{{ID: "job-1", Status: "COMPLETED", Type: "command", Command: "echo", Args: []string{"hi"}, UpdatedAt: now}}); err != nil {
 		t.Fatalf("write jobs: %v", err)
 	}
-	if !strings.Contains(out.String(), "job-1") || !strings.Contains(out.String(), "echo hi") {
+	if !strings.Contains(out.String(), "job-1") || !strings.Contains(out.String(), "echo hi") || !strings.Contains(out.String(), "REQUIRES") {
 		t.Fatalf("unexpected jobs output:\n%s", out.String())
 	}
 }

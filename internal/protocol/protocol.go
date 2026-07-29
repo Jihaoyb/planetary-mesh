@@ -60,6 +60,14 @@ type NodeLoad struct {
 }
 
 func NormalizeNodeCapabilities(in []string) ([]string, error) {
+	return normalizeCapabilityLabels(in, "node capability", "node capabilities")
+}
+
+func NormalizeRequiredCapabilities(in []string) ([]string, error) {
+	return normalizeCapabilityLabels(in, "required capability", "required capabilities")
+}
+
+func normalizeCapabilityLabels(in []string, singular, plural string) ([]string, error) {
 	if len(in) == 0 {
 		return []string{}, nil
 	}
@@ -69,13 +77,13 @@ func NormalizeNodeCapabilities(in []string) ([]string, error) {
 	for _, raw := range in {
 		label := strings.TrimSpace(raw)
 		if label == "" {
-			return nil, fmt.Errorf("node capability label cannot be empty")
+			return nil, fmt.Errorf("%s label cannot be empty", singular)
 		}
 		if len(label) > MaxNodeCapabilityLength {
-			return nil, fmt.Errorf("node capability %q exceeds %d characters", label, MaxNodeCapabilityLength)
+			return nil, fmt.Errorf("%s %q exceeds %d characters", singular, label, MaxNodeCapabilityLength)
 		}
 		if !isValidNodeCapability(label) {
-			return nil, fmt.Errorf("invalid node capability %q", label)
+			return nil, fmt.Errorf("invalid %s %q", singular, label)
 		}
 		if _, ok := seen[label]; ok {
 			continue
@@ -84,7 +92,7 @@ func NormalizeNodeCapabilities(in []string) ([]string, error) {
 		out = append(out, label)
 	}
 	if len(out) > MaxNodeCapabilities {
-		return nil, fmt.Errorf("node capabilities exceed maximum of %d", MaxNodeCapabilities)
+		return nil, fmt.Errorf("%s exceed maximum of %d", plural, MaxNodeCapabilities)
 	}
 	sort.Strings(out)
 	return out, nil

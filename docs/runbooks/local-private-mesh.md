@@ -180,10 +180,13 @@ use [HTTP/JSON v0 API inventory](../api-http-json-v0.md).
 
 - In-memory coordinator state is lost when the coordinator exits.
 - Plain HTTP is the default for local development.
-- Node capability and load metadata is visibility-only and does not affect
-  scheduling.
-- Initial dispatch selects the first healthy node; retryable dispatch failures
-  can reassign work to another healthy node.
+- Command jobs may require all labels supplied with repeatable
+  `--require-capability` flags.
+- Dispatch filters to matching healthy nodes, then orders by reported active
+  executions and node ID. Retryable failures reassign only within that matching
+  snapshot.
+- Labels and load are heartbeat assertions, not verified workload availability
+  or capacity reservations.
 - `CANCELLED` is reserved but unsupported; there is no cancellation API.
 - Command execution is allowlisted direct execution on trusted hosts, not strong
   sandboxing.

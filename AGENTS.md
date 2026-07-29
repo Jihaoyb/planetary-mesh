@@ -21,10 +21,10 @@ behavior, and future ideas separate in code and documentation.
 
 ## Current Baseline
 
-Current `main` is after Milestone 28 `pmctl doctor` and private-mesh readiness
-diagnostics.
+Current `main` is after Milestone 29 capability-constrained and
+least-reported-active scheduling.
 
-Milestones 1 through 28 are complete:
+Milestones 1 through 29 are complete:
 
 - initial docs/process alignment
 - HTTP/JSON coordinator/agent control plane
@@ -44,7 +44,7 @@ Milestones 1 through 28 are complete:
   coordinator restart
 - runtime implementation of additive agent terminal result reporting and
   bounded Postgres reconciliation grace after coordinator restart
-- Postgres schema readiness metadata version `2`
+- Postgres schema readiness metadata version `3`
 - manual HTTP/JSON v0 API inventory and compatibility policy with focused
   DB-free API drift tests
 - task-oriented operator runbooks for local private mesh operation, Postgres
@@ -80,6 +80,9 @@ Milestones 1 through 28 are complete:
   `/nodes` data, with PASS/WARN/FAIL checks, schema-versioned JSON, strict
   warning gating, safe redaction, no-job smoke coverage, and installed-release
   verification
+- fail-closed capability-constrained command submission through
+  `POST /jobs/command`, canonical job requirement persistence, and deterministic
+  least-reported-active scheduling with node-ID tie breaking
 
 Runtime agent reconciliation is implemented as a narrow best-effort slice:
 agents keep only bounded in-memory terminal result history, and Postgres startup
@@ -88,11 +91,13 @@ Phase 1 is closed and Phase 2 has started with source-based first-run
 onboarding, a practical external workload pattern, a pre-release local binary
 artifact/install-smoke path, `pmctl` templates with local inspection and
 preview, pre-release Linux/systemd service installation, and consolidated
-read-only operator diagnostics. The next work
+read-only operator diagnostics, followed by capability-aware scheduler policy.
+The next work
 should be explicitly planned Phase 2 productized private mesh work such as
 signed or package-managed distribution, richer operator UX beyond the current
-CLI, security hardening, scheduler policy, generated API contract planning, or
-certificate helper planning. Do not jump to marketplace, payment, public-node,
+CLI, security hardening, broader scheduler/capacity policy, generated API
+contract planning, or certificate helper planning. Do not jump to marketplace,
+payment, public-node,
 shared-pool, or remote-node product work without explicit planning and an
 accepted direction.
 
@@ -275,6 +280,7 @@ Current coordinator endpoints:
 - `POST /register`
 - `GET /nodes`
 - `POST /jobs`
+- `POST /jobs/command`
 - `GET /jobs`
 - `GET /jobs/{id}`
 - `POST /jobs/{id}/result`
@@ -297,7 +303,11 @@ coordinator. Keep agents focused on registration, heartbeat, and execution. Keep
 
 Command execution is security-sensitive. Preserve these rules:
 
-- `POST /jobs` supports `type="command"`, `command`, and optional `args`.
+- `POST /jobs` supports legacy unconstrained command submission with
+  `type="command"`, `command`, and optional `args`.
+- `POST /jobs/command` supports command submission with optional canonical
+  `required_capabilities`; the legacy endpoint rejects any occurrence of that
+  field so constraints cannot be silently ignored by an older request path.
 - `payload` is rejected for `type="command"` with `400 Bad Request`.
 - Job responses include execution/result fields:
   - `attempts`
@@ -334,6 +344,10 @@ Command execution is security-sensitive. Preserve these rules:
   remain retryable under coordinator dispatch policy.
 - Node state changes to `SUSPECT` or `OFFLINE` do not cancel an already
   in-flight execution attempt in v0.
+- Placement requirements use all-of matching against operator-configured node
+  labels. Eligible nodes are `HEALTHY` and ordered by reported
+  `active_executions`, then node ID. The snapshot is not a reservation or
+  verified capacity guarantee.
 
 Do not describe this model as strong sandboxing. It is allowlisted direct
 execution on trusted hosts with bounded output and a fixed timeout.
@@ -359,7 +373,7 @@ Preserve these rules:
   agent-to-coordinator result reporting plus a Postgres reconciliation grace
   window before failing persisted `RUNNING` jobs.
 - Postgres integration tests must be opt-in or separately gated.
-- Schema readiness metadata version `2` is current. It is not a full migration
+- Schema readiness metadata version `3` is current. It is not a full migration
   framework.
 
 ## Security Rules
@@ -406,7 +420,8 @@ productized private mesh work:
 - certificate/onboarding helper planning
 - workflow/job template planning for approved private actions layered on
   allowlisted commands
-- scheduler policy for reported node capabilities/load, if explicitly planned
+- broader scheduler capacity, priority, quota, or fairness policy, if
+  explicitly planned
 - generated API contract decision, if explicitly planned
 - follow-up reconciliation hardening if the current best-effort slice proves
   insufficient

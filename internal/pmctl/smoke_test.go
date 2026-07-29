@@ -67,7 +67,7 @@ func TestSmokeFlowAgainstCoordinatorHandler(t *testing.T) {
 		t.Fatalf("unexpected nodes: %+v", nodes)
 	}
 
-	created, err := client.CreateCommandJob(ctx, "echo", []string{"hello smoke"})
+	created, err := client.CreateCommandJob(ctx, "echo", []string{"hello smoke"}, nil)
 	if err != nil {
 		t.Fatalf("submit command: %v", err)
 	}

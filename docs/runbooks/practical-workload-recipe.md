@@ -29,10 +29,12 @@ Planetary Mesh does not transfer files today. Workload inputs must already
 exist on the selected agent host or be reachable by normal host-local means,
 such as a mounted directory managed outside Planetary Mesh.
 
-Scheduling is still first healthy node with retryable cross-node reassignment.
-Reported capabilities are operator-visible only and do not select nodes. For
-this recipe, run one eligible agent or prepare the same helper path and input
-path on every healthy agent that might receive the job.
+Use `--require-capability role:text-worker` to restrict this recipe to healthy
+agents carrying that operator-configured label. Matching candidates are ordered
+by reported active executions then node ID, and retryable reassignment stays
+within the matching snapshot. The label does not prove that the helper is
+allowlisted or that the input path exists, so prepare every matching agent or
+use a more specific label for the prepared host set.
 
 The `text-stats` logical command used below maps to an external executable path
 in the agent allowlist. The submitted command name is the logical key
@@ -161,7 +163,9 @@ On Windows, use the `.exe` helper path in the `text-stats=<path>` mapping.
 Submit the workload directly:
 
 ```bash
-go run ./cmd/pmctl --config config/pmctl.env.example --json submit command text-stats /tmp/planetary-mesh-workloads/input.txt
+go run ./cmd/pmctl --config config/pmctl.env.example --json submit command \
+  --require-capability role:text-worker \
+  text-stats /tmp/planetary-mesh-workloads/input.txt
 ```
 
 Or validate, preview, and submit the tracked template:
@@ -169,8 +173,8 @@ Or validate, preview, and submit the tracked template:
 ```bash
 go run ./cmd/pmctl --config config/pmctl.env.example templates validate examples/templates/text-stats.pmtemplate.json
 go run ./cmd/pmctl --config config/pmctl.env.example templates inspect examples/templates/text-stats.pmtemplate.json
-go run ./cmd/pmctl --config config/pmctl.env.example templates preview examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
-go run ./cmd/pmctl --config config/pmctl.env.example --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=/tmp/planetary-mesh-workloads/input.txt
+go run ./cmd/pmctl --config config/pmctl.env.example templates preview examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-workloads/input.txt
+go run ./cmd/pmctl --config config/pmctl.env.example --json submit template examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
 Record the returned job id, then inspect it:
@@ -227,7 +231,7 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl nodes list
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-go run ./cmd/pmctl --json submit command text-stats <agent-local-input-path>
+go run ./cmd/pmctl --json submit command --require-capability role:text-worker text-stats <agent-local-input-path>
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl templates validate examples/templates/text-stats.pmtemplate.json
@@ -236,10 +240,10 @@ PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
 go run ./cmd/pmctl templates inspect examples/templates/text-stats.pmtemplate.json
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-go run ./cmd/pmctl templates preview examples/templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+go run ./cmd/pmctl templates preview examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=<agent-local-input-path>
 
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-go run ./cmd/pmctl --json submit template examples/templates/text-stats.pmtemplate.json --set input_path=<agent-local-input-path>
+go run ./cmd/pmctl --json submit template examples/templates/text-stats.pmtemplate.json --require-capability role:text-worker --set input_path=<agent-local-input-path>
 ```
 
 Inspect the returned `<job-id>` and expect the same completed result shape as
@@ -252,7 +256,8 @@ the local run.
 | Job fails with command not allowlisted | Agent allowlist lacks the logical key `text-stats` | Inspect `AGENT_COMMAND_ALLOWLIST` on the agent host. |
 | Job has retryable dispatch failures or agent `5xx` responses | The mapped helper path is missing, not executable, or not valid for that OS | Confirm the `text-stats=<agent-local-helper-path>` mapping and file permissions. |
 | Job fails with non-zero exit and `text-stats:` in stderr | Input path is missing or unreadable on the executing agent | Inspect job `stderr` and confirm the file exists on the agent host. |
-| Job runs on an unexpected node | Multiple healthy agents are available and scheduler is first-healthy-node | Use one eligible agent or install the helper and input path on every eligible agent. |
+| Job remains `QUEUED` with `attempts=0` | No healthy node reports every required capability | Inspect `required_capabilities` in the job and capability labels in `pmctl nodes list`; a later matching heartbeat makes the job eligible. |
+| Job runs on an unexpected matching node | Multiple matching healthy agents report equivalent or lower load | Prepare the helper/input on every matching agent or use a narrower operator-managed label; node ID breaks equal-load ties. |
 | Unexpected counts | The selected agent read different host-local content than expected | Compare submitted args with the actual agent-local input path and file contents. |
 | Template validation fails | The template was edited outside the supported v1 schema | Run `pmctl templates validate <template-file>` and compare with `examples/templates/text-stats.pmtemplate.json`. |
 | Template preview looks correct but submit fails with allowlist or file errors | Preview is local and does not check agent allowlists or agent-local files | Inspect the selected agent's allowlist and confirm the input path exists on that host. |

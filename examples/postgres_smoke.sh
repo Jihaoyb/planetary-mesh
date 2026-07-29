@@ -99,8 +99,8 @@ ok = (
     status.get("status") == "ok"
     and status.get("storage_backend") == "postgres"
     and schema.get("ready") is True
-    and schema.get("version") == 2
-    and schema.get("expected_version") == 2
+    and schema.get("version") == 3
+    and schema.get("expected_version") == 3
     and reconciliation.get("grace") == "3s"
 )
 sys.exit(0 if ok else 1)
@@ -182,8 +182,8 @@ require_metrics() {
   grep -q 'planetary_jobs_reconciliation_pending 0' <<<"${metrics}"
   grep -q 'planetary_nodes{state="HEALTHY"}' <<<"${metrics}"
   grep -q 'planetary_postgres_schema_ready 1' <<<"${metrics}"
-  grep -q 'planetary_postgres_schema_version 2' <<<"${metrics}"
-  grep -q 'planetary_postgres_schema_expected_version 2' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_version 3' <<<"${metrics}"
+  grep -q 'planetary_postgres_schema_expected_version 3' <<<"${metrics}"
 }
 
 require_command docker
@@ -219,15 +219,26 @@ echo "Registered nodes"
 pmctl nodes list
 
 echo
-echo "Submitting durable echo job"
-ECHO_JSON="$(pmctl --json submit command echo "hello from postgres smoke")"
+echo "Submitting durable constrained echo job"
+ECHO_JSON="$(
+  pmctl --json submit command \
+    --require-capability "role:worker" \
+    --require-capability "profile:local" \
+    echo "hello from postgres smoke"
+)"
 ECHO_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${ECHO_JSON}")"
 ECHO_FINAL="$(wait_for_job_status "${ECHO_ID}" "COMPLETED")"
-ECHO_STDOUT="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["stdout"].strip())' <<<"${ECHO_FINAL}")"
-if [[ "${ECHO_STDOUT}" != "hello from postgres smoke" ]]; then
-  echo "Unexpected echo stdout: ${ECHO_STDOUT}" >&2
-  exit 1
-fi
+python3 -c '
+import json
+import sys
+
+job = json.load(sys.stdin)
+ok = (
+    job.get("stdout", "").strip() == "hello from postgres smoke"
+    and job.get("required_capabilities") == ["profile:local", "role:worker"]
+)
+sys.exit(0 if ok else 1)
+' <<<"${ECHO_FINAL}"
 
 echo
 echo "Submitting long-running job for restart recovery"
@@ -240,6 +251,18 @@ echo "Restarting coordinator"
 wait_for_url "coordinator" "${COORD_URL}/healthz"
 wait_for_postgres_status
 require_job_status_now "${SLEEP_ID}" "RUNNING"
+ECHO_AFTER_RESTART="$(pmctl --json jobs inspect "${ECHO_ID}")"
+python3 -c '
+import json
+import sys
+
+job = json.load(sys.stdin)
+ok = (
+    job.get("status") == "COMPLETED"
+    and job.get("required_capabilities") == ["profile:local", "role:worker"]
+)
+sys.exit(0 if ok else 1)
+' <<<"${ECHO_AFTER_RESTART}"
 
 RECOVERED_JSON="$(wait_for_job_status "${SLEEP_ID}" "FAILED")"
 RECOVERED_ERROR="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["last_error"])' <<<"${RECOVERED_JSON}")"
@@ -251,15 +274,25 @@ fi
 wait_for_nodes
 
 echo
-echo "Submitting post-restart echo job"
-AFTER_JSON="$(pmctl --json submit command echo "after postgres restart")"
+echo "Submitting post-restart constrained echo job"
+AFTER_JSON="$(
+  pmctl --json submit command \
+    --require-capability "role:worker" \
+    echo "after postgres restart"
+)"
 AFTER_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${AFTER_JSON}")"
 AFTER_FINAL="$(wait_for_job_status "${AFTER_ID}" "COMPLETED")"
-AFTER_STDOUT="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["stdout"].strip())' <<<"${AFTER_FINAL}")"
-if [[ "${AFTER_STDOUT}" != "after postgres restart" ]]; then
-  echo "Unexpected post-restart stdout: ${AFTER_STDOUT}" >&2
-  exit 1
-fi
+python3 -c '
+import json
+import sys
+
+job = json.load(sys.stdin)
+ok = (
+    job.get("stdout", "").strip() == "after postgres restart"
+    and job.get("required_capabilities") == ["role:worker"]
+)
+sys.exit(0 if ok else 1)
+' <<<"${AFTER_FINAL}"
 
 require_metrics
 

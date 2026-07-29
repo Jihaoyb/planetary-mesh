@@ -4,9 +4,10 @@ This runbook covers the current `pmctl` workflow template layer. Templates are
 local JSON files that `pmctl` validates and expands into one existing
 `type="command"` job.
 
-Templates do not add coordinator-owned resources, agent-side registries, new
-endpoints, storage tables, file transfer, artifact storage, scheduler policy,
-secret management, job cancellation, or workflow orchestration.
+Template files do not add coordinator-owned resources, agent-side registries,
+storage tables, file transfer, artifact storage, secret management, job
+cancellation, or workflow orchestration. Placement is separate
+invocation-time job metadata.
 
 ## Current Boundary
 
@@ -21,14 +22,17 @@ Current behavior:
 - `pmctl templates validate <template-file>` validates a template locally
 - `pmctl templates inspect <template-file>` shows local template metadata,
   parameters, and argument token structure
-- `pmctl templates preview <template-file> --set name=value` expands parameter
-  values locally without creating a job
-- `pmctl submit template <template-file> --set name=value` expands the template
-  and submits the existing command-job request shape
+- `pmctl templates preview <template-file>` accepts repeatable placement flags
+  alongside `--set`, then expands parameters and canonical requirements locally
+  without creating a job
+- `pmctl submit template <template-file>` accepts the same placement and
+  parameter flags, then submits one command job
 - template commands are logical allowlist keys, not executable paths, shell
   snippets, or `builtin:<name>` target strings
 - template args are structured `literal` or `param` tokens
 - parameter values expand to one argument vector element each
+- placement requirements are CLI metadata and are not fields in strict template
+  schema version `1`
 - the agent still enforces `AGENT_COMMAND_ALLOWLIST`
 
 There is no interpolation syntax and no shell expansion.
@@ -185,6 +189,7 @@ job vector that submission would create:
 
 ```bash
 go run ./cmd/pmctl templates preview examples/templates/text-stats.pmtemplate.json \
+  --require-capability role:text-worker \
   --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
@@ -196,6 +201,7 @@ Status:                  preview
 Name:                    text-stats
 Expanded Job Type:       command
 Expanded Command:        text-stats
+Required Capabilities:   role:text-worker
 Creates Job:             false
 Contacts Coordinator:    false
 Checks Agent Allowlist:  false
@@ -209,6 +215,7 @@ Use JSON output for automation:
 
 ```bash
 go run ./cmd/pmctl --json templates preview examples/templates/text-stats.pmtemplate.json \
+  --require-capability role:text-worker \
   --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
@@ -224,7 +231,8 @@ Example JSON shape:
     "command": "text-stats",
     "args": [
       "/tmp/planetary-mesh-workloads/input.txt"
-    ]
+    ],
+    "required_capabilities": ["role:text-worker"]
   },
   "creates_job": false,
   "contacts_coordinator": false,
@@ -234,7 +242,8 @@ Example JSON shape:
 
 Preview does not create a job, does not contact the coordinator, and does not
 prove any agent currently allowlists `text-stats`. The expanded command and
-args are separate vector elements, not a shell command line.
+args are separate vector elements, not a shell command line. JSON preview always
+includes `required_capabilities`, using `[]` when none were supplied.
 
 ## Submit a Template
 
@@ -256,6 +265,7 @@ Submit:
 ```bash
 go run ./cmd/pmctl --config config/pmctl.env.example \
   submit template examples/templates/text-stats.pmtemplate.json \
+  --require-capability role:text-worker \
   --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
@@ -264,6 +274,7 @@ For automation:
 ```bash
 go run ./cmd/pmctl --config config/pmctl.env.example --json \
   submit template examples/templates/text-stats.pmtemplate.json \
+  --require-capability role:text-worker \
   --set input_path=/tmp/planetary-mesh-workloads/input.txt
 ```
 
@@ -273,7 +284,8 @@ The submitted job is the same as:
 {
   "type": "command",
   "command": "text-stats",
-  "args": ["/tmp/planetary-mesh-workloads/input.txt"]
+  "args": ["/tmp/planetary-mesh-workloads/input.txt"],
+  "required_capabilities": ["role:text-worker"]
 }
 ```
 
@@ -316,6 +328,9 @@ Template smoke completed successfully
 | Missing required parameter | A required template parameter has no `--set` value | Pass `--set name=value` for every required parameter. |
 | Unknown parameter | A `--set` name is not declared by the template | Compare the command line with the template `parameters` list. |
 | Duplicate `--set` value | The same parameter was supplied more than once | Keep one value for each parameter. |
+| Invalid capability label | A placement flag is empty, malformed, too long, or exceeds the 32-label limit | Use the same canonical label grammar as `AGENT_CAPABILITIES`; pmctl fails locally without a request. |
+| `coordinator does not support required capabilities` | A constrained submit reached an older coordinator | Upgrade the coordinator; pmctl does not fall back to an unconstrained job. |
+| Job remains `QUEUED` with `attempts=0` | No healthy node reports every required capability | Compare job requirements with `pmctl nodes list`; a later matching heartbeat can enable dispatch. |
 | Preview shows `checks_agent_allowlist=false` | Preview is local and cannot know which agent will run the job | Inspect `AGENT_COMMAND_ALLOWLIST` on eligible agents before submission. |
 | Job fails with command not allowlisted | The selected agent does not allowlist the template command key | Inspect `AGENT_COMMAND_ALLOWLIST` on eligible agents. |
 | Job fails in the wrapper | The expanded args refer to missing agent-local files or invalid wrapper inputs | Inspect job `stderr`, `last_error`, and the agent-local file path. |
@@ -325,6 +340,8 @@ Template smoke completed successfully
 - Templates are not sandboxing.
 - Templates do not make untrusted workloads safe.
 - Templates do not transfer input files or store large result artifacts.
+- Capability labels are assertions, not proof of allowlist entries, executable
+  installation, input files, hardware, identity, or capacity.
 - Keep command allowlists narrow and workflow-specific.
 - Prefer wrappers that validate their own domain-specific arguments.
 - Do not allowlist shells or broad interpreters just to make templates more

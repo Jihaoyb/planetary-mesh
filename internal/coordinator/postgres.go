@@ -15,7 +15,7 @@ import (
 )
 
 const RestartRecoveryError = "coordinator restarted before result was recorded"
-const PostgresExpectedSchemaVersion = 2
+const PostgresExpectedSchemaVersion = 3
 
 const postgresSchemaVersionID = "coordinator"
 
@@ -357,6 +357,11 @@ func scanNode(row rowScanner) (Node, error) {
 }
 
 func (s *PostgresJobStore) Create(in JobCreateInput) (Job, error) {
+	requiredCapabilities, err := protocol.NormalizeRequiredCapabilities(in.RequiredCapabilities)
+	if err != nil {
+		return Job{}, err
+	}
+
 	var seq int64
 	if err := s.db.QueryRow(`SELECT nextval('job_id_seq')`).Scan(&seq); err != nil {
 		return Job{}, err
@@ -364,29 +369,43 @@ func (s *PostgresJobStore) Create(in JobCreateInput) (Job, error) {
 
 	now := time.Now().UTC()
 	job := Job{
-		ID:        fmt.Sprintf("job-%d", seq),
-		Type:      in.Type,
-		Payload:   in.Payload,
-		Command:   in.Command,
-		Args:      append([]string(nil), in.Args...),
-		Status:    JobStatusQueued,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                   fmt.Sprintf("job-%d", seq),
+		Type:                 in.Type,
+		Payload:              in.Payload,
+		Command:              in.Command,
+		Args:                 append([]string(nil), in.Args...),
+		RequiredCapabilities: requiredCapabilities,
+		Status:               JobStatusQueued,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 
 	argsJSON, err := json.Marshal(job.Args)
 	if err != nil {
 		return Job{}, err
 	}
+	requiredCapabilitiesJSON, err := json.Marshal(job.RequiredCapabilities)
+	if err != nil {
+		return Job{}, err
+	}
 
 	_, err = s.db.Exec(`
 INSERT INTO jobs (
-  id, type, payload, command, args, status, node_id, attempts,
+  id, type, payload, command, args, required_capabilities, status, node_id, attempts,
   stdout, stderr, stdout_truncated, stderr_truncated, last_error,
   created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5::jsonb, $6, '', 0, '', '', false, false, '', $7, $7)
-`, job.ID, job.Type, job.Payload, job.Command, string(argsJSON), job.Status, now)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, '', 0, '', '', false, false, '', $8, $8)
+`,
+		job.ID,
+		job.Type,
+		job.Payload,
+		job.Command,
+		string(argsJSON),
+		string(requiredCapabilitiesJSON),
+		job.Status,
+		now,
+	)
 	if err != nil {
 		return Job{}, err
 	}
@@ -670,7 +689,7 @@ WHERE id = $4
 }
 
 const jobColumns = `
-id, type, payload, command, args, status, node_id, attempts,
+id, type, payload, command, args, required_capabilities, status, node_id, attempts,
 started_at, completed_at, exit_code, stdout, stderr, stdout_truncated,
 stderr_truncated, last_error, created_at, updated_at`
 
@@ -698,6 +717,7 @@ func scanJobs(rows *sql.Rows) ([]Job, error) {
 func scanJob(row rowScanner) (Job, error) {
 	var job Job
 	var argsJSON []byte
+	var requiredCapabilitiesJSON []byte
 	var startedAt sql.NullTime
 	var completedAt sql.NullTime
 	var exitCode sql.NullInt64
@@ -708,6 +728,7 @@ func scanJob(row rowScanner) (Job, error) {
 		&job.Payload,
 		&job.Command,
 		&argsJSON,
+		&requiredCapabilitiesJSON,
 		&job.Status,
 		&job.NodeID,
 		&job.Attempts,
@@ -730,6 +751,19 @@ func scanJob(row rowScanner) (Job, error) {
 		if err := json.Unmarshal(argsJSON, &job.Args); err != nil {
 			return Job{}, err
 		}
+	}
+	requiredCapabilities := []string{}
+	if len(requiredCapabilitiesJSON) > 0 {
+		if err := json.Unmarshal(requiredCapabilitiesJSON, &requiredCapabilities); err != nil {
+			return Job{}, err
+		}
+	}
+	job.RequiredCapabilities, err = protocol.NormalizeRequiredCapabilities(requiredCapabilities)
+	if err != nil {
+		return Job{}, err
+	}
+	if job.Args == nil {
+		job.Args = []string{}
 	}
 	if startedAt.Valid {
 		t := startedAt.Time

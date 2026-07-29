@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +147,7 @@ func (s *Server) Mux() *http.ServeMux {
 	mux.HandleFunc("/register", s.handleRegister)
 	mux.HandleFunc("/nodes", s.handleListNodes)
 	mux.HandleFunc("/jobs", s.handleJobs)
+	mux.HandleFunc("/jobs/command", s.handleCreateCommandJob)
 	mux.HandleFunc("/jobs/", s.handleJobByID)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/status", s.handleStatus)
@@ -161,10 +163,19 @@ type registerRequest struct {
 }
 
 type createJobRequest struct {
-	Type    string   `json:"type"`
-	Payload string   `json:"payload,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
+	Type                 string          `json:"type"`
+	Payload              string          `json:"payload,omitempty"`
+	Command              string          `json:"command,omitempty"`
+	Args                 []string        `json:"args,omitempty"`
+	RequiredCapabilities json.RawMessage `json:"required_capabilities,omitempty"`
+}
+
+type createCommandJobRequest struct {
+	Type                 string   `json:"type"`
+	Payload              string   `json:"payload,omitempty"`
+	Command              string   `json:"command,omitempty"`
+	Args                 []string `json:"args,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities"`
 }
 
 // HealthHandler is a basic health check.
@@ -492,6 +503,52 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+	if req.RequiredCapabilities != nil {
+		http.Error(w, "required_capabilities are only supported by POST /jobs/command", http.StatusBadRequest)
+		return
+	}
+	s.createJob(w, createCommandJobRequest{
+		Type:    req.Type,
+		Payload: req.Payload,
+		Command: req.Command,
+		Args:    req.Args,
+	})
+}
+
+// handleCreateCommandJob implements fail-closed placement-aware command
+// submission at POST /jobs/command.
+func (s *Server) handleCreateCommandJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireProtocolVersion(w, r) {
+		return
+	}
+
+	var req createCommandJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		http.Error(w, "type is required", http.StatusBadRequest)
+		return
+	}
+	if req.Type != "command" {
+		http.Error(w, "type must be command for POST /jobs/command", http.StatusBadRequest)
+		return
+	}
+	requiredCapabilities, err := protocol.NormalizeRequiredCapabilities(req.RequiredCapabilities)
+	if err != nil {
+		http.Error(w, "invalid required_capabilities: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.RequiredCapabilities = requiredCapabilities
+	s.createJob(w, req)
+}
+
+func (s *Server) createJob(w http.ResponseWriter, req createCommandJobRequest) {
 	if req.Type == "" {
 		http.Error(w, "type is required", http.StatusBadRequest)
 		return
@@ -511,10 +568,11 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := s.jobs.Create(JobCreateInput{
-		Type:    req.Type,
-		Payload: req.Payload,
-		Command: req.Command,
-		Args:    req.Args,
+		Type:                 req.Type,
+		Payload:              req.Payload,
+		Command:              req.Command,
+		Args:                 req.Args,
+		RequiredCapabilities: req.RequiredCapabilities,
 	})
 	if err != nil {
 		s.logger.Error("create job failed", "err", err)
@@ -549,7 +607,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // StartQueuedJobScheduler starts a coordinator-owned loop that revisits queued
-// jobs left behind when no healthy node was available during submission.
+// jobs left behind when no eligible healthy node was available during submission.
 func (s *Server) StartQueuedJobScheduler(stopCh <-chan struct{}) {
 	s.startQueuedJobScheduler(stopCh, defaultQueuedSchedulerInterval)
 }
@@ -592,16 +650,6 @@ func (s *Server) dispatchQueuedJobs() {
 		return
 	}
 	if len(queuedIDs) == 0 {
-		return
-	}
-
-	nodes, err := s.registry.List()
-	if err != nil {
-		s.logger.Error("list nodes during queued scheduler failed", "err", err)
-		return
-	}
-	if !hasHealthyNode(nodes) {
-		s.logger.Warn("queued jobs waiting; no healthy nodes", "queued_jobs", len(queuedIDs))
 		return
 	}
 
@@ -681,19 +729,11 @@ func (s *Server) clearReconciliationPending(jobIDs []string) {
 	s.metrics.ReconciliationPendingJobs.Store(uint64(len(s.reconciliationPending)))
 }
 
-func hasHealthyNode(nodes []Node) bool {
-	for _, node := range nodes {
-		if node.State == NodeStateHealthy {
-			return true
-		}
-	}
-	return false
-}
-
-// dispatchJob picks healthy nodes, marks the job RUNNING, and POSTs to each
-// selected agent's /execute endpoint. It retries retryable failures on the
-// selected node up to dispatch.MaxAttempts with exponential backoff, then
-// reassigns to the next healthy node from the dispatch candidate list.
+// dispatchJob snapshots eligible healthy nodes, orders them by reported active
+// executions and node ID, marks the job RUNNING, and POSTs to each selected
+// agent's /execute endpoint. It retries retryable failures on the selected node
+// up to dispatch.MaxAttempts with exponential backoff, then reassigns to the
+// next node from that fixed candidate snapshot.
 func (s *Server) dispatchJob(jobID string) {
 	if !s.beginDispatch(jobID) {
 		s.logger.Debug("dispatch already active; skipping duplicate", "job_id", jobID)
@@ -721,15 +761,13 @@ func (s *Server) dispatchJob(jobID string) {
 		return
 	}
 
-	healthyNodes := make([]Node, 0, len(nodes))
-	for i := range nodes {
-		if nodes[i].State == NodeStateHealthy {
-			healthyNodes = append(healthyNodes, nodes[i])
-		}
-	}
-
-	if len(healthyNodes) == 0 {
-		s.logger.Warn("no healthy nodes; leaving job QUEUED", "job_id", jobID)
+	candidates := eligibleDispatchNodes(job, nodes)
+	if len(candidates) == 0 {
+		s.logger.Warn(
+			"no eligible healthy nodes; leaving job QUEUED",
+			"job_id", jobID,
+			"required_capabilities", job.RequiredCapabilities,
+		)
 		return
 	}
 
@@ -743,7 +781,7 @@ func (s *Server) dispatchJob(jobID string) {
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		s.logger.Error("marshal execute request failed", "job_id", jobID, "err", err)
-		s.failJob(jobID, healthyNodes[0].ID, JobResult{LastError: err.Error()})
+		s.failJob(jobID, candidates[0].ID, JobResult{LastError: err.Error()})
 		return
 	}
 
@@ -753,10 +791,10 @@ func (s *Server) dispatchJob(jobID string) {
 	}
 
 	lastResult := JobResult{}
-	lastNodeID := healthyNodes[len(healthyNodes)-1].ID
+	lastNodeID := candidates[len(candidates)-1].ID
 
-	for nodeIndex := range healthyNodes {
-		target := healthyNodes[nodeIndex]
+	for nodeIndex := range candidates {
+		target := candidates[nodeIndex]
 		agentURL := buildAgentBaseURL(target.Address, s.security.Enabled()) + "/execute"
 		logger := s.logger.With("job_id", jobID, "node_id", target.ID, "agent_url", agentURL)
 		backoff := s.dispatch.BaseBackoff
@@ -805,14 +843,54 @@ func (s *Server) dispatchJob(jobID string) {
 			backoff *= 2
 		}
 
-		if nodeIndex < len(healthyNodes)-1 {
-			next := healthyNodes[nodeIndex+1]
+		if nodeIndex < len(candidates)-1 {
+			next := candidates[nodeIndex+1]
 			logger.Warn("node retry attempts exhausted; reassigning job", "attempts_on_node", maxAttempts, "next_node_id", next.ID, "last_error", lastResult.LastError)
 		}
 	}
 
 	s.failJob(jobID, lastNodeID, lastResult)
-	s.logger.Error("job failed after all eligible healthy nodes exhausted", "job_id", jobID, "node_count", len(healthyNodes), "attempts_per_node", maxAttempts, "last_node_id", lastNodeID, "last_error", lastResult.LastError)
+	s.logger.Error("job failed after all eligible healthy nodes exhausted", "job_id", jobID, "node_count", len(candidates), "attempts_per_node", maxAttempts, "last_node_id", lastNodeID, "last_error", lastResult.LastError)
+}
+
+func eligibleDispatchNodes(job Job, nodes []Node) []Node {
+	required := make(map[string]struct{}, len(job.RequiredCapabilities))
+	for _, capability := range job.RequiredCapabilities {
+		required[capability] = struct{}{}
+	}
+
+	candidates := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.State != NodeStateHealthy || !nodeHasCapabilities(node, required) {
+			continue
+		}
+		candidates = append(candidates, node)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		left := candidates[i]
+		right := candidates[j]
+		if left.Load.ActiveExecutions == right.Load.ActiveExecutions {
+			return left.ID < right.ID
+		}
+		return left.Load.ActiveExecutions < right.Load.ActiveExecutions
+	})
+	return candidates
+}
+
+func nodeHasCapabilities(node Node, required map[string]struct{}) bool {
+	if len(required) == 0 {
+		return true
+	}
+	available := make(map[string]struct{}, len(node.Capabilities))
+	for _, capability := range node.Capabilities {
+		available[capability] = struct{}{}
+	}
+	for capability := range required {
+		if _, ok := available[capability]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) beginDispatch(jobID string) bool {

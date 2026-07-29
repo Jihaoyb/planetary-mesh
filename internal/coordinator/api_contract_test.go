@@ -37,6 +37,7 @@ func TestCoordinatorAPIContractVersionedEndpointsRequireProtocolHeader(t *testin
 		{name: "register", method: http.MethodPost, path: "/register", body: strings.NewReader(`{}`)},
 		{name: "nodes", method: http.MethodGet, path: "/nodes"},
 		{name: "jobs create", method: http.MethodPost, path: "/jobs", body: strings.NewReader(`{}`)},
+		{name: "command jobs create", method: http.MethodPost, path: "/jobs/command", body: strings.NewReader(`{}`)},
 		{name: "jobs list", method: http.MethodGet, path: "/jobs"},
 		{name: "job inspect", method: http.MethodGet, path: "/jobs/job-1"},
 		{name: "job result", method: http.MethodPost, path: "/jobs/job-1/result", body: strings.NewReader(`{}`)},
@@ -69,6 +70,7 @@ func TestCoordinatorAPIContractRouteMethodExpectations(t *testing.T) {
 		{name: "register", method: http.MethodGet, path: "/register"},
 		{name: "nodes", method: http.MethodPost, path: "/nodes"},
 		{name: "jobs collection", method: http.MethodPut, path: "/jobs"},
+		{name: "command jobs create", method: http.MethodGet, path: "/jobs/command"},
 		{name: "job inspect", method: http.MethodPost, path: "/jobs/job-1"},
 		{name: "job result", method: http.MethodGet, path: "/jobs/job-1/result"},
 		{name: "metrics", method: http.MethodPost, path: "/metrics"},
@@ -144,6 +146,21 @@ func TestCoordinatorAPIContractSuccessfulRouteInventory(t *testing.T) {
 			want: http.StatusOK,
 		},
 		{
+			name: "POST /jobs/command",
+			build: func(t *testing.T) (*Server, *http.Request) {
+				body := mustJSONReader(t, createCommandJobRequest{
+					Type:                 "command",
+					Command:              "echo",
+					Args:                 []string{"hello"},
+					RequiredCapabilities: []string{"role:worker"},
+				})
+				req := newVersionedRequest(http.MethodPost, "/jobs/command", body)
+				req.Header.Set("Content-Type", "application/json")
+				return NewServer(NewNodeRegistry(), NewJobStore(), nil), req
+			},
+			want: http.StatusCreated,
+		},
+		{
 			name: "GET /jobs/{id}",
 			build: func(t *testing.T) (*Server, *http.Request) {
 				store := NewJobStore()
@@ -200,7 +217,7 @@ func TestCoordinatorAPIContractSuccessfulRouteInventory(t *testing.T) {
 }
 
 func TestCoordinatorAPIContractStatusJSONFields(t *testing.T) {
-	schema := protocol.SchemaStatus{Ready: true, Version: 2, ExpectedVersion: 2}
+	schema := protocol.SchemaStatus{Ready: true, Version: 3, ExpectedVersion: 3}
 	srv := NewServerWithRuntime(
 		NewNodeRegistry(),
 		NewJobStore(),
@@ -250,31 +267,32 @@ func TestCoordinatorAPIContractNodeAndJobJSONFields(t *testing.T) {
 
 	exitCode := 0
 	job := Job{
-		ID:              "job-1",
-		Type:            "command",
-		Payload:         "",
-		Command:         "echo",
-		Args:            []string{"hello"},
-		Status:          JobStatusCompleted,
-		NodeID:          "agent-1",
-		Attempts:        1,
-		StartedAt:       &now,
-		CompletedAt:     &now,
-		ExitCode:        &exitCode,
-		Stdout:          "hello\n",
-		Stderr:          "",
-		StdoutTruncated: false,
-		StderrTruncated: false,
-		LastError:       "",
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                   "job-1",
+		Type:                 "command",
+		Payload:              "",
+		Command:              "echo",
+		Args:                 []string{"hello"},
+		RequiredCapabilities: []string{"role:worker"},
+		Status:               JobStatusCompleted,
+		NodeID:               "agent-1",
+		Attempts:             1,
+		StartedAt:            &now,
+		CompletedAt:          &now,
+		ExitCode:             &exitCode,
+		Stdout:               "hello\n",
+		Stderr:               "",
+		StdoutTruncated:      false,
+		StderrTruncated:      false,
+		LastError:            "",
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	jobMap := marshalMap(t, job)
-	assertJSONKeys(t, jobMap, "id", "type", "payload", "command", "args", "status", "node_id", "attempts", "started_at", "completed_at", "exit_code", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "last_error", "created_at", "updated_at")
+	assertJSONKeys(t, jobMap, "id", "type", "payload", "command", "args", "required_capabilities", "status", "node_id", "attempts", "started_at", "completed_at", "exit_code", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "last_error", "created_at", "updated_at")
 }
 
 func TestCoordinatorAPIContractMetricsInventory(t *testing.T) {
-	schema := protocol.SchemaStatus{Ready: true, Version: 2, ExpectedVersion: 2}
+	schema := protocol.SchemaStatus{Ready: true, Version: 3, ExpectedVersion: 3}
 	registry := NewNodeRegistry()
 	if _, err := registry.Register(NodeRegistration{ID: "agent-1", Address: "http://agent.local:8081"}); err != nil {
 		t.Fatalf("register node: %v", err)

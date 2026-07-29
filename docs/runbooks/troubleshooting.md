@@ -194,6 +194,41 @@ Notes:
 - reported active execution count is a heartbeat snapshot and may be stale for
   unhealthy nodes
 
+## Capability-Constrained Job Placement
+
+Use job inspection and node listing together:
+
+```bash
+go run ./cmd/pmctl --json jobs inspect <job-id>
+go run ./cmd/pmctl --json nodes list
+```
+
+Current failure and waiting behavior:
+
+- malformed, empty, overlong, or excessive `--require-capability` labels produce
+  a concise `pmctl:` stderr error, exit `1`, and no coordinator request
+- exact duplicate labels are accepted once and output is sorted canonically
+- an old coordinator returns `404` or `405` for constrained submission; pmctl
+  exits `1` with
+  `coordinator does not support required capabilities; upgrade the coordinator`
+  and never falls back to an unconstrained request
+- an accepted constrained job with no matching healthy node is printed
+  normally, exits `0`, and remains `QUEUED` with `attempts=0`; nonmatching
+  healthy nodes are not contacted
+- a later heartbeat with every required label makes the queued job eligible on
+  a later scheduler pass
+- retryable failures exhaust the configured attempts on each node in the fixed
+  matching snapshot; if all fail, the job becomes `FAILED` with the last
+  retryable error, without trying a nonmatching node
+- validation, allowlist rejection, command failure, timeout, and other terminal
+  classifications are unchanged
+- if stdout fails while printing a successfully submitted job, pmctl exits `1`
+  and the job may already exist; inspect jobs before retrying. Preview output
+  failures also exit `1`, but preview remains local and creates no job
+
+Capability labels are operator assertions. A match does not verify executable
+installation, allowlist coverage, files, identity, hardware, or capacity.
+
 ## Allowlist Rejection
 
 Symptom:
@@ -299,8 +334,8 @@ curl http://localhost:8080/metrics \
 Expected current schema metadata:
 
 ```text
-version=2
-expected_version=2
+version=3
+expected_version=3
 ```
 
 For an end-to-end durable sanity check:

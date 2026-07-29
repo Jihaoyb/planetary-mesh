@@ -152,6 +152,19 @@ func TestDoctorStorageSecurityAndReconciliationPolicies(t *testing.T) {
 			wantSchemaFact: true,
 		},
 		{
+			name: "postgres version 3 ready",
+			mutate: func(status *protocol.CoordinatorStatusResponse) {
+				status.StorageBackend = "postgres"
+				status.Schema = &protocol.SchemaStatus{Ready: true, Version: 3, ExpectedVersion: 3}
+				status.Reconciliation = &protocol.ReconciliationStatus{Grace: "30s"}
+			},
+			checkName:      "storage_readiness",
+			wantStatus:     doctorStatusPass,
+			wantCode:       "postgres_schema_ready",
+			wantReady:      true,
+			wantSchemaFact: true,
+		},
+		{
 			name: "pending reconciliation warns",
 			mutate: func(status *protocol.CoordinatorStatusResponse) {
 				status.StorageBackend = "postgres"
@@ -168,7 +181,7 @@ func TestDoctorStorageSecurityAndReconciliationPolicies(t *testing.T) {
 			name: "unknown ready schema warns",
 			mutate: func(status *protocol.CoordinatorStatusResponse) {
 				status.StorageBackend = "postgres"
-				status.Schema = &protocol.SchemaStatus{Ready: true, Version: 3, ExpectedVersion: 3}
+				status.Schema = &protocol.SchemaStatus{Ready: true, Version: 4, ExpectedVersion: 4}
 				status.Reconciliation = &protocol.ReconciliationStatus{Grace: "30s"}
 			},
 			checkName:      "storage_readiness",

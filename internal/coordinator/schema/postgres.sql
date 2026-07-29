@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   payload TEXT NOT NULL DEFAULT '',
   command TEXT NOT NULL DEFAULT '',
   args JSONB NOT NULL DEFAULT '[]'::jsonb,
+  required_capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
   status TEXT NOT NULL,
   node_id TEXT NOT NULL DEFAULT '',
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -51,3 +52,5 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS required_capabilities JSONB NOT NULL DEFAULT '[]'::jsonb;

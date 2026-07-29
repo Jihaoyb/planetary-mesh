@@ -19,7 +19,10 @@ submission. Linux release archives also provide a pre-release systemd path for
 installing coordinator and agent independently under stable unprivileged
 service identities. `pmctl doctor` provides read-only, secret-safe readiness
 diagnostics from existing coordinator status and node data; it does not create
-jobs or prove workload availability or production readiness.
+jobs or prove workload availability or production readiness. Command jobs can
+require all specified node capability labels, and the coordinator prefers the
+matching healthy node with the lowest reported active execution count, using
+node ID as a deterministic tie break.
 
 It is not a public marketplace, production multi-tenant compute platform,
 signed distribution, package-manager distributed product, automatic-update
@@ -58,7 +61,9 @@ explicit allowlisted external commands or wrapper scripts, following the
 tracked `text-stats` example pattern. Current templates can expose approved
 actions such as OCR, transcription, embeddings, image conversion, or batch
 processing after those wrappers are explicitly built, allowlisted, and
-validated.
+validated. Capability labels can route those submissions toward prepared
+hosts, but they do not attest to wrapper installation, allowlist coverage,
+agent-local files, hardware, identity, or live capacity.
 
 ## Product Path
 

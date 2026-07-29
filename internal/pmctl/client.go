@@ -81,30 +81,32 @@ type Node struct {
 }
 
 type Job struct {
-	ID              string     `json:"id"`
-	Type            string     `json:"type"`
-	Payload         string     `json:"payload"`
-	Command         string     `json:"command,omitempty"`
-	Args            []string   `json:"args,omitempty"`
-	Status          string     `json:"status"`
-	NodeID          string     `json:"node_id,omitempty"`
-	Attempts        int        `json:"attempts"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	ExitCode        *int       `json:"exit_code,omitempty"`
-	Stdout          string     `json:"stdout"`
-	Stderr          string     `json:"stderr"`
-	StdoutTruncated bool       `json:"stdout_truncated"`
-	StderrTruncated bool       `json:"stderr_truncated"`
-	LastError       string     `json:"last_error"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID                   string     `json:"id"`
+	Type                 string     `json:"type"`
+	Payload              string     `json:"payload"`
+	Command              string     `json:"command,omitempty"`
+	Args                 []string   `json:"args,omitempty"`
+	RequiredCapabilities []string   `json:"required_capabilities"`
+	Status               string     `json:"status"`
+	NodeID               string     `json:"node_id,omitempty"`
+	Attempts             int        `json:"attempts"`
+	StartedAt            *time.Time `json:"started_at,omitempty"`
+	CompletedAt          *time.Time `json:"completed_at,omitempty"`
+	ExitCode             *int       `json:"exit_code,omitempty"`
+	Stdout               string     `json:"stdout"`
+	Stderr               string     `json:"stderr"`
+	StdoutTruncated      bool       `json:"stdout_truncated"`
+	StderrTruncated      bool       `json:"stderr_truncated"`
+	LastError            string     `json:"last_error"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 type createJobRequest struct {
-	Type    string   `json:"type"`
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
+	Type                 string   `json:"type"`
+	Command              string   `json:"command,omitempty"`
+	Args                 []string `json:"args,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -180,8 +182,13 @@ func (c *Client) ListNodes(ctx context.Context) ([]Node, error) {
 
 func (c *Client) ListJobs(ctx context.Context) ([]Job, error) {
 	var out []Job
-	err := c.doJSON(ctx, http.MethodGet, "/jobs", nil, &out)
-	return out, err
+	if err := c.doJSON(ctx, http.MethodGet, "/jobs", nil, &out); err != nil {
+		return nil, err
+	}
+	if err := normalizeJobs(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func normalizeNodes(nodes []Node) error {
@@ -200,18 +207,63 @@ func normalizeNodes(nodes []Node) error {
 
 func (c *Client) GetJob(ctx context.Context, id string) (Job, error) {
 	var out Job
-	err := c.doJSON(ctx, http.MethodGet, "/jobs/"+id, nil, &out)
-	return out, err
+	if err := c.doJSON(ctx, http.MethodGet, "/jobs/"+id, nil, &out); err != nil {
+		return Job{}, err
+	}
+	if err := normalizeJob(&out); err != nil {
+		return Job{}, err
+	}
+	return out, nil
 }
 
-func (c *Client) CreateCommandJob(ctx context.Context, command string, args []string) (Job, error) {
+func (c *Client) CreateCommandJob(ctx context.Context, command string, args, requiredCapabilities []string) (Job, error) {
+	requirements, err := protocol.NormalizeRequiredCapabilities(requiredCapabilities)
+	if err != nil {
+		return Job{}, fmt.Errorf("invalid required capabilities: %w", err)
+	}
+	path := "/jobs"
+	if len(requirements) > 0 {
+		path = "/jobs/command"
+	}
+
 	var out Job
-	err := c.doJSON(ctx, http.MethodPost, "/jobs", createJobRequest{
-		Type:    "command",
-		Command: command,
-		Args:    append([]string(nil), args...),
+	err = c.doJSON(ctx, http.MethodPost, path, createJobRequest{
+		Type:                 "command",
+		Command:              command,
+		Args:                 append([]string(nil), args...),
+		RequiredCapabilities: requirements,
 	}, &out)
-	return out, err
+	if err != nil {
+		var httpErr *HTTPError
+		if len(requirements) > 0 &&
+			errors.As(err, &httpErr) &&
+			(httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed) {
+			return Job{}, errors.New("coordinator does not support required capabilities; upgrade the coordinator")
+		}
+		return Job{}, err
+	}
+	if err := normalizeJob(&out); err != nil {
+		return Job{}, err
+	}
+	return out, nil
+}
+
+func normalizeJobs(jobs []Job) error {
+	for i := range jobs {
+		if err := normalizeJob(&jobs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeJob(job *Job) error {
+	requirements, err := protocol.NormalizeRequiredCapabilities(job.RequiredCapabilities)
+	if err != nil {
+		return fmt.Errorf("invalid required capabilities for job %q: %w", job.ID, err)
+	}
+	job.RequiredCapabilities = requirements
+	return nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) error {

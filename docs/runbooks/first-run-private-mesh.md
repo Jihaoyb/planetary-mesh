@@ -189,7 +189,9 @@ go run ./cmd/agent
 Submit the workload:
 
 ```bash
-go run ./cmd/pmctl --config config/pmctl.env.example --json submit command line-count /tmp/planetary-mesh-first-run/input.txt
+go run ./cmd/pmctl --config config/pmctl.env.example --json submit command \
+  --require-capability role:text-worker \
+  line-count /tmp/planetary-mesh-first-run/input.txt
 ```
 
 Record the returned job id, then inspect it:
@@ -208,9 +210,10 @@ Expected result:
 - truncation flags are `false`
 - `Last Error` is empty or absent
 
-If more than one healthy agent is registered, the current scheduler picks the
-first healthy node. Either run one eligible agent for this recipe or prepare
-the same input path on every healthy agent that might receive the job.
+The requirement routes only to a `HEALTHY` agent reporting
+`role:text-worker`. It does not prove that `line-count` is allowlisted or that
+the input path exists. If multiple matching agents are registered, prepare the
+input on each one or use more specific operator-managed labels.
 
 ## 4. Run Across Two LAN Machines
 
@@ -309,7 +312,9 @@ Submit the portable validation workload:
 
 ```bash
 PMCTL_COORDINATOR_URL=http://<coordinator-lan-host>:<coordinator-port> \
-go run ./cmd/pmctl --json submit command line-count <agent-local-input-path>
+go run ./cmd/pmctl --json submit command \
+  --require-capability role:text-worker \
+  line-count <agent-local-input-path>
 ```
 
 Inspect the returned `<job-id>` and expect:
@@ -340,11 +345,11 @@ after inspection.
 | Health check fails | Process is not running or port is blocked/in use | `curl .../healthz` and process logs |
 | `pmctl` gets protocol conflict | Raw `curl` command missed `X-Planetary-Protocol-Version: 1` | Use `pmctl` or add the protocol header |
 | Node missing or `OFFLINE` | Agent cannot reach coordinator or advertised address is unreachable | `COORDINATOR_URL`, `AGENT_ADVERTISE_ADDR`, firewall rules |
-| Job stays `QUEUED` | No healthy node is available | `pmctl nodes list` |
+| Job stays `QUEUED` | No healthy node matches every requirement | Compare job `Required Capabilities` with `pmctl nodes list` |
 | `line-count` not allowlisted | Agent allowlist lacks `line-count=builtin:line-count` | Agent startup config |
 | `line-count` exits non-zero | Input path is missing or unreadable on the selected agent | Job `stderr` and agent-local file path |
 | External helper fails with `text-stats:` in stderr | Input path is missing or unreadable on the selected agent | Job `stderr` and the [Practical External Workload Recipe](practical-workload-recipe.md) |
-| Job runs on unexpected node | Multiple healthy agents and first-healthy-node scheduling | Use one eligible agent or prepare the input on all eligible agents |
+| Job runs on unexpected matching node | Multiple matching agents report equivalent or lower load | Prepare every matching agent or use a narrower capability label; node ID breaks equal-load ties |
 
 For deeper troubleshooting, use [Troubleshooting](troubleshooting.md).
 
