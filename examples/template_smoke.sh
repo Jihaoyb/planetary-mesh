@@ -201,10 +201,18 @@ fi
 
 echo
 echo "Previewing text-stats template"
-PREVIEW_JSON="$(pmctl --json templates preview "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
+PREVIEW_JSON="$(
+  pmctl --json templates preview "${TEMPLATE_PATH}" \
+    --require-capability "role:text-worker" \
+    --require-capability "profile:local" \
+    --set "input_path=${INPUT_PATH}"
+)"
 if ! require_json_contains "${PREVIEW_JSON}" '"valid": true,' ||
   ! require_json_contains "${PREVIEW_JSON}" '"type": "command",' ||
   ! require_json_contains "${PREVIEW_JSON}" '"command": "text-stats",' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"required_capabilities": [' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"profile:local",' ||
+  ! require_json_contains "${PREVIEW_JSON}" '"role:text-worker"' ||
   ! require_json_contains "${PREVIEW_JSON}" "\"${INPUT_PATH}\"" ||
   ! require_json_contains "${PREVIEW_JSON}" '"creates_job": false,' ||
   ! require_json_contains "${PREVIEW_JSON}" '"contacts_coordinator": false,' ||
@@ -220,7 +228,12 @@ pmctl nodes list
 
 echo
 echo "Submitting text-stats template"
-JOB_JSON="$(pmctl --json submit template "${TEMPLATE_PATH}" --set "input_path=${INPUT_PATH}")"
+JOB_JSON="$(
+  pmctl --json submit template "${TEMPLATE_PATH}" \
+    --set "input_path=${INPUT_PATH}" \
+    --require-capability "role:text-worker" \
+    --require-capability "profile:local"
+)"
 JOB_ID="$(json_string_field "${JOB_JSON}" "id")"
 if [[ -z "${JOB_ID}" ]]; then
   echo "Could not parse submitted job id" >&2
@@ -238,6 +251,9 @@ if [[ -z "${ATTEMPTS}" || "${ATTEMPTS}" -lt 1 ]]; then
 fi
 if ! require_json_contains "${FINAL_JOB_JSON}" '"status": "COMPLETED",' ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"command": "text-stats",' ||
+  ! require_json_contains "${FINAL_JOB_JSON}" '"required_capabilities": [' ||
+  ! require_json_contains "${FINAL_JOB_JSON}" '"profile:local",' ||
+  ! require_json_contains "${FINAL_JOB_JSON}" '"role:text-worker"' ||
   ! require_json_contains "${FINAL_JOB_JSON}" "\"node_id\": \"${NODE_ID}\"," ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"stdout": "lines=3\nnon_empty_lines=3\nwords=3\n",' ||
   ! require_json_contains "${FINAL_JOB_JSON}" '"stderr": "",' ||
