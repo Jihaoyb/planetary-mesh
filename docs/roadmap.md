@@ -913,6 +913,31 @@ Non-goals:
 - payment/payout systems
 - production multi-tenant cloud platform behavior
 
+### Proposed pilot: AI release testing on two trusted machines
+
+The next experiment asks whether one team can use Planetary Mesh to decide
+whether to ship a model update on two hardware targets its customers use.
+Demand is unverified. Start with the existing CLI and an allowlisted evaluator
+on each prepared machine.
+
+1. Choose one recurring workload with the team. Record how it tests releases
+   today and agree on a quality threshold and a latency budget.
+2. Run the baseline and candidate model separately on each machine using the
+   same test inputs. Record the model revision, runtime build, backend, and
+   test-set version. Repeat timing runs to distinguish variation from a regression.
+3. Compare baseline and candidate **within each machine**. Give the team one
+   report showing which targets pass and which changes would block release.
+
+Record operator time against the team's current process, whether the report
+informed the release decision, and whether the team uses it for its next
+release. Use that evidence to decide whether to invest in automated comparisons
+or close the pilot.
+
+If setup failures consume significant time, try an offline readiness check:
+have the evaluator load the pinned model and process one small local input.
+Defer evaluation across separately held private datasets until a partner brings
+a concrete data-sharing constraint and the team reviews output privacy.
+
 ## Phase 3: Remote Private Mesh
 
 Goal: support trusted machines outside the LAN while still owned or controlled
